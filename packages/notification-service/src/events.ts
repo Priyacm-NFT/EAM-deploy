@@ -1,0 +1,12 @@
+export const SYSTEM_EVENT_TYPES = [
+  'WO_ASSIGNED',
+  'WO_STATUS_CHANGED',
+  'SR_CREATED',
+  'SR_STATUS_CHANGED',
+  'WF_TASK_ASSIGNED',
+  'WF_TASK_APPROVED',
+  'ATTACHMENT_VIRUS_FOUND',
+  'REPORT_READY',
+] as const;
+
+export type SystemEventType = (typeof SYSTEM_EVENT_TYPES)[number];
