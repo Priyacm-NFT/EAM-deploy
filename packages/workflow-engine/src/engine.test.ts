@@ -9,3 +9,13 @@ describe('workflow conditions', () => {
     expect(expr.evaluate({ totalcost: 80000 })).toBe(false);
   });
 });
+
+describe('assignee assignment types', () => {
+  it('documents GROUP config shape', () => {
+    const node = {
+      config: { assignmentType: 'GROUP', groupName: 'Maintenance Leads' },
+    };
+    expect(node.config.assignmentType).toBe('GROUP');
+    expect(node.config.groupName).toBe('Maintenance Leads');
+  });
+});

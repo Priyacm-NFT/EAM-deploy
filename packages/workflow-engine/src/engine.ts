@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Parser } from 'expr-eval';
 import type { Database } from '@eam/db';
 import {
@@ -7,29 +7,21 @@ import {
   workflowTasks,
   workflowHistory,
   users,
+  groups,
 } from '@eam/db';
 import { globalEventBus } from '@eam/shared';
+import { executeWorkflowIntegration } from './integration-node.js';
+import { pickWorkflowDefinition } from './version.js';
+import type {
+  AssigneeResult,
+  StartWorkflowOptions,
+  WorkflowDefinitionJson,
+  WorkflowNode,
+} from './types.js';
+
+export type { WorkflowNode, WorkflowEdge, WorkflowDefinitionJson } from './types.js';
 
 const parser = new Parser();
-
-export interface WorkflowNode {
-  id: string;
-  type: string;
-  config?: Record<string, unknown>;
-}
-
-export interface WorkflowEdge {
-  id: string;
-  source: string;
-  target: string;
-  label?: string;
-}
-
-export interface WorkflowDefinitionJson {
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-  metadata?: Record<string, unknown>;
-}
 
 export class WorkflowEngine {
   constructor(private db: Database) {}
@@ -49,25 +41,30 @@ export class WorkflowEngine {
     triggerEvent: string,
     tenantId: string,
     context: Record<string, unknown>,
+    options?: StartWorkflowOptions,
   ) {
     const defs = await this.db
       .select()
       .from(workflowDefinitions)
-      .where(eq(workflowDefinitions.entityType, entityType));
+      .where(
+        and(
+          eq(workflowDefinitions.entityType, entityType),
+          eq(workflowDefinitions.tenantId, tenantId),
+        ),
+      );
 
-    const def = defs.find(
-      (d) => d.triggerEvent === triggerEvent && d.isActive === 'true',
-    );
+    const def = pickWorkflowDefinition(defs, triggerEvent, options);
     if (!def) return null;
 
-    const definition = def.definition as unknown as WorkflowDefinitionJson;
+    const fullDef = defs.find((d) => d.id === def.id)!;
+    const definition = fullDef.definition as unknown as WorkflowDefinitionJson;
     const startNode = definition.nodes.find((n) => n.type === 'START');
     if (!startNode) return null;
 
     const [instance] = await this.db
       .insert(workflowInstances)
       .values({
-        workflowDefId: def.id,
+        workflowDefId: fullDef.id,
         entityType,
         entityId,
         tenantId,
@@ -77,7 +74,7 @@ export class WorkflowEngine {
       })
       .returning();
 
-    await this.advanceFromNode(instance!, def, definition, startNode.id, context);
+    await this.advanceFromNode(instance!, fullDef, definition, startNode.id, context);
     return instance;
   }
 
@@ -129,7 +126,7 @@ export class WorkflowEngine {
     const edge =
       action === 'REJECT'
         ? edges.find((e) => e.label === 'reject')
-        : edges.find((e) => e.label !== 'reject') ?? edges[0];
+        : (edges.find((e) => e.label !== 'reject') ?? edges[0]);
     if (edge) {
       await this.advanceFromNode(
         instance!,
@@ -164,28 +161,85 @@ export class WorkflowEngine {
     if (node.type === 'DECISION') {
       const condition = (node.config?.condition as string) ?? 'true';
       const result = this.evaluateCondition(condition, context);
-      const edge = definition.edges.find(
-        (e) => e.source === nodeId && (result ? e.label !== 'false' : e.label === 'false'),
-      ) ?? definition.edges.find((e) => e.source === nodeId);
+      const edge =
+        definition.edges.find(
+          (e) => e.source === nodeId && (result ? e.label !== 'false' : e.label === 'false'),
+        ) ?? definition.edges.find((e) => e.source === nodeId);
       if (edge) {
         await this.advanceFromNode(instance, def, definition, edge.target, context);
       }
       return;
     }
 
-    if (node.type === 'TASK' || node.type === 'APPROVAL') {
-      const assignee = await this.resolveAssignee(node, context, instance.tenantId);
-      await this.db.insert(workflowTasks).values({
+    if (node.type === 'NOTIFICATION') {
+      const eventType = (node.config?.eventType as string) ?? 'WF_NOTIFICATION';
+      await this.db.insert(workflowHistory).values({
         instanceId: instance.id,
         nodeId: node.id,
-        nodeType: node.type,
-        assignedToUserId: assignee.userId,
-        assignedToRole: assignee.role,
-        status: 'PENDING',
-        dueAt: node.config?.dueMinutes
-          ? new Date(Date.now() + Number(node.config.dueMinutes) * 60000)
-          : undefined,
+        action: 'NOTIFICATION_SENT',
+        metadata: { eventType, config: node.config ?? {} },
       });
+      await globalEventBus.emit(eventType, {
+        tenantId: instance.tenantId,
+        entityType: instance.entityType,
+        entityId: instance.entityId,
+        instanceId: instance.id,
+        nodeId: node.id,
+        context: { ...(instance.context as Record<string, unknown>), ...context },
+        distributionRules: node.config?.distributionRules,
+        subject: node.config?.subject,
+        body: node.config?.body,
+        ...(node.config ?? {}),
+      });
+      await this.continueToNext(instance, def, definition, nodeId, context);
+      return;
+    }
+
+    if (node.type === 'INTEGRATION') {
+      const result = await executeWorkflowIntegration(this.db, node, instance, context);
+      await this.db.insert(workflowHistory).values({
+        instanceId: instance.id,
+        nodeId: node.id,
+        action: 'INTEGRATION_EXECUTED',
+        metadata: {
+          success: result.success,
+          error: result.error,
+          data: result.data,
+        },
+      });
+      if (!result.success && node.config?.stopOnError === true) {
+        await this.db
+          .update(workflowInstances)
+          .set({
+            status: 'ERROR',
+            error: result.error ?? 'Integration failed',
+            currentNodeId: node.id,
+          })
+          .where(eq(workflowInstances.id, instance.id));
+        return;
+      }
+      await this.continueToNext(instance, def, definition, nodeId, context);
+      return;
+    }
+
+    if (node.type === 'TASK' || node.type === 'APPROVAL') {
+      const assignee = await this.resolveAssignee(node, context, instance.tenantId);
+      const dueAt = node.config?.dueMinutes
+        ? new Date(Date.now() + Number(node.config.dueMinutes) * 60000)
+        : undefined;
+      const [task] = await this.db
+        .insert(workflowTasks)
+        .values({
+          instanceId: instance.id,
+          nodeId: node.id,
+          nodeType: node.type,
+          assignedToUserId: assignee.userId,
+          assignedToRole: assignee.role,
+          assignedToGroup: assignee.group,
+          status: 'PENDING',
+          dueAt,
+        })
+        .returning();
       await this.db
         .update(workflowInstances)
         .set({ currentNodeId: node.id })
@@ -193,11 +247,27 @@ export class WorkflowEngine {
       await globalEventBus.emit('WF_TASK_ASSIGNED', {
         instanceId: instance.id,
         nodeId: node.id,
+        taskId: task!.id,
         assignee,
+        dueAt: dueAt?.toISOString(),
+        escalationRole: node.config?.escalationRole as string | undefined,
+        tenantId: instance.tenantId,
+        entityType: instance.entityType,
+        entityId: instance.entityId,
       });
       return;
     }
 
+    await this.continueToNext(instance, def, definition, nodeId, context);
+  }
+
+  private async continueToNext(
+    instance: typeof workflowInstances.$inferSelect,
+    def: typeof workflowDefinitions.$inferSelect,
+    definition: WorkflowDefinitionJson,
+    nodeId: string,
+    context: Record<string, unknown>,
+  ) {
     const nextEdge = definition.edges.find((e) => e.source === nodeId);
     if (nextEdge) {
       await this.advanceFromNode(instance, def, definition, nextEdge.target, context);
@@ -207,15 +277,35 @@ export class WorkflowEngine {
   private async resolveAssignee(
     node: WorkflowNode,
     context: Record<string, unknown>,
-    _tenantId: string,
-  ): Promise<{ userId?: string; role?: string }> {
-    void _tenantId;
+    tenantId: string,
+  ): Promise<AssigneeResult> {
     const assignmentType = node.config?.assignmentType as string;
     if (assignmentType === 'ROLE') {
       return { role: node.config?.role as string };
     }
     if (assignmentType === 'STATIC_USER') {
       return { userId: node.config?.userId as string };
+    }
+    if (assignmentType === 'GROUP') {
+      const groupId = node.config?.groupId as string | undefined;
+      const groupName = node.config?.groupName as string | undefined;
+      if (groupId) {
+        const [g] = await this.db
+          .select()
+          .from(groups)
+          .where(and(eq(groups.id, groupId), eq(groups.tenantId, tenantId)))
+          .limit(1);
+        if (g) return { group: g.name };
+      }
+      if (groupName) {
+        const [g] = await this.db
+          .select()
+          .from(groups)
+          .where(and(eq(groups.name, groupName), eq(groups.tenantId, tenantId)))
+          .limit(1);
+        if (g) return { group: g.name };
+      }
+      return { group: groupName ?? groupId };
     }
     if (assignmentType === 'SUPERVISOR' && context.requesterId) {
       const [user] = await this.db

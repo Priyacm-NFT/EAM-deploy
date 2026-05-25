@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@eam/db": "workspace:*",
+    "@eam/integration-framework": "workspace:*",
     "@eam/shared": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "expr-eval": "^2.0.2"
