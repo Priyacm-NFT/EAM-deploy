@@ -1,9 +1,11 @@
 import { Parser, type Value } from 'expr-eval';
 import type { ValidationResult } from '@eam/shared';
+import { parseValidationRules, type FieldValidationRules } from '@eam/shared';
 
 export interface FieldDef {
   fieldKey: string;
   isRequiredGlobal: boolean;
+  fieldType?: string;
   validationRules?: Record<string, unknown>;
 }
 
@@ -36,6 +38,103 @@ export function evaluateCondition(expression: string, data: Record<string, unkno
 function ruleAppliesToUser(rule: FieldRule, userRoleIds: string[]): boolean {
   if (!rule.roleId) return true;
   return userRoleIds.includes(rule.roleId);
+}
+
+function isEmptyValue(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+function toComparableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isNaN(n) ? null : n;
+  }
+  return null;
+}
+
+function toComparableDate(value: unknown): string | null {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  return null;
+}
+
+function boundaryToNumber(boundary: number | string | undefined): number | null {
+  if (boundary === undefined) return null;
+  if (typeof boundary === 'number') return boundary;
+  const d = toComparableDate(boundary);
+  if (d) return Date.parse(d);
+  const n = Number(boundary);
+  return Number.isNaN(n) ? null : n;
+}
+
+/** Validates regex, string length, and numeric/date range rules for a single field value. */
+export function validateFieldValueRules(
+  fieldKey: string,
+  value: unknown,
+  rules: FieldValidationRules,
+  fieldType?: string,
+): Array<{ field_key: string; message: string }> {
+  const errors: Array<{ field_key: string; message: string }> = [];
+  if (isEmptyValue(value)) return errors;
+
+  const str = typeof value === 'string' ? value : String(value);
+
+  if (rules.regex && typeof value === 'string') {
+    try {
+      if (!new RegExp(rules.regex).test(value)) {
+        errors.push({ field_key: fieldKey, message: `${fieldKey} format is invalid` });
+      }
+    } catch {
+      errors.push({ field_key: fieldKey, message: `${fieldKey} has invalid validation config` });
+    }
+  }
+
+  if (rules.minLength != null && str.length < rules.minLength) {
+    errors.push({
+      field_key: fieldKey,
+      message: `${fieldKey} must be at least ${rules.minLength} characters`,
+    });
+  }
+  if (rules.maxLength != null && str.length > rules.maxLength) {
+    errors.push({
+      field_key: fieldKey,
+      message: `${fieldKey} must be at most ${rules.maxLength} characters`,
+    });
+  }
+
+  const isDateField = fieldType === 'DATE' || fieldType === 'DATETIME';
+  const minBound = boundaryToNumber(rules.min);
+  const maxBound = boundaryToNumber(rules.max);
+
+  if (minBound != null || maxBound != null) {
+    let comparable: number | null = null;
+    if (isDateField) {
+      comparable = toComparableDate(value) ? Date.parse(toComparableDate(value)!) : null;
+    } else {
+      comparable = toComparableNumber(value);
+    }
+    if (comparable == null) {
+      errors.push({ field_key: fieldKey, message: `${fieldKey} must be a valid ${isDateField ? 'date' : 'number'}` });
+    } else {
+      if (minBound != null && comparable < minBound) {
+        errors.push({
+          field_key: fieldKey,
+          message: `${fieldKey} must be at least ${rules.min}`,
+        });
+      }
+      if (maxBound != null && comparable > maxBound) {
+        errors.push({
+          field_key: fieldKey,
+          message: `${fieldKey} must be at most ${rules.max}`,
+        });
+      }
+    }
+  }
+
+  return errors;
 }
 
 export function applyFieldRules(
@@ -116,12 +215,10 @@ export function validateRecord(
       errors.push({ field_key: field.fieldKey, message: `${field.fieldKey} is required` });
     }
 
-    const regex = field.validationRules?.regex as string | undefined;
-    if (regex && value != null && typeof value === 'string') {
-      if (!new RegExp(regex).test(value)) {
-        errors.push({ field_key: field.fieldKey, message: `${field.fieldKey} format is invalid` });
-      }
-    }
+    const parsedRules = parseValidationRules(field.validationRules);
+    errors.push(
+      ...validateFieldValueRules(field.fieldKey, value, parsedRules, field.fieldType),
+    );
 
     if (state?.required && (value === undefined || value === null || value === '')) {
       errors.push({ field_key: field.fieldKey, message: `${field.fieldKey} is required by rule` });

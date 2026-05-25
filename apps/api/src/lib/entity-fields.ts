@@ -41,6 +41,7 @@ export async function validateEntityWrite(
   const fieldDefs = fields.map((f) => ({
     fieldKey: f.fieldKey,
     isRequiredGlobal: f.isRequiredGlobal,
+    fieldType: f.fieldType,
     validationRules: f.validationRules ?? undefined,
   }));
 

@@ -7,6 +7,9 @@ import { GroupFormPage } from './pages/admin/identity/GroupForm.js';
 import { RoleListPage } from './pages/admin/identity/RoleList.js';
 import { RoleFormPage } from './pages/admin/identity/RoleForm.js';
 import { SsoConfigPage } from './pages/admin/identity/SsoConfig.js';
+import { ConfigEntityListPage } from './pages/admin/config/EntityList.js';
+import { ConfigFieldListPage } from './pages/admin/config/FieldList.js';
+import { FormDesignerPage } from './pages/admin/config/FormDesigner.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 
 export default function App() {
@@ -19,6 +22,7 @@ export default function App() {
         <Link to="/admin/identity/groups">Groups</Link>
         <Link to="/admin/identity/roles">Roles</Link>
         <Link to="/admin/identity/providers">SSO</Link>
+        <Link to="/admin/config">Configuration</Link>
       </header>
       <main className="p-6">
         <Routes>
@@ -31,6 +35,9 @@ export default function App() {
           <Route path="/admin/identity/roles" element={<RoleListPage />} />
           <Route path="/admin/identity/roles/:id" element={<RoleFormPage />} />
           <Route path="/admin/identity/providers" element={<SsoConfigPage />} />
+          <Route path="/admin/config" element={<ConfigEntityListPage />} />
+          <Route path="/admin/config/entities/:entityId/fields" element={<ConfigFieldListPage />} />
+          <Route path="/admin/config/entities/:entityId/forms" element={<FormDesignerPage />} />
         </Routes>
       </main>
     </div>
