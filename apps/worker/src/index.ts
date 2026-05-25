@@ -6,6 +6,7 @@ import { scanBuffer } from '@eam/attachment-service';
 import { renderTemplate } from '@eam/notification-service';
 import { globalEventBus } from '@eam/shared';
 import { registerWorkflowHandlers } from './workflow.js';
+import { registerIntegrationJobHandlers } from './integration-jobs.js';
 
 const connection = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
@@ -80,5 +81,6 @@ await ldapSyncQueue.add(
 );
 
 registerWorkflowHandlers(connection, sendEmailQueue);
+registerIntegrationJobHandlers(connection);
 
 console.log('EAM worker started');

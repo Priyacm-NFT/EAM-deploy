@@ -1,20 +1,9 @@
 import { eq } from 'drizzle-orm';
 import type { Database } from '@eam/db';
 import { integrationConnections } from '@eam/db';
-import { RestAdapter, WebhookOutboundAdapter } from '@eam/integration-framework';
-import type { AdapterResult, IntegrationAdapter } from '@eam/integration-framework';
+import { getAdapter } from '@eam/integration-framework';
+import type { AdapterResult } from '@eam/integration-framework';
 import type { WorkflowNode } from './types.js';
-
-function adapterForType(type: string): IntegrationAdapter | null {
-  switch (type) {
-    case 'REST':
-      return new RestAdapter();
-    case 'WEBHOOK_OUTBOUND':
-      return new WebhookOutboundAdapter();
-    default:
-      return null;
-  }
-}
 
 export async function executeWorkflowIntegration(
   db: Database,
@@ -41,7 +30,7 @@ export async function executeWorkflowIntegration(
     adapterType = conn.adapterType;
   }
 
-  const adapter = adapterForType(adapterType);
+  const adapter = getAdapter(adapterType);
   if (!adapter) {
     return { success: false, error: `Unsupported integration adapter: ${adapterType}` };
   }

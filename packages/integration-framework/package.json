@@ -13,8 +13,22 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@eam/db": "workspace:*",
     "@eam/shared": "workspace:*",
-    "axios": "^1.7.9"
+    "amqplib": "^0.10.5",
+    "axios": "^1.7.9",
+    "cron-parser": "^4.9.0",
+    "drizzle-orm": "^0.38.3",
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^4.5.1",
+    "kafkajs": "^2.2.4",
+    "postgres": "^3.4.5",
+    "ssh2-sftp-client": "^11.0.0"
   },
-  "devDependencies": { "typescript": "~5.4.5", "vitest": "^2.1.8" }
+  "devDependencies": {
+    "@types/amqplib": "^0.10.6",
+    "@types/ssh2-sftp-client": "^9.0.4",
+    "typescript": "~5.4.5",
+    "vitest": "^2.1.8"
+  }
 }

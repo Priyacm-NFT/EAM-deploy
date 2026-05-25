@@ -36,7 +36,17 @@ export async function buildApp() {
     allowList: (req) => !req.url.startsWith('/auth'),
   });
 
-  await app.register(swagger, { openapi: { openapi: '3.1.0', info: { title: 'EAM API', version: '0.0.0' } } });
+  await app.register(swagger, {
+    openapi: {
+      openapi: '3.1.0',
+      info: { title: 'EAM API', version: '0.0.0' },
+      tags: [
+        { name: 'Health', description: 'Service health checks' },
+        { name: 'Integrations', description: 'Integration connections, jobs, export' },
+        { name: 'Reports', description: 'Reporting and analytics' },
+      ],
+    },
+  });
   await app.register(swaggerUi, { routePrefix: '/docs' });
 
   await app.register(healthRoutes);

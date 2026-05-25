@@ -1,4 +1,11 @@
-export type AdapterType = 'REST' | 'SFTP' | 'WEBHOOK_OUTBOUND' | 'KAFKA';
+export type AdapterType =
+  | 'REST'
+  | 'SOAP'
+  | 'KAFKA'
+  | 'RABBITMQ'
+  | 'SFTP'
+  | 'JDBC'
+  | 'WEBHOOK_OUTBOUND';
 
 export interface TestResult {
   success: boolean;
@@ -15,4 +22,8 @@ export interface IntegrationAdapter {
   type: AdapterType;
   test(config: unknown): Promise<TestResult>;
   execute(config: unknown, payload: unknown): Promise<AdapterResult>;
+}
+
+export function isDryRun(config: unknown): boolean {
+  return Boolean((config as { dryRun?: boolean })?.dryRun);
 }
