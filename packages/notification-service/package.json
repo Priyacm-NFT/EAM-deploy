@@ -17,7 +17,8 @@
     "@eam/shared": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "expr-eval": "^2.0.2",
-    "handlebars": "^4.7.8"
+    "handlebars": "^4.7.8",
+    "ioredis": "^5.4.2"
   },
   "devDependencies": { "typescript": "~5.4.5", "vitest": "^2.1.8" }
 }

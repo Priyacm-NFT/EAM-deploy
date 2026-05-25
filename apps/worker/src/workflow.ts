@@ -3,19 +3,13 @@ import type { Redis } from 'ioredis';
 import type { Queue as BullQueue } from 'bullmq';
 import { db } from '@eam/db';
 import { processTaskEscalation } from '@eam/workflow-engine';
-import { NotificationDispatcher } from '@eam/notification-service';
 import { globalEventBus } from '@eam/shared';
 
 export function registerWorkflowHandlers(
   connection: Redis,
-  sendEmailQueue: BullQueue,
+  _sendEmailQueue: BullQueue,
 ): void {
   const escalationQueue = new Queue('workflow-escalation', { connection });
-
-  const dispatcher = new NotificationDispatcher(db, async (job) => {
-    await sendEmailQueue.add('send-email', job);
-  });
-  dispatcher.attach(globalEventBus);
 
   globalEventBus.on('WF_TASK_ASSIGNED', async (raw) => {
     const payload = raw as {

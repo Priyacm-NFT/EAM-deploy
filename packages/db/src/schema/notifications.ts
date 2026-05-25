@@ -85,6 +85,24 @@ export const smtpConfigurations = pgTable('smtp_configurations', {
   isActive: boolean('is_active').notNull().default(true),
 });
 
+export const notificationDigestQueue = pgTable('notification_digest_queue', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  triggerId: uuid('trigger_id')
+    .notNull()
+    .references(() => notificationTriggers.id, { onDelete: 'cascade' }),
+  recipientUserId: uuid('recipient_user_id').references(() => users.id),
+  recipientEmail: text('recipient_email').notNull(),
+  subject: text('subject').notNull(),
+  html: text('html').notNull(),
+  entityType: text('entity_type'),
+  entityId: uuid('entity_id'),
+  flushAfter: timestamp('flush_after', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const userNotificationPrefs = pgTable(
   'user_notification_prefs',
   {

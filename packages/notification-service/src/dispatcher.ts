@@ -1,25 +1,44 @@
 import { and, eq } from 'drizzle-orm';
-import { Parser } from 'expr-eval';
+import type { Redis } from 'ioredis';
 import type { Database } from '@eam/db';
 import {
   notificationTriggers,
   notificationTemplates,
   inAppNotifications,
   notificationDeliveryLog,
+  userNotificationPrefs,
 } from '@eam/db';
 import type { EventBus } from '@eam/shared';
 import { SYSTEM_EVENT_TYPES } from './events.js';
 import { renderTemplate } from './template.js';
 import { resolveDistributionRecipients } from './recipient-resolver.js';
 import type { DistributionRule } from './recipients.js';
-
-const parser = new Parser();
+import { triggerApplies } from './trigger.js';
+import {
+  parseDigestConfig,
+  queueDigestItem,
+  digestFlushAfter,
+} from './digest.js';
+import {
+  parseRateLimitConfig,
+  checkInMemoryRateLimit,
+  checkRedisRateLimit,
+} from './rate-limit.js';
+import { publishNotificationPush } from './event-bridge.js';
 
 export type EmailEnqueueFn = (job: {
   to: string;
   subject: string;
   html: string;
 }) => Promise<void>;
+
+export type InAppPushFn = (userId: string, notification: {
+  id: string;
+  title: string;
+  body: string;
+  entityType?: string;
+  entityId?: string;
+}) => void | Promise<void>;
 
 function distributionRules(config: Record<string, unknown>): DistributionRule[] {
   const rules = config.rules;
@@ -34,25 +53,14 @@ function distributionRules(config: Record<string, unknown>): DistributionRule[] 
   );
 }
 
-function triggerApplies(
-  trigger: { conditionExpression: string | null; entityType: string | null },
-  payload: Record<string, unknown>,
-): boolean {
-  if (trigger.entityType && trigger.entityType !== payload.entityType) return false;
-  if (!trigger.conditionExpression) return true;
-  try {
-    const ctx = (payload.context as Record<string, unknown>) ?? payload;
-    const expr = parser.parse(trigger.conditionExpression);
-    return Boolean(expr.evaluate({ ...ctx } as Record<string, number | string>));
-  } catch {
-    return false;
-  }
-}
-
 export class NotificationDispatcher {
   constructor(
     private db: Database,
     private enqueueEmail?: EmailEnqueueFn,
+    private options?: {
+      redis?: Redis;
+      pushInApp?: InAppPushFn;
+    },
   ) {}
 
   attach(bus: EventBus): void {
@@ -112,32 +120,141 @@ export class NotificationDispatcher {
         }
       }
 
-      for (const recipient of recipients) {
-        await this.db.insert(inAppNotifications).values({
-          tenantId,
-          userId: recipient.userId,
-          title: subject,
-          body: html.replace(/<[^>]+>/g, ' ').trim(),
-          entityType: payload.entityType as string | undefined,
-          entityId: payload.entityId as string | undefined,
-        });
+      const digestConfig = parseDigestConfig(
+        trigger.digestConfig as Record<string, unknown> | null,
+      );
+      const rateLimitConfig = parseRateLimitConfig(
+        trigger.rateLimitConfig as Record<string, unknown> | null,
+      );
 
-        if (this.enqueueEmail) {
-          await this.enqueueEmail({
-            to: recipient.email,
-            subject,
-            html,
-          });
-          await this.db.insert(notificationDeliveryLog).values({
+      const rateKey = `notify:rate:${tenantId}:${trigger.id}`;
+      let rateCheck = { allowed: true, count: 0 };
+      if (rateLimitConfig) {
+        rateCheck = this.options?.redis
+          ? await checkRedisRateLimit(
+              this.options.redis,
+              rateKey,
+              rateLimitConfig.max,
+              rateLimitConfig.windowSeconds,
+            )
+          : checkInMemoryRateLimit(
+              rateKey,
+              rateLimitConfig.max,
+              rateLimitConfig.windowSeconds,
+            );
+      }
+      const rateDigest =
+        rateLimitConfig &&
+        !rateCheck.allowed &&
+        rateLimitConfig.overflowMode === 'digest';
+      const rateDrop =
+        rateLimitConfig &&
+        !rateCheck.allowed &&
+        rateLimitConfig.overflowMode === 'drop';
+
+      for (const recipient of recipients) {
+        const prefs = await this.loadUserPrefs(recipient.userId, trigger.id);
+        const emailAllowed =
+          trigger.isMandatory || prefs?.emailEnabled !== false;
+        const inAppAllowed = prefs?.inAppEnabled !== false;
+
+        if (inAppAllowed) {
+          const [row] = await this.db
+            .insert(inAppNotifications)
+            .values({
+              tenantId,
+              userId: recipient.userId,
+              title: subject,
+              body: html.replace(/<[^>]+>/g, ' ').trim(),
+              entityType: payload.entityType as string | undefined,
+              entityId: payload.entityId as string | undefined,
+            })
+            .returning();
+
+          if (row && this.options?.pushInApp) {
+            await this.options.pushInApp(recipient.userId, {
+              id: row.id,
+              title: row.title,
+              body: row.body,
+              entityType: row.entityType ?? undefined,
+              entityId: row.entityId ?? undefined,
+            });
+          } else if (row && this.options?.redis) {
+            await publishNotificationPush(this.options.redis, {
+              userId: recipient.userId,
+              notification: {
+                id: row.id,
+                title: row.title,
+                body: row.body,
+                entityType: row.entityType ?? undefined,
+                entityId: row.entityId ?? undefined,
+              },
+            });
+          }
+        }
+
+        if (!this.enqueueEmail || !emailAllowed) continue;
+        if (rateDrop) continue;
+
+        const useDigest =
+          Boolean(digestConfig?.enabled) ||
+          rateDigest ||
+          prefs?.digestEnabled === true;
+
+        if (useDigest) {
+          const windowMinutes = digestConfig?.windowMinutes ?? 5;
+          await queueDigestItem(this.db, {
+            tenantId,
             triggerId: trigger.id,
-            entityId: payload.entityId as string | undefined,
             recipientUserId: recipient.userId,
             recipientEmail: recipient.email,
-            channel: 'EMAIL',
-            status: 'QUEUED',
+            subject,
+            html,
+            entityType: payload.entityType as string | undefined,
+            entityId: payload.entityId as string | undefined,
+            flushAfter: digestFlushAfter(windowMinutes),
           });
+          await this.logDelivery(trigger.id, recipient, payload, 'DIGEST_QUEUED');
+          continue;
         }
+
+        await this.enqueueEmail({
+          to: recipient.email,
+          subject,
+          html,
+        });
+        await this.logDelivery(trigger.id, recipient, payload, 'QUEUED');
       }
     }
+  }
+
+  private async loadUserPrefs(userId: string, triggerId: string) {
+    const [prefs] = await this.db
+      .select()
+      .from(userNotificationPrefs)
+      .where(
+        and(
+          eq(userNotificationPrefs.userId, userId),
+          eq(userNotificationPrefs.triggerId, triggerId),
+        ),
+      )
+      .limit(1);
+    return prefs;
+  }
+
+  private async logDelivery(
+    triggerId: string,
+    recipient: { userId: string; email: string },
+    payload: Record<string, unknown>,
+    status: string,
+  ): Promise<void> {
+    await this.db.insert(notificationDeliveryLog).values({
+      triggerId,
+      entityId: payload.entityId as string | undefined,
+      recipientUserId: recipient.userId,
+      recipientEmail: recipient.email,
+      channel: 'EMAIL',
+      status,
+    });
   }
 }

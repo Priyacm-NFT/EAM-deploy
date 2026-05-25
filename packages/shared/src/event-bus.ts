@@ -1,13 +1,19 @@
 type EventHandler = (payload: unknown) => void | Promise<void>;
 type AnyEventHandler = (event: string, payload: unknown) => void | Promise<void>;
+export type EventPublishHook = (event: string, payload: unknown) => void | Promise<void>;
 
 export class EventBus {
   private handlers = new Map<string, Set<EventHandler>>();
   private anyHandlers = new Set<AnyEventHandler>();
+  private publishHook?: EventPublishHook;
 
   onAny(handler: AnyEventHandler): () => void {
     this.anyHandlers.add(handler);
     return () => this.anyHandlers.delete(handler);
+  }
+
+  setPublishHook(hook: EventPublishHook): void {
+    this.publishHook = hook;
   }
 
   on(event: string, handler: EventHandler): () => void {
@@ -32,6 +38,9 @@ export class EventBus {
       }),
     );
     await Promise.all(runs);
+    if (this.publishHook) {
+      await this.publishHook(event, payload);
+    }
   }
 }
 

@@ -3,11 +3,12 @@ import { Redis } from 'ioredis';
 import { eq } from 'drizzle-orm';
 import { db, attachments } from '@eam/db';
 import { scanBuffer } from '@eam/attachment-service';
-import { renderTemplate } from '@eam/notification-service';
+import { renderTemplate, wireEventBusPublisher } from '@eam/notification-service';
 import { globalEventBus } from '@eam/shared';
 import { registerWorkflowHandlers } from './workflow.js';
 import { registerIntegrationJobHandlers } from './integration-jobs.js';
 import { registerReportHandlers, startReportScheduleCron } from './reports.js';
+import { registerNotificationHandlers } from './notifications.js';
 
 const connection = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
@@ -88,6 +89,9 @@ await ldapSyncQueue.add(
   { repeat: { pattern: '0 */6 * * *' }, jobId: 'ldap-sync-cron' },
 );
 
+wireEventBusPublisher(globalEventBus, connection);
+const { dispatcher } = registerNotificationHandlers(connection, sendEmailQueue);
+dispatcher.attach(globalEventBus);
 registerWorkflowHandlers(connection, sendEmailQueue);
 registerIntegrationJobHandlers(connection);
 registerReportHandlers(connection, sendEmailQueue);

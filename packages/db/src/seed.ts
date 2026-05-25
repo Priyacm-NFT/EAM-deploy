@@ -12,7 +12,7 @@ import {
 import { entityDefinitions } from './schema/config.js';
 import { reportSubjects } from './schema/reporting.js';
 import { documentTypes } from './schema/attachments.js';
-import { notificationTemplates } from './schema/notifications.js';
+import { notificationTemplates, notificationTriggers } from './schema/notifications.js';
 
 const DEFAULT_PERMISSIONS = [
   { resource: 'admin', action: 'users:manage', description: 'Manage users and identity' },
@@ -145,14 +145,51 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     isSystem: true,
   });
 
-  await db.insert(notificationTemplates).values({
-    tenantId: tenant!.id,
-    name: 'WO Assigned',
-    subjectTemplate: 'Work Order {{wo_num}} assigned',
-    htmlTemplate: '<p>Hello {{assignee.name}}, WO {{wo_num}} has been assigned to you.</p>',
-    textTemplate: 'WO {{wo_num}} assigned to {{assignee.name}}',
-    isSystem: true,
-  });
+  const [woTemplate] = await db
+    .insert(notificationTemplates)
+    .values({
+      tenantId: tenant!.id,
+      name: 'WO Assigned',
+      subjectTemplate: 'Work Order {{wo_num}} assigned',
+      htmlTemplate:
+        '<p>Hello {{assignee.name}}, WO {{wo_num}} on {{asset.description}} has been assigned to you.</p>',
+      textTemplate: 'WO {{wo_num}} assigned to {{assignee.name}}',
+      isSystem: true,
+    })
+    .returning();
+
+  await db.insert(notificationTriggers).values([
+    {
+      tenantId: tenant!.id,
+      eventType: 'WO_ASSIGNED',
+      entityType: 'WorkOrder',
+      templateId: woTemplate!.id,
+      distributionConfig: {
+        rules: [{ type: 'FIELD', value: 'assigneeUserId' }],
+      },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
+      eventType: 'WF_TASK_ASSIGNED',
+      templateId: woTemplate!.id,
+      distributionConfig: {
+        rules: [{ type: 'FIELD', value: 'assigneeUserId' }],
+      },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
+      eventType: 'SR_STATUS_CHANGED',
+      entityType: 'PurchaseRequisition',
+      conditionExpression: 'totalcost > 100000',
+      templateId: woTemplate!.id,
+      distributionConfig: {
+        rules: [{ type: 'ROLE', value: 'Supervisor' }],
+      },
+      isActive: true,
+    },
+  ]);
 
   return { tenantId: tenant!.id, adminUserId: '' };
 }

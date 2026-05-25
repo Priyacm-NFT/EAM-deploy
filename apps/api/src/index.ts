@@ -17,6 +17,7 @@ import { dashboardRoutes } from './routes/dashboard.js';
 import { chatRoutes } from './routes/chat.js';
 import { presenceRoutes } from './routes/presence.js';
 import { setupSocketIO } from './socket.js';
+import { wireApiNotificationBridge } from './lib/notification-bridge.js';
 
 export { setupSocketIO };
 
@@ -24,6 +25,7 @@ const PORT = Number(process.env.PORT ?? 3000);
 
 export async function buildApp() {
   await initJwtKeys();
+  wireApiNotificationBridge();
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 

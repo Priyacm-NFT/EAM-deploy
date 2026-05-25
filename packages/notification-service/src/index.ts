@@ -3,3 +3,7 @@ export * from './template.js';
 export * from './recipients.js';
 export * from './recipient-resolver.js';
 export * from './dispatcher.js';
+export * from './digest.js';
+export * from './rate-limit.js';
+export * from './event-bridge.js';
+export * from './trigger.js';

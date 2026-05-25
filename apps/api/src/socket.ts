@@ -5,6 +5,7 @@ import { verifyToken } from '@eam/auth';
 import { db, chatMessages } from '@eam/db';
 import { persistChatMessage } from './lib/chat-persist.js';
 import { setUserPresence, type PresenceStatus } from './lib/presence.js';
+import { wireNotificationSocketPush } from './lib/notification-bridge.js';
 
 export function setupSocketIO(httpServer: HttpServer) {
   const io = new Server(httpServer, {
@@ -16,6 +17,7 @@ export function setupSocketIO(httpServer: HttpServer) {
 
   const nsp = io.of('/eam');
   registerCollaborationHandlers(nsp);
+  wireNotificationSocketPush(nsp);
   return io;
 }
 
