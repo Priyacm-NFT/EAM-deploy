@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { scanBuffer, EICAR_TEST_STRING } from './scan.js';
 
 describe('virus scan', () => {
+  beforeAll(() => {
+    process.env.CLAMAV_DISABLED = 'true';
+  });
   it('detects EICAR', async () => {
     const r = await scanBuffer(Buffer.from(EICAR_TEST_STRING));
     expect(r.status).toBe('INFECTED');

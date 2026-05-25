@@ -25,11 +25,18 @@ new Worker(
     };
     const buffer = Buffer.from(bufferBase64, 'base64');
     const result = await scanBuffer(buffer);
+    const scanStatus =
+      result.status === 'INFECTED'
+        ? 'INFECTED'
+        : result.status === 'FAILED'
+          ? 'FAILED'
+          : 'CLEAN';
     await db
       .update(attachments)
       .set({
-        scanStatus: result.status === 'INFECTED' ? 'INFECTED' : 'CLEAN',
+        scanStatus,
         scanResult: result as unknown as Record<string, unknown>,
+        scanEngineVersion: result.engine ?? 'clamav',
       })
       .where(eq(attachments.id, attachmentId));
     if (result.status === 'INFECTED') {
