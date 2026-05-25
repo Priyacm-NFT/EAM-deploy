@@ -15,7 +15,10 @@ import { reportRoutes } from './routes/reports.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { chatRoutes } from './routes/chat.js';
+import { presenceRoutes } from './routes/presence.js';
 import { setupSocketIO } from './socket.js';
+
+export { setupSocketIO };
 
 const PORT = Number(process.env.PORT ?? 3000);
 
@@ -59,6 +62,7 @@ export async function buildApp() {
   await app.register(notificationRoutes);
   await app.register(dashboardRoutes);
   await app.register(chatRoutes);
+  await app.register(presenceRoutes);
 
   return app;
 }

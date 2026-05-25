@@ -5,7 +5,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
@@ -23,7 +28,8 @@
     "fast-xml-parser": "^4.5.1",
     "kafkajs": "^2.2.4",
     "postgres": "^3.4.5",
-    "ssh2-sftp-client": "^11.0.0"
+    "ssh2-sftp-client": "^11.0.0",
+    "strnum": "^2.3.0"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.6",

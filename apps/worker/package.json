@@ -17,9 +17,11 @@
     "@eam/db": "workspace:*",
     "@eam/integration-framework": "workspace:*",
     "@eam/notification-service": "workspace:*",
+    "@eam/reporting-engine": "workspace:*",
     "@eam/shared": "workspace:*",
     "@eam/workflow-engine": "workspace:*",
     "bullmq": "^5.34.3",
+    "cron-parser": "^4.9.0",
     "drizzle-orm": "^0.38.3",
     "ioredis": "^5.4.2",
     "nodemailer": "^6.9.16"

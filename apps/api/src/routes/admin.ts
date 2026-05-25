@@ -6,12 +6,14 @@ import { adminIdentityRoutes } from './admin-identity.js';
 import { adminIdentityProviderRoutes } from './admin-identity-providers.js';
 import { adminConfigRoutes } from './admin-config.js';
 import { adminIntegrationRoutes } from './admin-integrations.js';
+import { adminReportingRoutes } from './admin-reporting.js';
 
 export async function adminRoutes(app: FastifyInstance) {
   await app.register(adminIdentityRoutes);
   await app.register(adminIdentityProviderRoutes);
   await app.register(adminConfigRoutes);
   await app.register(adminIntegrationRoutes);
+  await app.register(adminReportingRoutes);
 
   const configGuard = { preHandler: requirePermission('admin:config:manage') };
 

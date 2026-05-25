@@ -58,3 +58,18 @@ export const reportRunLog = pgTable('report_run_log', {
   startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
 });
+
+export const reportBiConnections = pgTable('report_bi_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  adapterType: text('adapter_type').notNull(),
+  name: text('name').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+  isActive: boolean('is_active').notNull().default(true),
+  lastTestedAt: timestamp('last_tested_at', { withTimezone: true }),
+  lastTestStatus: text('last_test_status'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});

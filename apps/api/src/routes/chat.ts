@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, or, and } from 'drizzle-orm';
+import { eq, or, and, desc } from 'drizzle-orm';
 import { db, chatMessages } from '@eam/db';
 import { authenticate } from '../plugins/auth.js';
 
@@ -10,11 +10,16 @@ export async function chatRoutes(app: FastifyInstance) {
       .select()
       .from(chatMessages)
       .where(
-        or(
-          and(eq(chatMessages.fromUserId, request.user!.id), eq(chatMessages.toUserId, q.with)),
-          and(eq(chatMessages.fromUserId, q.with), eq(chatMessages.toUserId, request.user!.id)),
+        and(
+          eq(chatMessages.tenantId, request.user!.tenantId),
+          or(
+            and(eq(chatMessages.fromUserId, request.user!.id), eq(chatMessages.toUserId, q.with)),
+            and(eq(chatMessages.fromUserId, q.with), eq(chatMessages.toUserId, request.user!.id)),
+          ),
         ),
-      );
+      )
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(50);
   });
 
   app.post('/chat/messages', { preHandler: authenticate }, async (request, reply) => {
