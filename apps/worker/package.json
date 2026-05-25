@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@eam/attachment-service": "workspace:*",
+    "@eam/auth": "workspace:*",
     "@eam/db": "workspace:*",
     "@eam/integration-framework": "workspace:*",
     "@eam/notification-service": "workspace:*",

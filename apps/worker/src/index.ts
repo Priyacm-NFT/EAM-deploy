@@ -57,4 +57,25 @@ new Worker(
   { connection },
 );
 
+new Worker(
+  'ldap-sync',
+  async (job) => {
+    const { providerId } = job.data as { providerId?: string };
+    const { LdapSyncService } = await import('@eam/auth');
+    const sync = new LdapSyncService(db);
+    if (providerId) {
+      await sync.syncProvider(providerId);
+    } else {
+      await sync.syncAllActive();
+    }
+  },
+  { connection },
+);
+
+await ldapSyncQueue.add(
+  'cron-ldap-sync',
+  {},
+  { repeat: { pattern: '0 */6 * * *' }, jobId: 'ldap-sync-cron' },
+);
+
 console.log('EAM worker started');

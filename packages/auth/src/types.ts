@@ -23,6 +23,8 @@ export interface JwtPayload {
   roles: string[];
   permissions: string[];
   type: 'access' | 'refresh' | 'mfa';
+  sid?: string;
+  mfa_verified?: boolean;
 }
 
 export interface AuthUser {
@@ -32,4 +34,6 @@ export interface AuthUser {
   displayName: string;
   roles: string[];
   permissions: string[];
+  sessionId?: string;
+  mfaVerified?: boolean;
 }

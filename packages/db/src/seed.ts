@@ -43,6 +43,11 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
           maxAgeDays: 90,
           lockoutAfterFailures: 5,
         },
+        sessionPolicy: {
+          idleTimeoutMinutes: 30,
+          absoluteTimeoutDays: 7,
+          maxConcurrentSessions: 5,
+        },
       },
     })
     .returning();

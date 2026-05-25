@@ -15,6 +15,7 @@ import {
 export const authSourceEnum = pgEnum('auth_source', ['LOCAL', 'AD', 'LDAP', 'SAML', 'OIDC']);
 export const groupSourceEnum = pgEnum('group_source', ['LOCAL', 'AD', 'LDAP']);
 export const idpTypeEnum = pgEnum('idp_type', ['SAML', 'OIDC', 'LDAP', 'AD']);
+export const mfaMethodEnum = pgEnum('mfa_method', ['TOTP', 'SMS', 'PUSH']);
 
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -44,6 +45,8 @@ export const users = pgTable(
     isActive: boolean('is_active').notNull().default(true),
     mfaEnabled: boolean('mfa_enabled').notNull().default(false),
     mfaSecret: text('mfa_secret'),
+    phone: text('phone'),
+    pushDeviceId: text('push_device_id'),
     emailBounced: boolean('email_bounced').notNull().default(false),
     failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
@@ -166,10 +169,41 @@ export const sessions = pgTable(
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('sessions_user_idx').on(t.userId), index('sessions_token_hash_idx').on(t.tokenHash)],
+);
+
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('password_reset_user_idx').on(t.userId)],
+);
+
+export const mfaMethods = pgTable(
+  'mfa_methods',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    method: mfaMethodEnum('method').notNull(),
+    secretOrTarget: text('secret_or_target'),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    enabledAt: timestamp('enabled_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('mfa_methods_user_method_idx').on(t.userId, t.method)],
 );
 
 export const auditLogs = pgTable(

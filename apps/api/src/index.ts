@@ -6,6 +6,8 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { initJwtKeys } from '@eam/auth';
 import { authRoutes } from './routes/auth.js';
+import { mfaRoutes } from './routes/mfa.js';
+import { ssoRoutes } from './routes/sso.js';
 import { healthRoutes } from './routes/health.js';
 import { adminRoutes } from './routes/admin.js';
 import { attachmentRoutes } from './routes/attachments.js';
@@ -39,6 +41,8 @@ export async function buildApp() {
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
+  await app.register(mfaRoutes);
+  await app.register(ssoRoutes);
   await app.register(adminRoutes);
   await app.register(attachmentRoutes);
   await app.register(reportRoutes);

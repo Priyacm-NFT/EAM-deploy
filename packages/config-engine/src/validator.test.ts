@@ -29,4 +29,24 @@ describe('ValidationEngine', () => {
   it('evaluates condition expressions', () => {
     expect(evaluateCondition('totalcost > 100000', { totalcost: 150000 })).toBe(true);
   });
+
+  it('rejects writes to hidden fields for role', () => {
+    const r = validateRecord(
+      [{ fieldKey: 'salary', isRequiredGlobal: false }],
+      [{ fieldKey: 'salary', ruleType: 'HIDDEN', roleId: 'role-a' }],
+      { salary: 100 },
+      ['role-a'],
+    );
+    expect(r.valid).toBe(false);
+  });
+
+  it('applyFieldRules marks readonly', async () => {
+    const { applyFieldRules } = await import('./validator.js');
+    const states = applyFieldRules(
+      [{ fieldKey: 'status', ruleType: 'READONLY', roleId: 'r1' }],
+      {},
+      ['r1'],
+    );
+    expect(states.status?.readonly).toBe(true);
+  });
 });
