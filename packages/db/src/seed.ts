@@ -1,13 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import type { Database } from './client.js';
 import {
   tenants,
   permissions,
   roles,
-  rolePermissions,
   users,
-  groups,
-  groupRoles,
 } from './schema/identity.js';
 import { entityDefinitions } from './schema/config.js';
 import { reportSubjects } from './schema/reporting.js';
@@ -25,6 +22,7 @@ const DEFAULT_PERMISSIONS = [
 export async function seedDatabase(db: Database): Promise<{ tenantId: string; adminUserId: string }> {
   const existing = await db.select().from(tenants).where(eq(tenants.slug, 'default')).limit(1);
   if (existing.length > 0) {
+    await removeLegacyDemoRoles(db);
     const admin = await db.select().from(users).where(eq(users.email, 'admin@eam.local')).limit(1);
     return { tenantId: existing[0]!.id, adminUserId: admin[0]?.id ?? '' };
   }
@@ -52,43 +50,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     })
     .returning();
 
-  const permRows = await db.insert(permissions).values(DEFAULT_PERMISSIONS).returning();
-
-  const [adminRole] = await db
-    .insert(roles)
-    .values({
-      tenantId: tenant!.id,
-      name: 'System Administrator',
-      description: 'Full system access',
-      isSystem: true,
-      requireMfa: false,
-    })
-    .returning();
-
-  await db.insert(rolePermissions).values(
-    permRows.map((p) => ({ roleId: adminRole!.id, permissionId: p.id })),
-  );
-
-  await db.insert(roles).values({
-    tenantId: tenant!.id,
-    name: 'Supervisor',
-    description: 'Maintenance supervisor',
-    isSystem: true,
-  });
-
-  await db.insert(roles).values({
-    tenantId: tenant!.id,
-    name: 'Technician',
-    description: 'Field technician',
-    isSystem: true,
-  });
-
-  const [adminGroup] = await db
-    .insert(groups)
-    .values({ tenantId: tenant!.id, name: 'Administrators', source: 'LOCAL' })
-    .returning();
-
-  await db.insert(groupRoles).values({ groupId: adminGroup!.id, roleId: adminRole!.id });
+  await db.insert(permissions).values(DEFAULT_PERMISSIONS);
 
   const entities = [
     { name: 'Asset', label: 'Asset', tableName: 'assets' },
@@ -178,18 +140,18 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
       },
       isActive: true,
     },
-    {
-      tenantId: tenant!.id,
-      eventType: 'SR_STATUS_CHANGED',
-      entityType: 'PurchaseRequisition',
-      conditionExpression: 'totalcost > 100000',
-      templateId: woTemplate!.id,
-      distributionConfig: {
-        rules: [{ type: 'ROLE', value: 'Supervisor' }],
-      },
-      isActive: true,
-    },
   ]);
 
   return { tenantId: tenant!.id, adminUserId: '' };
+}
+
+/** Removes legacy demo roles so admins create roles through the UI (P0-1 AC-1.2). */
+export async function removeLegacyDemoRoles(db: Database): Promise<void> {
+  const [tenant] = await db.select().from(tenants).where(eq(tenants.slug, 'default')).limit(1);
+  if (!tenant) return;
+
+  const legacyNames = ['Supervisor', 'Technician'];
+  for (const name of legacyNames) {
+    await db.delete(roles).where(and(eq(roles.tenantId, tenant.id), eq(roles.name, name)));
+  }
 }

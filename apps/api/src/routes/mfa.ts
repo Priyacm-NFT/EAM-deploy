@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { eq, and, isNull } from 'drizzle-orm';
 import {
   generateTotpSecret,
@@ -11,32 +11,61 @@ import {
   verifyToken,
   hashToken,
 } from '@eam/auth';
-import { db, users, mfaRecoveryCodes, mfaMethods } from '@eam/db';
+import { db, users, mfaRecoveryCodes, audit } from '@eam/db';
 import { authenticate } from '../plugins/auth.js';
 import { issueTokens, getUserAgent } from '../lib/tokens.js';
 import { redisSetex, redisGet, redisDel } from '../lib/redis.js';
 import { sendSms } from '../lib/email.js';
+import { clearLoginLockout, clearMfaPhone, getMfaPhone, storeMfaPhone } from '../lib/auth-state.js';
 import QRCode from 'qrcode';
 
 const SMS_OTP_TTL = 300;
 const PUSH_CHALLENGE_TTL = 120;
 
+interface MfaSetupActor {
+  id: string;
+  tenantId: string;
+  email: string;
+}
+
+/** Accepts a normal access token or a short-lived MFA setup session token. */
+async function authenticateForMfaSetup(request: FastifyRequest): Promise<MfaSetupActor> {
+  const header = request.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    throw { statusCode: 401, message: 'Unauthorized' };
+  }
+  try {
+    const payload = await verifyToken(header.slice(7));
+    if (payload.type !== 'access' && payload.type !== 'mfa') {
+      throw new Error('invalid token type');
+    }
+    const [user] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
+    if (!user || !user.isActive) throw new Error('invalid user');
+    return { id: user.id, tenantId: user.tenantId, email: user.email };
+  } catch (e) {
+    if (typeof e === 'object' && e !== null && 'statusCode' in e) throw e;
+    throw { statusCode: 401, message: 'Unauthorized' };
+  }
+}
+
 export async function mfaRoutes(app: FastifyInstance) {
   app.post('/auth/mfa/setup', async (request, reply) => {
+    let actor: MfaSetupActor;
     try {
-      await authenticate(request);
+      actor = await authenticateForMfaSetup(request);
     } catch (e) {
       return reply.status(401).send(e);
     }
     const secret = generateTotpSecret();
-    const uri = getTotpUri(secret, request.user!.email);
+    const uri = getTotpUri(secret, actor.email);
     const qrDataUri = await QRCode.toDataURL(uri);
     return reply.send({ secret, qrDataUri, otpauthUri: uri });
   });
 
   app.post('/auth/mfa/verify-setup', async (request, reply) => {
+    let actor: MfaSetupActor;
     try {
-      await authenticate(request);
+      actor = await authenticateForMfaSetup(request);
     } catch (e) {
       return reply.status(401).send(e);
     }
@@ -49,26 +78,24 @@ export async function mfaRoutes(app: FastifyInstance) {
     await db
       .update(users)
       .set({ mfaSecret: encrypted, mfaEnabled: true })
-      .where(eq(users.id, request.user!.id));
+      .where(eq(users.id, actor.id));
 
-    await db.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, request.user!.id));
+    await db.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, actor.id));
     const codes = generateRecoveryCodes(10);
     await db.insert(mfaRecoveryCodes).values(
       codes.map((code) => ({
-        userId: request.user!.id,
+        userId: actor.id,
         codeHash: hashRecoveryCode(code),
       })),
     );
 
-    await db
-      .insert(mfaMethods)
-      .values({
-        userId: request.user!.id,
-        method: 'TOTP',
-        secretOrTarget: encrypted,
-        isPrimary: true,
-      })
-      .onConflictDoNothing();
+    await audit(db, {
+      tenantId: actor.tenantId,
+      userId: actor.id,
+      action: 'MFA_ENABLED',
+      resource: 'auth',
+      resourceId: actor.id,
+    });
 
     return reply.send({ recoveryCodes: codes });
   });
@@ -121,12 +148,10 @@ export async function mfaRoutes(app: FastifyInstance) {
 
     if (!valid) return reply.status(401).send({ error: 'Invalid MFA code' });
 
-    await db
-      .update(users)
-      .set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() })
-      .where(eq(users.id, user.id));
+    await clearLoginLockout(user.id);
+    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
-    return issueTokens(reply, user, {
+    return issueTokens(user, {
       ip: request.ip,
       userAgent: getUserAgent(request),
       mfaVerified: true,
@@ -153,7 +178,15 @@ export async function mfaRoutes(app: FastifyInstance) {
       .set({ mfaEnabled: false, mfaSecret: null })
       .where(eq(users.id, user.id));
     await db.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, user.id));
-    await db.delete(mfaMethods).where(eq(mfaMethods.userId, user.id));
+    await clearMfaPhone(user.id);
+
+    await audit(db, {
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'MFA_DISABLED',
+      resource: 'auth',
+      resourceId: user.id,
+    });
 
     return reply.send({ ok: true });
   });
@@ -168,12 +201,12 @@ export async function mfaRoutes(app: FastifyInstance) {
     }
     if (payload.type !== 'mfa') return reply.status(401).send({ error: 'Invalid token type' });
 
-    const [user] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
-    if (!user?.phone) return reply.status(400).send({ error: 'Phone not configured' });
+    const phone = await getMfaPhone(payload.sub);
+    if (!phone) return reply.status(400).send({ error: 'Phone not configured' });
 
     const otp = String(Math.floor(100000 + Math.random() * 900000));
-    await redisSetex(`mfa:otp:${user.id}`, SMS_OTP_TTL, otp);
-    await sendSms(user.phone, `Your EAM verification code is ${otp}`);
+    await redisSetex(`mfa:otp:${payload.sub}`, SMS_OTP_TTL, otp);
+    await sendSms(phone, `Your EAM verification code is ${otp}`);
     return reply.send({ sent: true });
   });
 
@@ -196,12 +229,7 @@ export async function mfaRoutes(app: FastifyInstance) {
     const [user] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
     if (!user || !user.isActive) return reply.status(401).send({ error: 'User not found' });
 
-    await db
-      .insert(mfaMethods)
-      .values({ userId: user.id, method: 'SMS', secretOrTarget: user.phone ?? '', isPrimary: false })
-      .onConflictDoNothing();
-
-    return issueTokens(reply, user, {
+    return issueTokens(user, {
       ip: request.ip,
       userAgent: getUserAgent(request),
       mfaVerified: true,
@@ -259,7 +287,7 @@ export async function mfaRoutes(app: FastifyInstance) {
     const [user] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
     if (!user || !user.isActive) return reply.status(401).send({ error: 'User not found' });
 
-    return issueTokens(reply, user, {
+    return issueTokens(user, {
       ip: request.ip,
       userAgent: getUserAgent(request),
       mfaVerified: true,
@@ -273,16 +301,11 @@ export async function mfaRoutes(app: FastifyInstance) {
       return reply.status(401).send(e);
     }
     const body = request.body as { phone: string };
-    await db.update(users).set({ phone: body.phone, mfaEnabled: true }).where(eq(users.id, request.user!.id));
+    await storeMfaPhone(request.user!.id, body.phone);
     await db
-      .insert(mfaMethods)
-      .values({
-        userId: request.user!.id,
-        method: 'SMS',
-        secretOrTarget: body.phone,
-        isPrimary: false,
-      })
-      .onConflictDoNothing();
+      .update(users)
+      .set({ mfaEnabled: true, phone: body.phone })
+      .where(eq(users.id, request.user!.id));
     return reply.send({ ok: true });
   });
 }

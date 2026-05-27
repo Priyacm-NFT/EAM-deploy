@@ -5,8 +5,9 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { initJwtKeys } from '@eam/auth';
-import { authRoutes } from './routes/auth.js';
-import { mfaRoutes } from './routes/mfa.js';
+import { seedDatabase, db } from '@eam/db';
+import { createAuthPlugin } from './plugins/create-auth-plugin.js';
+import { ensureDevAdminUser } from './lib/dev-seed.js';
 import { ssoRoutes } from './routes/sso.js';
 import { healthRoutes } from './routes/health.js';
 import { adminRoutes } from './routes/admin.js';
@@ -25,6 +26,10 @@ const PORT = Number(process.env.PORT ?? 3000);
 
 export async function buildApp() {
   await initJwtKeys();
+  if (process.env.NODE_ENV !== 'production' && process.env.AUTO_SEED !== 'false') {
+    await seedDatabase(db);
+    await ensureDevAdminUser();
+  }
   wireApiNotificationBridge();
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
@@ -55,8 +60,7 @@ export async function buildApp() {
   await app.register(swaggerUi, { routePrefix: '/docs' });
 
   await app.register(healthRoutes);
-  await app.register(authRoutes);
-  await app.register(mfaRoutes);
+  await app.register(createAuthPlugin);
   await app.register(ssoRoutes);
   await app.register(adminRoutes);
   await app.register(attachmentRoutes);

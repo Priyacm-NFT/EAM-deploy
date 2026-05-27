@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '@eam/db';
-import { users, roles, userRoles, groups, userGroups } from '@eam/db';
+import { users, roles, groups, userGroups, groupRoles } from '@eam/db';
 import { deduplicateRecipients, type DistributionRule } from './recipients.js';
 
 export async function resolveDistributionRecipients(
@@ -28,9 +28,11 @@ export async function resolveDistributionRecipients(
       case 'ROLE': {
         const rows = await db
           .select({ userId: users.id, email: users.email })
-          .from(userRoles)
-          .innerJoin(users, eq(userRoles.userId, users.id))
-          .innerJoin(roles, eq(userRoles.roleId, roles.id))
+          .from(userGroups)
+          .innerJoin(users, eq(userGroups.userId, users.id))
+          .innerJoin(groups, eq(userGroups.groupId, groups.id))
+          .innerJoin(groupRoles, eq(userGroups.groupId, groupRoles.groupId))
+          .innerJoin(roles, eq(groupRoles.roleId, roles.id))
           .where(
             and(
               eq(roles.tenantId, tenantId),

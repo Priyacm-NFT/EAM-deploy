@@ -1,36 +1,20 @@
 import { eq, inArray } from 'drizzle-orm';
 import type { Database } from '@eam/db';
-import {
-  userRoles,
-  userGroups,
-  groupRoles,
-  roles,
-  rolePermissions,
-  permissions,
-} from '@eam/db';
+import { userGroups, groupRoles, roles, rolePermissions, permissions } from '@eam/db';
 
 export async function getEffectivePermissions(
   db: Database,
   userId: string,
 ): Promise<{ roles: string[]; permissions: string[] }> {
-  const directRoles = await db
-    .select({ name: roles.name, requireMfa: roles.requireMfa })
-    .from(userRoles)
-    .innerJoin(roles, eq(userRoles.roleId, roles.id))
-    .where(eq(userRoles.userId, userId));
-
   const groupRoleRows = await db
-    .select({ name: roles.name, requireMfa: roles.requireMfa })
+    .select({ name: roles.name, roleId: roles.id })
     .from(userGroups)
     .innerJoin(groupRoles, eq(userGroups.groupId, groupRoles.groupId))
     .innerJoin(roles, eq(groupRoles.roleId, roles.id))
     .where(eq(userGroups.userId, userId));
 
-  const roleNames = [...new Set([...directRoles, ...groupRoleRows].map((r) => r.name))];
-  const roleIds = await db
-    .select({ id: roles.id })
-    .from(roles)
-    .where(inArray(roles.name, roleNames));
+  const roleNames = [...new Set(groupRoleRows.map((r) => r.name))];
+  const roleIds = [...new Set(groupRoleRows.map((r) => r.roleId))];
 
   const permRows =
     roleIds.length === 0
@@ -39,12 +23,7 @@ export async function getEffectivePermissions(
           .select({ resource: permissions.resource, action: permissions.action })
           .from(rolePermissions)
           .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-          .where(
-            inArray(
-              rolePermissions.roleId,
-              roleIds.map((r) => r.id),
-            ),
-          );
+          .where(inArray(rolePermissions.roleId, roleIds));
 
   const permissionStrings = [
     ...new Set(permRows.map((p) => `${p.resource}:${p.action}`)),
@@ -58,8 +37,12 @@ export function hasPermission(userPermissions: string[], required: string): bool
 }
 
 export async function userRequiresMfa(db: Database, userId: string): Promise<boolean> {
-  const { roles: roleNames } = await getEffectivePermissions(db, userId);
-  if (roleNames.length === 0) return false;
-  const roleRows = await db.select().from(roles).where(inArray(roles.name, roleNames));
-  return roleRows.some((r) => r.requireMfa);
+  const rows = await db
+    .select({ requireMfa: roles.requireMfa })
+    .from(userGroups)
+    .innerJoin(groupRoles, eq(userGroups.groupId, groupRoles.groupId))
+    .innerJoin(roles, eq(groupRoles.roleId, roles.id))
+    .where(eq(userGroups.userId, userId));
+
+  return rows.some((r) => r.requireMfa);
 }

@@ -46,7 +46,7 @@ export async function touchSession(db: Database, sessionId: string): Promise<voi
   await db
     .update(sessions)
     .set({ lastActivityAt: new Date() })
-    .where(eq(sessions.id, sessionId));
+    .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt)));
 }
 
 export async function getSessionByTokenHash(
@@ -76,7 +76,7 @@ export function validateStoredSession(
   return isSessionValid(
     {
       expiresAt: session.expiresAt,
-      lastActivityAt: session.lastActivityAt,
+      lastActivityAt: session.lastActivityAt ?? session.createdAt,
       revokedAt: session.revokedAt,
       createdAt: session.createdAt,
     },

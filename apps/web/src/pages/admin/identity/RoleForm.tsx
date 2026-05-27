@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../../api/client.js';
+import { AdminAccessBanner } from '../../../components/AdminAccessBanner.js';
+import {
+  FormActions,
+  FormField,
+  IdentityPageLayout,
+  MessageBanner,
+} from '../../../components/identity/IdentityLayout.js';
 
 interface Permission {
   id: string;
@@ -24,10 +31,22 @@ export function RoleFormPage() {
   const [requireMfa, setRequireMfa] = useState(false);
   const [allPerms, setAllPerms] = useState<Permission[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [forbidden, setForbidden] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api<Permission[]>('/admin/permissions').then(setAllPerms);
-    if (!isNew && id) {
+    if (isNew) {
+      navigate('/admin/identity/roles', { replace: true });
+      return;
+    }
+    api<Permission[]>('/admin/permissions')
+      .then(setAllPerms)
+      .catch((e) => {
+        if (String(e).toLowerCase().includes('forbidden')) setForbidden(true);
+      });
+    if (id) {
       api<Role>(`/admin/roles/${id}`).then((role) => {
         setName(role.name);
         setDescription(role.description ?? '');
@@ -37,28 +56,36 @@ export function RoleFormPage() {
         setSelected(new Set(p.map((x) => x.id))),
       );
     }
-  }, [id, isNew]);
+  }, [id, isNew, navigate]);
+
+  if (forbidden) {
+    return (
+      <IdentityPageLayout title="Edit role" backTo="/admin/identity/roles" backLabel="Back to roles">
+        <AdminAccessBanner />
+      </IdentityPageLayout>
+    );
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    let roleId = id;
-    if (isNew) {
-      const created = await api<{ id: string }>('/admin/roles', {
-        method: 'POST',
-        body: JSON.stringify({ name, description, requireMfa }),
-      });
-      roleId = created.id;
-    } else {
+    if (!id) return;
+    setError('');
+    setSaving(true);
+    try {
       await api(`/admin/roles/${id}`, {
         method: 'PUT',
         body: JSON.stringify({ name, description, requireMfa }),
       });
+      await api(`/admin/roles/${id}/permissions`, {
+        method: 'PUT',
+        body: JSON.stringify({ permissionIds: [...selected] }),
+      });
+      setMsg('Role saved.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
     }
-    await api(`/admin/roles/${roleId}/permissions`, {
-      method: 'PUT',
-      body: JSON.stringify({ permissionIds: [...selected] }),
-    });
-    navigate('/admin/identity/roles');
   }
 
   function togglePerm(pid: string) {
@@ -71,43 +98,81 @@ export function RoleFormPage() {
   }
 
   return (
-    <form onSubmit={save} className="max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">{isNew ? 'New role' : 'Edit role'}</h1>
-      <input
-        className="border rounded w-full px-2 py-1"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Role name"
-        required
-      />
-      <textarea
-        className="border rounded w-full px-2 py-1"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder="Description"
-      />
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={requireMfa} onChange={(e) => setRequireMfa(e.target.checked)} />
-        Require MFA
-      </label>
-      <div>
-        <p className="font-medium text-sm mb-2">Permissions</p>
-        <div className="grid grid-cols-2 gap-2 text-sm max-h-64 overflow-auto border p-2 rounded bg-white">
-          {allPerms.map((p) => (
-            <label key={p.id} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={selected.has(p.id)}
-                onChange={() => togglePerm(p.id)}
-              />
-              {p.resource}:{p.action}
-            </label>
-          ))}
+    <IdentityPageLayout
+      title="Edit role"
+      subtitle="Update role details and assign permissions"
+      backTo="/admin/identity/roles"
+      backLabel="Back to roles"
+    >
+      {error && <MessageBanner type="error" text={error} />}
+      {msg && <MessageBanner type="success" text={msg} />}
+
+      <form onSubmit={save} className="admin-section space-y-4">
+        <h2 className="admin-section-title">Role details</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField label="Role name" htmlFor="role-name-edit">
+            <input
+              id="role-name-edit"
+              type="text"
+              className="form-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </FormField>
+          <FormField label="Description" htmlFor="role-desc-edit">
+            <input
+              id="role-desc-edit"
+              type="text"
+              className="form-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </FormField>
         </div>
-      </div>
-      <button type="submit" className="bg-slate-800 text-white px-4 py-2 rounded text-sm">
-        Save
-      </button>
-    </form>
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input
+            type="checkbox"
+            className="rounded border-slate-300 text-accent focus:ring-accent"
+            checked={requireMfa}
+            onChange={(e) => setRequireMfa(e.target.checked)}
+          />
+          Require MFA for users with this role
+        </label>
+
+        <div>
+          <p className="form-label">Permissions</p>
+          {allPerms.length === 0 ? (
+            <p className="text-sm text-slate-500">Loading permissions…</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-auto border border-slate-200 rounded-lg p-3 bg-slate-50 mt-1">
+              {allPerms.map((p) => (
+                <label
+                  key={p.id}
+                  className="flex items-center gap-2 text-sm text-slate-800 cursor-pointer p-1.5 rounded hover:bg-white"
+                >
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300 text-accent focus:ring-accent"
+                    checked={selected.has(p.id)}
+                    onChange={() => togglePerm(p.id)}
+                  />
+                  <span>
+                    <span className="font-medium">{p.resource}</span>
+                    <span className="text-slate-500">:{p.action}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <FormActions>
+          <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
+            {saving ? 'Saving…' : 'Save role'}
+          </button>
+        </FormActions>
+      </form>
+    </IdentityPageLayout>
   );
 }

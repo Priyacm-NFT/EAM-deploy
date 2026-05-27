@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import * as samlify from 'samlify';
 import * as openidClient from 'openid-client';
 import { randomBytes } from 'node:crypto';
-import { db, identityProviders } from '@eam/db';
+import { db, identityProviders, tenants } from '@eam/db';
 import { decryptIdpConfig, mapClaims, upsertSsoUser } from '@eam/auth';
 import { issueTokens, getUserAgent } from '../lib/tokens.js';
 import { redisSetex, redisGet } from '../lib/redis.js';
@@ -11,6 +11,19 @@ import { redisSetex, redisGet } from '../lib/redis.js';
 const oidcStates = new Map<string, { providerId: string; codeVerifier: string }>();
 
 export async function ssoRoutes(app: FastifyInstance) {
+  app.get('/auth/sso/providers', async (request) => {
+    const tenantSlug = (request.query as { tenant?: string }).tenant ?? 'default';
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.slug, tenantSlug)).limit(1);
+    if (!tenant) return [];
+
+    const list = await db
+      .select({ id: identityProviders.id, name: identityProviders.name, type: identityProviders.type })
+      .from(identityProviders)
+      .where(and(eq(identityProviders.tenantId, tenant.id), eq(identityProviders.isActive, true)));
+
+    return list.filter((p) => p.type === 'SAML' || p.type === 'OIDC');
+  });
+
   app.get('/auth/saml/:providerId/metadata', async (request, reply) => {
     const { providerId } = request.params as { providerId: string };
     const provider = await loadProvider(providerId);
@@ -81,7 +94,7 @@ export async function ssoRoutes(app: FastifyInstance) {
       const attrs = extract.attributes as Record<string, unknown>;
       const mapped = mapClaims({ ...attrs, nameID: extract.nameID }, claimsMap);
       const user = await upsertSsoUser(db, provider.tenantId, 'SAML', mapped);
-      return issueTokens(reply, user, { ip: request.ip, userAgent: getUserAgent(request), mfaVerified: false });
+      return issueTokens(user, { ip: request.ip, userAgent: getUserAgent(request), mfaVerified: false });
     } catch (err) {
       request.log.error(err);
       return reply.status(401).send({ error: 'SAML assertion invalid' });
@@ -152,7 +165,7 @@ export async function ssoRoutes(app: FastifyInstance) {
     const claimsMap = (config.claims_map ?? {}) as Record<string, string>;
     const mapped = mapClaims(claims as Record<string, unknown>, claimsMap);
     const user = await upsertSsoUser(db, provider.tenantId, 'OIDC', mapped);
-    return issueTokens(reply, user, { ip: request.ip, userAgent: getUserAgent(request), mfaVerified: false });
+    return issueTokens(user, { ip: request.ip, userAgent: getUserAgent(request), mfaVerified: false });
   });
 }
 

@@ -1,4 +1,4 @@
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import {
   signAccessToken,
   hashToken,
@@ -18,7 +18,6 @@ export interface IssuedTokens {
 }
 
 export async function issueTokens(
-  reply: FastifyReply,
   user: {
     id: string;
     email: string;
@@ -48,7 +47,6 @@ export async function issueTokens(
       ipAddress: opts.ip,
       userAgent: opts.userAgent,
       expiresAt,
-      lastActivityAt: now,
     })
     .returning();
 
@@ -64,9 +62,7 @@ export async function issueTokens(
     mfa_verified: opts.mfaVerified ?? false,
   });
 
-  const body = { accessToken, refreshToken, tokenType: 'Bearer' as const };
-  reply.send(body);
-  return body;
+  return { accessToken, refreshToken, tokenType: 'Bearer' as const };
 }
 
 export function getUserAgent(request: FastifyRequest): string | undefined {

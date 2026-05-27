@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../../api/client.js';
+import {
+  FormActions,
+  FormField,
+  IdentityPageLayout,
+  MessageBanner,
+} from '../../../components/identity/IdentityLayout.js';
+
+interface Entity {
+  id: string;
+  name: string;
+  label: string;
+  tableName: string;
+}
 
 interface FieldRow {
   id: string;
@@ -12,209 +25,361 @@ interface FieldRow {
   validationRules?: Record<string, unknown>;
 }
 
+const FIELD_TYPES: { value: string; label: string }[] = [
+  { value: 'TEXT', label: 'Text' },
+  { value: 'NUMBER', label: 'Number' },
+  { value: 'DATE', label: 'Date' },
+  { value: 'DATETIME', label: 'Date & time' },
+  { value: 'BOOLEAN', label: 'Yes / No' },
+  { value: 'EMAIL', label: 'Email' },
+  { value: 'URL', label: 'URL' },
+  { value: 'PHONE', label: 'Phone' },
+  { value: 'PICKLIST', label: 'Picklist' },
+  { value: 'MULTI_SELECT', label: 'Multi-select' },
+  { value: 'LOOKUP', label: 'Lookup' },
+  { value: 'FORMULA', label: 'Formula' },
+  { value: 'ATTACHMENT', label: 'Attachment' },
+];
+
+const emptyForm = {
+  fieldKey: '',
+  label: '',
+  fieldType: 'TEXT',
+  isRequiredGlobal: false,
+  min: '',
+  max: '',
+  minLength: '',
+  maxLength: '',
+  regex: '',
+};
+
+function formatValidation(rules?: Record<string, unknown>): string {
+  if (!rules || Object.keys(rules).length === 0) return 'None';
+  return Object.entries(rules)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(' · ');
+}
+
 export function ConfigFieldListPage() {
   const { entityId } = useParams();
+  const [entity, setEntity] = useState<Entity | null>(null);
   const [fields, setFields] = useState<FieldRow[]>([]);
-  const [form, setForm] = useState({
-    fieldKey: '',
-    label: '',
-    fieldType: 'TEXT',
-    isRequiredGlobal: false,
-    min: '',
-    max: '',
-    minLength: '',
-    maxLength: '',
-    regex: '',
-  });
+  const [filter, setFilter] = useState('');
+  const [form, setForm] = useState(emptyForm);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   function load() {
     if (!entityId) return;
-    api<FieldRow[]>(`/admin/config/entities/${entityId}/fields`).then(setFields);
+    api<Entity[]>('/admin/config/entities')
+      .then((list) => setEntity(list.find((e) => e.id === entityId) ?? null))
+      .catch((e) => setError(String(e)));
+    api<FieldRow[]>(`/admin/config/entities/${entityId}/fields`)
+      .then(setFields)
+      .catch((e) => setError(String(e)));
   }
 
   useEffect(() => {
     load();
   }, [entityId]);
 
+  const filtered = fields.filter(
+    (f) =>
+      f.fieldKey.toLowerCase().includes(filter.toLowerCase()) ||
+      f.label.toLowerCase().includes(filter.toLowerCase()) ||
+      f.fieldType.toLowerCase().includes(filter.toLowerCase()),
+  );
+
+  const showLengthRules = ['TEXT', 'EMAIL', 'URL', 'PHONE'].includes(form.fieldType);
+  const showRangeRules = ['NUMBER', 'DATE', 'DATETIME'].includes(form.fieldType);
+
   async function addField(e: React.FormEvent) {
     e.preventDefault();
     if (!entityId) return;
-    const validationRules: Record<string, unknown> = {};
-    if (form.regex) validationRules.regex = form.regex;
-    if (form.minLength) validationRules.minLength = Number(form.minLength);
-    if (form.maxLength) validationRules.maxLength = Number(form.maxLength);
-    if (form.min) {
-      validationRules.min =
-        form.fieldType === 'NUMBER' ? Number(form.min) : form.min;
-    }
-    if (form.max) {
-      validationRules.max =
-        form.fieldType === 'NUMBER' ? Number(form.max) : form.max;
-    }
+    setError('');
+    setMsg('');
+    setSaving(true);
+    try {
+      const validationRules: Record<string, unknown> = {};
+      if (form.regex.trim()) validationRules.regex = form.regex.trim();
+      if (form.minLength) validationRules.minLength = Number(form.minLength);
+      if (form.maxLength) validationRules.maxLength = Number(form.maxLength);
+      if (form.min) {
+        validationRules.min = form.fieldType === 'NUMBER' ? Number(form.min) : form.min;
+      }
+      if (form.max) {
+        validationRules.max = form.fieldType === 'NUMBER' ? Number(form.max) : form.max;
+      }
 
-    await api(`/admin/config/entities/${entityId}/fields`, {
-      method: 'POST',
-      body: JSON.stringify({
-        fieldKey: form.fieldKey,
-        label: form.label,
-        fieldType: form.fieldType,
-        isRequiredGlobal: form.isRequiredGlobal,
-        validationRules,
-      }),
-    });
-    setForm({
-      fieldKey: '',
-      label: '',
-      fieldType: 'TEXT',
-      isRequiredGlobal: false,
-      min: '',
-      max: '',
-      minLength: '',
-      maxLength: '',
-      regex: '',
-    });
-    load();
+      await api(`/admin/config/entities/${entityId}/fields`, {
+        method: 'POST',
+        body: JSON.stringify({
+          fieldKey: form.fieldKey.trim(),
+          label: form.label.trim(),
+          fieldType: form.fieldType,
+          isRequiredGlobal: form.isRequiredGlobal,
+          validationRules,
+        }),
+      });
+      setForm(emptyForm);
+      setMsg(`Field "${form.label.trim()}" added. A database column custom__${form.fieldKey.trim()} was created.`);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to add field');
+    } finally {
+      setSaving(false);
+    }
   }
 
-  async function removeField(id: string) {
-    if (!entityId || !confirm('Delete this field? The database column will be soft-dropped.')) return;
-    await api(`/admin/config/entities/${entityId}/fields/${id}`, { method: 'DELETE' });
-    load();
+  async function removeField(id: string, label: string) {
+    if (!entityId || !window.confirm(`Delete field "${label}"? The database column will be removed.`)) return;
+    setError('');
+    try {
+      await api(`/admin/config/entities/${entityId}/fields/${id}`, { method: 'DELETE' });
+      setMsg(`Field "${label}" deleted.`);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
+    }
   }
+
+  const entityTitle = entity?.label ?? 'Entity';
 
   return (
-    <div className="max-w-4xl">
-      <Link to="/admin/config" className="text-sm text-blue-600">
-        ← Configuration
-      </Link>
-      <h1 className="text-xl font-semibold mt-2 mb-4">Entity fields</h1>
+    <IdentityPageLayout
+      title={`Manage fields — ${entityTitle}`}
+      subtitle={
+        entity
+          ? `Add custom fields for ${entity.name}. Stored as custom__field_key on table ${entity.tableName}.`
+          : 'Define fields and validation rules for this entity'
+      }
+      backTo="/admin/config"
+      backLabel="Back to configuration"
+    >
+      {error && <MessageBanner type="error" text={error} />}
+      {msg && <MessageBanner type="success" text={msg} />}
 
-      <form onSubmit={addField} className="border rounded bg-white p-4 mb-6 space-y-3">
-        <h2 className="font-medium text-sm">Add custom field</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="text-sm">
-            Field key
+      {entity && (
+        <div className="admin-section">
+          <div className="flex flex-wrap gap-3 text-sm">
+            <Link to={`/admin/config/entities/${entityId}/forms`} className="btn-primary !w-auto px-4">
+              Open form designer
+            </Link>
+            <span className="text-slate-600 self-center">
+              Entity: <strong className="text-slate-900">{entity.name}</strong>
+            </span>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={addField} className="admin-section space-y-4">
+        <h2 className="admin-section-title">Add custom field</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField label="Field key" htmlFor="field-key" hint="Snake_case, e.g. serial_number">
             <input
-              className="border rounded w-full px-2 py-1 mt-1"
+              id="field-key"
+              type="text"
+              className="form-input font-mono"
               value={form.fieldKey}
               onChange={(e) => setForm({ ...form, fieldKey: e.target.value })}
               required
+              pattern="[a-z][a-z0-9_]*"
+              title="Lowercase letters, numbers, and underscores only"
             />
-          </label>
-          <label className="text-sm">
-            Label
+          </FormField>
+          <FormField label="Display label" htmlFor="field-label">
             <input
-              className="border rounded w-full px-2 py-1 mt-1"
+              id="field-label"
+              type="text"
+              className="form-input"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
               required
             />
-          </label>
-          <label className="text-sm">
-            Type
+          </FormField>
+          <FormField label="Field type" htmlFor="field-type">
             <select
-              className="border rounded w-full px-2 py-1 mt-1"
+              id="field-type"
+              className="form-select"
               value={form.fieldType}
               onChange={(e) => setForm({ ...form, fieldType: e.target.value })}
             >
-              <option value="TEXT">Text</option>
-              <option value="NUMBER">Number</option>
-              <option value="DATE">Date</option>
-              <option value="BOOLEAN">Boolean</option>
+              {FIELD_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
             </select>
-          </label>
-          <label className="text-sm flex items-end gap-2">
-            <input
-              type="checkbox"
-              checked={form.isRequiredGlobal}
-              onChange={(e) => setForm({ ...form, isRequiredGlobal: e.target.checked })}
-            />
-            Required globally
-          </label>
-          <label className="text-sm">
-            Min length
-            <input
-              className="border rounded w-full px-2 py-1 mt-1"
-              type="number"
-              value={form.minLength}
-              onChange={(e) => setForm({ ...form, minLength: e.target.value })}
-            />
-          </label>
-          <label className="text-sm">
-            Max length
-            <input
-              className="border rounded w-full px-2 py-1 mt-1"
-              type="number"
-              value={form.maxLength}
-              onChange={(e) => setForm({ ...form, maxLength: e.target.value })}
-            />
-          </label>
-          <label className="text-sm">
-            Min {form.fieldType === 'DATE' ? '(YYYY-MM-DD)' : '(value)'}
-            <input
-              className="border rounded w-full px-2 py-1 mt-1"
-              value={form.min}
-              onChange={(e) => setForm({ ...form, min: e.target.value })}
-            />
-          </label>
-          <label className="text-sm">
-            Max {form.fieldType === 'DATE' ? '(YYYY-MM-DD)' : '(value)'}
-            <input
-              className="border rounded w-full px-2 py-1 mt-1"
-              value={form.max}
-              onChange={(e) => setForm({ ...form, max: e.target.value })}
-            />
-          </label>
-          <label className="text-sm col-span-2">
-            Regex
-            <input
-              className="border rounded w-full px-2 py-1 mt-1 font-mono text-xs"
-              value={form.regex}
-              onChange={(e) => setForm({ ...form, regex: e.target.value })}
-            />
-          </label>
+          </FormField>
+          <div className="flex items-end pb-1">
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300 text-accent focus:ring-accent"
+                checked={form.isRequiredGlobal}
+                onChange={(e) => setForm({ ...form, isRequiredGlobal: e.target.checked })}
+              />
+              Required on every form (global)
+            </label>
+          </div>
         </div>
-        <button type="submit" className="bg-blue-600 text-white text-sm px-3 py-1.5 rounded">
-          Add field
-        </button>
+
+        <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/80 space-y-4">
+          <p className="text-sm font-medium text-slate-800">Validation rules (optional)</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {showLengthRules && (
+              <>
+                <FormField label="Minimum length" htmlFor="field-min-len">
+                  <input
+                    id="field-min-len"
+                    type="number"
+                    min={0}
+                    className="form-input"
+                    value={form.minLength}
+                    onChange={(e) => setForm({ ...form, minLength: e.target.value })}
+                  />
+                </FormField>
+                <FormField label="Maximum length" htmlFor="field-max-len">
+                  <input
+                    id="field-max-len"
+                    type="number"
+                    min={0}
+                    className="form-input"
+                    value={form.maxLength}
+                    onChange={(e) => setForm({ ...form, maxLength: e.target.value })}
+                  />
+                </FormField>
+              </>
+            )}
+            {showRangeRules && (
+              <>
+                <FormField
+                  label="Minimum value"
+                  htmlFor="field-min"
+                  hint={form.fieldType.includes('DATE') ? 'YYYY-MM-DD for dates' : undefined}
+                >
+                  <input
+                    id="field-min"
+                    type="text"
+                    className="form-input"
+                    value={form.min}
+                    onChange={(e) => setForm({ ...form, min: e.target.value })}
+                  />
+                </FormField>
+                <FormField
+                  label="Maximum value"
+                  htmlFor="field-max"
+                  hint={form.fieldType.includes('DATE') ? 'YYYY-MM-DD for dates' : undefined}
+                >
+                  <input
+                    id="field-max"
+                    type="text"
+                    className="form-input"
+                    value={form.max}
+                    onChange={(e) => setForm({ ...form, max: e.target.value })}
+                  />
+                </FormField>
+              </>
+            )}
+            <FormField
+              label="Regex pattern"
+              htmlFor="field-regex"
+              hint="Example: ^[A-Z]{2}-[0-9]+$"
+            >
+              <input
+                id="field-regex"
+                type="text"
+                className="form-input font-mono text-sm"
+                value={form.regex}
+                onChange={(e) => setForm({ ...form, regex: e.target.value })}
+              />
+            </FormField>
+          </div>
+        </div>
+
+        <FormActions>
+          <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
+            {saving ? 'Adding…' : 'Add field'}
+          </button>
+        </FormActions>
       </form>
 
-      <table className="w-full text-sm border rounded bg-white">
-        <thead>
-          <tr className="border-b bg-slate-50 text-left">
-            <th className="p-2">Key</th>
-            <th className="p-2">Label</th>
-            <th className="p-2">Type</th>
-            <th className="p-2">Validation</th>
-            <th className="p-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {fields.map((f) => (
-            <tr key={f.id} className="border-b">
-              <td className="p-2 font-mono text-xs">{f.fieldKey}</td>
-              <td className="p-2">{f.label}</td>
-              <td className="p-2">{f.fieldType}</td>
-              <td className="p-2 text-xs text-slate-600">
-                {f.validationRules && Object.keys(f.validationRules).length > 0
-                  ? JSON.stringify(f.validationRules)
-                  : '—'}
-              </td>
-              <td className="p-2 text-right">
-                {!f.isSystem && (
-                  <button
-                    type="button"
-                    className="text-red-600"
-                    onClick={() => removeField(f.id)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+      <div className="admin-section">
+        <h2 className="admin-section-title">Existing fields ({fields.length})</h2>
+        <FormField label="Search fields" htmlFor="field-search">
+          <input
+            id="field-search"
+            type="search"
+            className="form-input max-w-md"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </FormField>
+
+        <div className="overflow-x-auto rounded-lg border border-slate-200 mt-4">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Field key</th>
+                <th>Label</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Validation</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center text-slate-500 py-8">
+                    {fields.length === 0
+                      ? 'No fields yet. Add one using the form above.'
+                      : 'No fields match your search.'}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((f) => (
+                <tr key={f.id}>
+                  <td>
+                    <code className="text-xs bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded">
+                      {f.fieldKey}
+                    </code>
+                    {f.isSystem && (
+                      <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                        System
+                      </span>
+                    )}
+                  </td>
+                  <td className="font-medium text-slate-900">{f.label}</td>
+                  <td>
+                    <span className="text-xs font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                      {FIELD_TYPES.find((t) => t.value === f.fieldType)?.label ?? f.fieldType}
+                    </span>
+                  </td>
+                  <td>{f.isRequiredGlobal ? 'Yes' : 'No'}</td>
+                  <td className="text-xs text-slate-600 max-w-[12rem] truncate" title={formatValidation(f.validationRules)}>
+                    {formatValidation(f.validationRules)}
+                  </td>
+                  <td>
+                    {!f.isSystem ? (
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        onClick={() => removeField(f.id, f.label)}
+                      >
+                        Delete
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-400">Built-in</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </IdentityPageLayout>
   );
 }

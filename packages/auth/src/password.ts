@@ -44,3 +44,15 @@ export function shouldLockout(
 export function lockoutDurationMs(): number {
   return 15 * 60 * 1000;
 }
+
+export function isPasswordExpired(
+  passwordChangedAt: Date | null | undefined,
+  accountCreatedAt: Date,
+  maxAgeDays: number,
+  now = new Date(),
+): boolean {
+  if (maxAgeDays <= 0) return false;
+  const reference = passwordChangedAt ?? accountCreatedAt;
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+  return now.getTime() - reference.getTime() > maxAgeMs;
+}

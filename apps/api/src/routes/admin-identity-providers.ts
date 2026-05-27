@@ -76,6 +76,27 @@ export async function adminIdentityProviderRoutes(app: FastifyInstance) {
     return reply.send({ ok: true });
   });
 
+  app.post('/admin/identity-providers/:id/sync', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [provider] = await db
+      .select()
+      .from(identityProviders)
+      .where(and(eq(identityProviders.id, id), eq(identityProviders.tenantId, request.user!.tenantId)))
+      .limit(1);
+    if (!provider) return reply.status(404).send({ error: 'Not found' });
+    if (provider.type !== 'LDAP' && provider.type !== 'AD') {
+      return reply.status(400).send({ error: 'Sync is only for LDAP/AD providers' });
+    }
+
+    try {
+      const sync = new LdapSyncService(db);
+      const result = await sync.syncProvider(id);
+      return reply.send({ ok: true, result });
+    } catch (e) {
+      return reply.status(400).send({ error: String(e) });
+    }
+  });
+
   app.post('/admin/identity-providers/:id/test', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const [provider] = await db

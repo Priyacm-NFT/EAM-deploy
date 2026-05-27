@@ -6,6 +6,7 @@ import {
   userRequiresMfa,
   getSessionById,
   validateStoredSession,
+  touchSession,
 } from '@eam/auth';
 import { parseSessionPolicy } from '@eam/shared';
 import { db, users, tenants } from '@eam/db';
@@ -39,6 +40,7 @@ export async function authenticate(request: FastifyRequest): Promise<void> {
       if (!session || !validateStoredSession(session, policy)) {
         throw { statusCode: 401, message: 'Session revoked or expired' };
       }
+      await touchSession(db, payload.sid);
     }
 
     const requiresMfa = await userRequiresMfa(db, user.id);

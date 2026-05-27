@@ -39,8 +39,8 @@ export function DashboardPage() {
 
   if (loading) {
     return (
-      <div>
-        <h1 className="text-xl font-semibold mb-4">Dashboard</h1>
+      <div className="content-card max-w-5xl mx-auto">
+        <h1 className="page-title !text-primary">Dashboard</h1>
         <p className="text-slate-500">Loading…</p>
       </div>
     );
@@ -48,8 +48,8 @@ export function DashboardPage() {
 
   if (error) {
     return (
-      <div>
-        <h1 className="text-xl font-semibold mb-4">Dashboard</h1>
+      <div className="content-card max-w-5xl mx-auto">
+        <h1 className="page-title !text-primary">Dashboard</h1>
         <p className="text-red-600">{error}</p>
       </div>
     );
@@ -59,22 +59,26 @@ export function DashboardPage() {
   const lists = data?.widgets.filter((w) => w.type === 'list') ?? [];
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold mb-4">Dashboard</h1>
+    <div className="content-card max-w-5xl mx-auto">
+      <h1 className="text-xl font-semibold text-primary mb-4">Dashboard</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {kpis.map((w) =>
           w.type === 'kpi' ? (
-            <div key={w.id} className="rounded-lg border bg-white p-4" data-testid={`widget-${w.id}`}>
+            <div
+              key={w.id}
+              className="rounded-lg border border-accent/20 bg-gradient-to-br from-white to-orange-50/40 p-4"
+              data-testid={`widget-${w.id}`}
+            >
               <p className="text-sm text-slate-500">{w.title}</p>
-              <p className="text-3xl font-bold">{w.value}</p>
+              <p className="text-3xl font-bold text-primary">{w.value}</p>
             </div>
           ) : null,
         )}
       </div>
       {lists.map((w) =>
         w.type === 'list' ? (
-          <div key={w.id} className="mt-6 rounded-lg border bg-white p-4" data-testid={`widget-${w.id}`}>
-            <p className="text-sm font-medium text-slate-700 mb-2">{w.title}</p>
+          <div key={w.id} className="mt-6 rounded-lg border border-slate-200 bg-white p-4" data-testid={`widget-${w.id}`}>
+            <p className="text-sm font-medium text-primary mb-2">{w.title}</p>
             {w.rows.length === 0 ? (
               <p className="text-sm text-slate-500">No records</p>
             ) : (

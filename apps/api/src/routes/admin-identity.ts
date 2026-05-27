@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, and } from 'drizzle-orm';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   hashPassword,
   validatePasswordPolicy,
@@ -14,7 +15,6 @@ import {
   groups,
   roles,
   userGroups,
-  userRoles,
   groupRoles,
   rolePermissions,
   permissions,
@@ -23,6 +23,10 @@ import {
   audit,
 } from '@eam/db';
 import { requirePermission } from '../plugins/auth.js';
+import { sendEmail } from '../lib/email.js';
+import { storePasswordResetToken } from '../lib/auth-state.js';
+
+const PASSWORD_RESET_TTL = 60 * 60;
 
 export async function adminIdentityRoutes(app: FastifyInstance) {
   const guard = { preHandler: requirePermission('admin:users:manage') };
@@ -37,7 +41,6 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
         isActive: users.isActive,
         authSource: users.authSource,
         lastLoginAt: users.lastLoginAt,
-        phone: users.phone,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -107,7 +110,6 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
       displayName?: string;
       email?: string;
       isActive?: boolean;
-      phone?: string;
     };
     const [existing] = await db
       .select()
@@ -122,7 +124,6 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
         displayName: body.displayName ?? existing.displayName,
         email: body.email ?? existing.email,
         isActive: body.isActive ?? existing.isActive,
-        phone: body.phone ?? existing.phone,
       })
       .where(eq(users.id, id))
       .returning();
@@ -159,6 +160,51 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
     return reply.send({ ok: true });
   });
 
+  app.post('/admin/users/:id/force-password-reset', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId)))
+      .limit(1);
+    if (!user) return reply.status(404).send({ error: 'Not found' });
+
+    const rawToken = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    await storePasswordResetToken(tokenHash, user.id, PASSWORD_RESET_TTL);
+    await revokeAllSessions(db, user.id);
+
+    const baseUrl = process.env.WEB_URL ?? 'http://localhost:5173';
+    const resetUrl = `${baseUrl}/reset-password?token=${rawToken}`;
+    await sendEmail(user.email, 'Password reset required', `Reset your password: ${resetUrl}`);
+
+    await audit(db, {
+      tenantId: request.user!.tenantId,
+      userId: request.user!.id,
+      action: 'ADMIN_PASSWORD_RESET',
+      resource: 'users',
+      resourceId: id,
+    });
+
+    return reply.send({ ok: true, resetUrl: process.env.NODE_ENV === 'development' ? resetUrl : undefined });
+  });
+
+  app.post('/admin/users/:id/groups', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { groupId: string };
+    await db.insert(userGroups).values({ userId: id, groupId: body.groupId }).onConflictDoNothing();
+    await revokeAllSessions(db, id);
+    await audit(db, {
+      tenantId: request.user!.tenantId,
+      userId: request.user!.id,
+      action: 'USER_GROUP_ADDED',
+      resource: 'users',
+      resourceId: id,
+      metadata: { groupId: body.groupId },
+    });
+    return reply.status(201).send({ ok: true });
+  });
+
   app.get('/admin/users/:id/sessions', guard, async (request) => {
     const { id } = request.params as { id: string };
     const list = await db.select().from(sessions).where(eq(sessions.userId, id));
@@ -182,7 +228,19 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
   app.post('/admin/users/:id/roles', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { roleId: string };
-    await db.insert(userRoles).values({ userId: id, roleId: body.roleId }).onConflictDoNothing();
+    const groupsWithRole = await db
+      .select({ groupId: groupRoles.groupId })
+      .from(groupRoles)
+      .innerJoin(groups, eq(groupRoles.groupId, groups.id))
+      .where(and(eq(groupRoles.roleId, body.roleId), eq(groups.tenantId, request.user!.tenantId)));
+
+    if (groupsWithRole.length === 0) {
+      return reply.status(400).send({ error: 'No group mapped to this role; assign via group membership' });
+    }
+
+    for (const { groupId } of groupsWithRole) {
+      await db.insert(userGroups).values({ userId: id, groupId }).onConflictDoNothing();
+    }
     await revokeAllSessions(db, id);
     await audit(db, {
       tenantId: request.user!.tenantId,
@@ -197,7 +255,15 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
 
   app.delete('/admin/users/:id/roles/:roleId', guard, async (request, reply) => {
     const { id, roleId } = request.params as { id: string; roleId: string };
-    await db.delete(userRoles).where(and(eq(userRoles.userId, id), eq(userRoles.roleId, roleId)));
+    const groupsWithRole = await db
+      .select({ groupId: groupRoles.groupId })
+      .from(groupRoles)
+      .innerJoin(groups, eq(groupRoles.groupId, groups.id))
+      .where(and(eq(groupRoles.roleId, roleId), eq(groups.tenantId, request.user!.tenantId)));
+
+    for (const { groupId } of groupsWithRole) {
+      await db.delete(userGroups).where(and(eq(userGroups.groupId, groupId), eq(userGroups.userId, id)));
+    }
     await revokeAllSessions(db, id);
     await audit(db, {
       tenantId: request.user!.tenantId,
@@ -258,7 +324,19 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
       .where(and(eq(groups.id, id), eq(groups.tenantId, request.user!.tenantId)))
       .limit(1);
     if (!group) return reply.status(404).send({ error: 'Not found' });
-    return group;
+
+    const members = await db
+      .select({ id: users.id, email: users.email, displayName: users.displayName })
+      .from(userGroups)
+      .innerJoin(users, eq(userGroups.userId, users.id))
+      .where(eq(userGroups.groupId, id));
+
+    const roleRows = await db
+      .select({ roleId: groupRoles.roleId })
+      .from(groupRoles)
+      .where(eq(groupRoles.groupId, id));
+
+    return { ...group, members, roleIds: roleRows.map((r) => r.roleId) };
   });
 
   app.post('/admin/groups', guard, async (request, reply) => {
@@ -300,6 +378,13 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
 
   app.delete('/admin/groups/:id', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const members = await db
+      .select({ userId: userGroups.userId })
+      .from(userGroups)
+      .where(eq(userGroups.groupId, id));
+    for (const m of members) {
+      await revokeAllSessions(db, m.userId);
+    }
     await db.delete(groups).where(and(eq(groups.id, id), eq(groups.tenantId, request.user!.tenantId)));
     return reply.send({ ok: true });
   });
@@ -351,17 +436,47 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
   app.put('/admin/roles/:id', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { name?: string; description?: string; requireMfa?: boolean };
+    const [existing] = await db
+      .select()
+      .from(roles)
+      .where(and(eq(roles.id, id), eq(roles.tenantId, request.user!.tenantId)))
+      .limit(1);
+    if (!existing) return reply.status(404).send({ error: 'Not found' });
+
     const [role] = await db
       .update(roles)
-      .set(body)
+      .set({
+        name: body.name,
+        description: body.description,
+        requireMfa: body.requireMfa,
+      })
       .where(and(eq(roles.id, id), eq(roles.tenantId, request.user!.tenantId)))
       .returning();
-    if (!role) return reply.status(404).send({ error: 'Not found' });
+
+    if (body.requireMfa !== undefined && body.requireMfa !== existing.requireMfa) {
+      const groupUsers = await db
+        .select({ userId: userGroups.userId })
+        .from(groupRoles)
+        .innerJoin(userGroups, eq(groupRoles.groupId, userGroups.groupId))
+        .where(eq(groupRoles.roleId, id));
+      for (const { userId } of groupUsers) {
+        await revokeAllSessions(db, userId);
+      }
+    }
+
     return role;
   });
 
   app.delete('/admin/roles/:id', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const groupUsers = await db
+      .select({ userId: userGroups.userId })
+      .from(groupRoles)
+      .innerJoin(userGroups, eq(groupRoles.groupId, userGroups.groupId))
+      .where(eq(groupRoles.roleId, id));
+    for (const { userId } of groupUsers) {
+      await revokeAllSessions(db, userId);
+    }
     await db.delete(roles).where(and(eq(roles.id, id), eq(roles.tenantId, request.user!.tenantId)));
     return reply.send({ ok: true });
   });
@@ -385,13 +500,12 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
         .values(body.permissionIds.map((permissionId) => ({ roleId: id, permissionId })));
     }
 
-    const directUsers = await db.select({ userId: userRoles.userId }).from(userRoles).where(eq(userRoles.roleId, id));
     const groupUsers = await db
       .select({ userId: userGroups.userId })
       .from(groupRoles)
       .innerJoin(userGroups, eq(groupRoles.groupId, userGroups.groupId))
       .where(eq(groupRoles.roleId, id));
-    const userIds = new Set([...directUsers.map((u) => u.userId), ...groupUsers.map((u) => u.userId)]);
+    const userIds = new Set(groupUsers.map((u) => u.userId));
     for (const userId of userIds) {
       await revokeAllSessions(db, userId);
     }

@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../../api/client.js';
+import {
+  FormField,
+  IdentityPageLayout,
+  MessageBanner,
+} from '../../../components/identity/IdentityLayout.js';
 import type { ReportDefinitionRow, ReportSubject } from './report-types.js';
 
 export function ReportLibraryPage() {
@@ -9,15 +14,20 @@ export function ReportLibraryPage() {
   const [filter, setFilter] = useState('');
   const [running, setRunning] = useState<string | null>(null);
   const [lastDownload, setLastDownload] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     (async () => {
-      const [r, s] = await Promise.all([
-        api<ReportDefinitionRow[]>('/reports/definitions'),
-        api<ReportSubject[]>('/reports/subjects'),
-      ]);
-      setReports(r);
-      setSubjects(s);
+      try {
+        const [r, s] = await Promise.all([
+          api<ReportDefinitionRow[]>('/reports/definitions'),
+          api<ReportSubject[]>('/reports/subjects'),
+        ]);
+        setReports(r);
+        setSubjects(s);
+      } catch (e) {
+        setError(String(e));
+      }
     })();
   }, []);
 
@@ -44,56 +54,87 @@ export function ReportLibraryPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Report library</h1>
-        <Link to="/admin/reporting/designer" className="text-sm text-blue-600">
-          Open designer
-        </Link>
+    <IdentityPageLayout
+      title="Reports"
+      subtitle="Build, schedule, and run reports — all definitions are created by you"
+    >
+      {error && <MessageBanner type="error" text={error} />}
+
+      <div className="admin-section">
+        <h2 className="admin-section-title">Report tools</h2>
+        <div className="flex flex-wrap gap-3 text-sm">
+          <Link to="/admin/reporting/designer" className="btn-primary !w-auto px-4">
+            Create report (designer)
+          </Link>
+          <Link to="/admin/reporting/schedules" className="btn-outline">
+            Scheduled reports
+          </Link>
+          <Link to="/admin/reporting/bi" className="btn-outline">
+            BI connections
+          </Link>
+        </div>
       </div>
-      <input
-        className="border rounded px-3 py-2 w-full max-w-md"
-        placeholder="Filter by name or subject…"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-      />
-      <table className="w-full text-sm border bg-white rounded-lg overflow-hidden">
-        <thead className="bg-slate-100 text-left">
-          <tr>
-            <th className="px-3 py-2">Name</th>
-            <th className="px-3 py-2">Subject</th>
-            <th className="px-3 py-2">Chart</th>
-            <th className="px-3 py-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((r) => (
-            <tr key={r.id} className="border-t">
-              <td className="px-3 py-2">{r.name}</td>
-              <td className="px-3 py-2">{subjectLabel(r.subjectId)}</td>
-              <td className="px-3 py-2">{r.definition.chartType ?? 'table'}</td>
-              <td className="px-3 py-2">
-                <button
-                  type="button"
-                  className="text-blue-600 hover:underline disabled:opacity-50"
-                  disabled={running === r.id}
-                  onClick={() => runPdf(r.id)}
-                >
-                  {running === r.id ? 'Running…' : 'Run PDF'}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {lastDownload && (
-        <p className="text-sm">
-          Download:{' '}
-          <a href={lastDownload} className="text-blue-600 underline" target="_blank" rel="noreferrer">
-            latest report output
-          </a>
-        </p>
-      )}
-    </div>
+
+      <div className="admin-section">
+        <h2 className="admin-section-title">Saved reports</h2>
+        <FormField label="Search reports" htmlFor="report-search">
+          <input
+            id="report-search"
+            type="search"
+            className="form-input max-w-md"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </FormField>
+
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Report name</th>
+                <th>Data subject</th>
+                <th>Chart type</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="text-center text-slate-500 py-8">
+                    No reports yet. Open the designer and type a report name to create one.
+                  </td>
+                </tr>
+              )}
+              {filtered.map((r) => (
+                <tr key={r.id}>
+                  <td className="font-medium">{r.name}</td>
+                  <td>{subjectLabel(r.subjectId)}</td>
+                  <td>{r.definition.chartType ?? 'table'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn-link disabled:opacity-50"
+                      disabled={running === r.id}
+                      onClick={() => runPdf(r.id)}
+                    >
+                      {running === r.id ? 'Running…' : 'Run PDF'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {lastDownload && (
+          <p className="text-sm text-slate-700 mt-3">
+            Download:{' '}
+            <a href={lastDownload} className="btn-link" target="_blank" rel="noreferrer">
+              latest report output
+            </a>
+          </p>
+        )}
+      </div>
+    </IdentityPageLayout>
   );
 }

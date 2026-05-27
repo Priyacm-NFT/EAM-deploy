@@ -1,23 +1,70 @@
 import ldap from 'ldapjs';
 import { eq, and } from 'drizzle-orm';
 import type { Database } from '@eam/db';
-import { identityProviders, users, groups, userGroups } from '@eam/db';
-import { decryptIdpConfig } from './sso.js';
+import { identityProviders, users, groups, userGroups, audit } from '@eam/db';
+import { decryptIdpConfig, encryptIdpConfig } from './sso.js';
 
+/** LDAP/AD provider config stored in identity_providers.config (jsonb, encrypted at rest). */
 export interface LdapConfig {
   url: string;
   bindDn: string;
   bindPassword: string;
+  /** Base DN for user search */
   baseDn: string;
+  /** Base DN for group search (defaults to baseDn) */
+  groupBaseDn?: string;
   userFilter?: string;
   groupFilter?: string;
   tls?: boolean;
+  /** Maps EAM field → LDAP attribute name */
+  attrMap?: {
+    displayName?: string;
+    email?: string;
+    department?: string;
+    manager?: string;
+  };
+  /** ISO timestamp of last successful sync (managed by sync) */
+  lastSyncAt?: string;
+  cronExpression?: string;
+}
+
+export interface LdapSyncResult {
+  added: number;
+  updated: number;
+  deactivated: number;
+  groups: number;
+  memberships: number;
+  errors: string[];
+  durationMs: number;
+}
+
+function ldapValues(value: unknown): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value.map(String);
+  return [String(value)];
+}
+
+function readAttr(entry: Record<string, unknown>, attr: string): string {
+  const v = entry[attr];
+  if (Array.isArray(v)) return String(v[0] ?? '');
+  return v != null ? String(v) : '';
 }
 
 export class LdapSyncService {
   constructor(private readonly db: Database) {}
 
-  async syncProvider(providerId: string): Promise<{ users: number; groups: number }> {
+  async syncProvider(providerId: string): Promise<LdapSyncResult> {
+    const started = Date.now();
+    const result: LdapSyncResult = {
+      added: 0,
+      updated: 0,
+      deactivated: 0,
+      groups: 0,
+      memberships: 0,
+      errors: [],
+      durationMs: 0,
+    };
+
     const [provider] = await this.db
       .select()
       .from(identityProviders)
@@ -32,6 +79,13 @@ export class LdapSyncService {
     }
 
     const config = decryptIdpConfig(provider.config) as unknown as LdapConfig;
+    const attrMap = {
+      displayName: config.attrMap?.displayName ?? 'cn',
+      email: config.attrMap?.email ?? 'mail',
+      department: config.attrMap?.department ?? 'department',
+      manager: config.attrMap?.manager ?? 'manager',
+    };
+
     const client = ldap.createClient({ url: config.url, tlsOptions: config.tls ? {} : undefined });
 
     await new Promise<void>((resolve, reject) => {
@@ -40,80 +94,159 @@ export class LdapSyncService {
       );
     });
 
-    let userCount = 0;
-    let groupCount = 0;
+    const syncedExternalIds = new Set<string>();
+    const authSource = provider.type === 'AD' ? 'AD' : 'LDAP';
 
     try {
-      const userFilter = config.userFilter ?? '(objectClass=person)';
-      const entries = await this.search(client, config.baseDn, userFilter);
-
-      for (const entry of entries) {
-        const email = String(entry.mail ?? entry.userPrincipalName ?? '');
-        if (!email) continue;
-
-        const externalId = String(entry.dn ?? email);
-        const displayName = String(entry.cn ?? entry.displayName ?? email);
-
-        const [existing] = await this.db
-          .select()
-          .from(users)
-          .where(
-            and(eq(users.tenantId, provider.tenantId), eq(users.externalId, externalId)),
-          )
-          .limit(1);
-
-        if (existing) {
-          await this.db
-            .update(users)
-            .set({ email, displayName, authSource: provider.type === 'AD' ? 'AD' : 'LDAP', isActive: true })
-            .where(eq(users.id, existing.id));
-        } else {
-          await this.db.insert(users).values({
-            tenantId: provider.tenantId,
-            email,
-            username: email.split('@')[0] ?? email,
-            displayName,
-            authSource: provider.type === 'AD' ? 'AD' : 'LDAP',
-            externalId,
-            passwordHash: null,
-          });
-        }
-        userCount++;
+      let userFilter = config.userFilter ?? '(objectClass=person)';
+      if (config.lastSyncAt) {
+        const ts = config.lastSyncAt.replace(/[-:TZ.]/g, '').slice(0, 14);
+        userFilter = `(&${userFilter}(modifyTimestamp>=${ts}.0Z))`;
       }
 
+      const userEntries = await this.search(client, config.baseDn, userFilter);
+
+      for (const entry of userEntries) {
+        try {
+          const email =
+            readAttr(entry, attrMap.email) ||
+            readAttr(entry, 'userPrincipalName') ||
+            readAttr(entry, 'mail');
+          if (!email) continue;
+
+          const externalId = readAttr(entry, 'dn') || String(entry.dn ?? email);
+          const displayName =
+            readAttr(entry, attrMap.displayName) || readAttr(entry, 'cn') || email;
+
+          syncedExternalIds.add(externalId);
+
+          const [existing] = await this.db
+            .select()
+            .from(users)
+            .where(and(eq(users.tenantId, provider.tenantId), eq(users.externalId, externalId)))
+            .limit(1);
+
+          if (existing) {
+            await this.db
+              .update(users)
+              .set({
+                email,
+                displayName,
+                department: readAttr(entry, attrMap.department) || existing.department,
+                authSource,
+                isActive: true,
+              })
+              .where(eq(users.id, existing.id));
+            result.updated++;
+          } else {
+            await this.db.insert(users).values({
+              tenantId: provider.tenantId,
+              email,
+              username: email.split('@')[0] ?? email,
+              displayName,
+              department: readAttr(entry, attrMap.department) || null,
+              authSource,
+              externalId,
+              passwordHash: null,
+            });
+            result.added++;
+          }
+        } catch (e) {
+          result.errors.push(e instanceof Error ? e.message : String(e));
+        }
+      }
+
+      const groupBase = config.groupBaseDn ?? config.baseDn;
       const groupFilter = config.groupFilter ?? '(objectClass=group)';
-      const groupEntries = await this.search(client, config.baseDn, groupFilter);
+      const groupEntries = await this.search(client, groupBase, groupFilter);
+
       for (const g of groupEntries) {
-        const name = String(g.cn ?? '');
-        if (!name) continue;
-        const externalDn = String(g.dn ?? name);
+        try {
+          const name = readAttr(g, 'cn');
+          if (!name) continue;
+          const externalDn = readAttr(g, 'dn') || String(g.dn ?? name);
 
-        const [existingGroup] = await this.db
-          .select()
-          .from(groups)
-          .where(and(eq(groups.tenantId, provider.tenantId), eq(groups.externalDn, externalDn)))
-          .limit(1);
+          let [groupRow] = await this.db
+            .select()
+            .from(groups)
+            .where(and(eq(groups.tenantId, provider.tenantId), eq(groups.externalDn, externalDn)))
+            .limit(1);
 
-        if (!existingGroup) {
-          await this.db.insert(groups).values({
-            tenantId: provider.tenantId,
-            name,
-            source: provider.type === 'AD' ? 'AD' : 'LDAP',
-            externalDn,
-          });
+          if (!groupRow) {
+            [groupRow] = await this.db
+              .insert(groups)
+              .values({
+                tenantId: provider.tenantId,
+                name,
+                source: authSource === 'AD' ? 'AD' : 'LDAP',
+                externalDn,
+              })
+              .returning();
+          }
+          result.groups++;
+
+          const memberDns = [
+            ...ldapValues(g.member),
+            ...ldapValues(g.uniqueMember),
+          ];
+
+          for (const memberDn of memberDns) {
+            const [memberUser] = await this.db
+              .select({ id: users.id })
+              .from(users)
+              .where(
+                and(eq(users.tenantId, provider.tenantId), eq(users.externalId, memberDn)),
+              )
+              .limit(1);
+            if (!memberUser) continue;
+
+            await this.db
+              .insert(userGroups)
+              .values({ userId: memberUser.id, groupId: groupRow!.id })
+              .onConflictDoNothing();
+            result.memberships++;
+          }
+        } catch (e) {
+          result.errors.push(e instanceof Error ? e.message : String(e));
         }
-        groupCount++;
       }
 
+      const ldapUsers = await this.db
+        .select({ id: users.id, externalId: users.externalId, authSource: users.authSource })
+        .from(users)
+        .where(and(eq(users.tenantId, provider.tenantId), eq(users.isActive, true)));
+
+      for (const u of ldapUsers) {
+        if (!u.externalId || (u.authSource !== 'AD' && u.authSource !== 'LDAP')) continue;
+        if (!syncedExternalIds.has(u.externalId)) {
+          await this.db.update(users).set({ isActive: false }).where(eq(users.id, u.id));
+          result.deactivated++;
+        }
+      }
+
+      const nextConfig: LdapConfig = {
+        ...config,
+        lastSyncAt: new Date().toISOString(),
+      };
       await this.db
         .update(identityProviders)
-        .set({ lastSyncAt: new Date() })
+        .set({ config: { _encrypted: encryptIdpConfig(nextConfig as unknown as Record<string, unknown>) } })
         .where(eq(identityProviders.id, providerId));
     } finally {
       client.unbind(() => undefined);
     }
 
-    return { users: userCount, groups: groupCount };
+    result.durationMs = Date.now() - started;
+
+    await audit(this.db, {
+      tenantId: provider.tenantId,
+      action: 'LDAP_SYNC',
+      resource: 'identity_providers',
+      resourceId: providerId,
+      metadata: result as unknown as Record<string, unknown>,
+    });
+
+    return result;
   }
 
   private search(

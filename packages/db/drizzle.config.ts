@@ -1,7 +1,8 @@
 import { defineConfig } from 'drizzle-kit';
 
 export default defineConfig({
-  schema: './src/schema/index.ts',
+  // Compiled output: drizzle-kit cannot resolve NodeNext `.js` imports against `.ts` sources.
+  schema: './dist/schema/index.js',
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
