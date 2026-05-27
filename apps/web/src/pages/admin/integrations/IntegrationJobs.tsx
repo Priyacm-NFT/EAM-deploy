@@ -24,7 +24,7 @@ interface Job {
 const JOB_STATUS_STYLE: Record<string, string> = {
   success: 'bg-green-100 text-green-800',
   failed: 'bg-red-100 text-red-800',
-  running: 'bg-blue-100 text-blue-800',
+  running: 'bg-accent/15 text-accent-dark',
 };
 
 const EMPTY_FORM = {
@@ -133,7 +133,7 @@ export function IntegrationJobsPage() {
         <h2 className="admin-section-title">Scheduled & triggered jobs</h2>
 
         <div className="flex justify-end">
-          <button type="button" className="btn-outline" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
             {showCreate && !editId ? 'Cancel' : '+ New job'}
           </button>
         </div>
@@ -167,7 +167,7 @@ export function IntegrationJobsPage() {
               <textarea id="job-mapping" className="form-input font-mono text-xs" rows={4} value={form.mappingConfig} onChange={(e) => setForm({ ...form, mappingConfig: e.target.value })} />
             </FormField>
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
               <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
             </div>
           </form>

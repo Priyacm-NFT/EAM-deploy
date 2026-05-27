@@ -14,7 +14,9 @@ import { notificationTemplates, notificationTriggers } from './schema/notificati
 const DEFAULT_PERMISSIONS = [
   { resource: 'admin', action: 'users:manage', description: 'Manage users and identity' },
   { resource: 'admin', action: 'config:manage', description: 'Manage application configuration' },
+  { resource: 'admin', action: 'workflows:manage', description: 'Manage workflows and schema migrations' },
   { resource: 'admin', action: 'integrations:manage', description: 'Manage integrations' },
+  { resource: 'admin', action: 'attachments:manage', description: 'Manage attachments and document types' },
   { resource: 'admin', action: 'reporting:manage', description: 'Manage reports' },
   { resource: 'admin', action: 'notifications:manage', description: 'Manage notifications' },
 ];
@@ -23,6 +25,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
   const existing = await db.select().from(tenants).where(eq(tenants.slug, 'default')).limit(1);
   if (existing.length > 0) {
     await removeLegacyDemoRoles(db);
+    await ensureMissingPermissions(db, existing[0]!.id);
     const admin = await db.select().from(users).where(eq(users.email, 'admin@eam.local')).limit(1);
     return { tenantId: existing[0]!.id, adminUserId: admin[0]?.id ?? '' };
   }
@@ -143,6 +146,18 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
   ]);
 
   return { tenantId: tenant!.id, adminUserId: '' };
+}
+
+/** Adds any permissions missing from an existing DB (safe to run on every startup). */
+async function ensureMissingPermissions(db: Database, _tenantId: string): Promise<void> {
+  const existing = await db.select().from(permissions);
+  const existingKeys = new Set(existing.map((p) => `${p.resource}:${p.action}`));
+  const missing = DEFAULT_PERMISSIONS.filter(
+    (p) => !existingKeys.has(`${p.resource}:${p.action}`),
+  );
+  if (missing.length > 0) {
+    await db.insert(permissions).values(missing);
+  }
 }
 
 /** Removes legacy demo roles so admins create roles through the UI (P0-1 AC-1.2). */

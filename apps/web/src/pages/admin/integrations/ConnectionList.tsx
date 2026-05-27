@@ -142,7 +142,7 @@ export function ConnectionListPage() {
           </select>
           <button
             type="button"
-            className="btn-outline"
+            className="btn-primary !w-auto px-4"
             onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}
           >
             {showCreate && !editId ? 'Cancel' : '+ New connection'}
@@ -173,7 +173,7 @@ export function ConnectionListPage() {
               />
             </FormField>
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
               <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); setForm(EMPTY_FORM); }}>Cancel</button>
             </div>
           </form>

@@ -136,7 +136,7 @@ export function DeliveryLogPage() {
           <h2 className="admin-section-title mb-0">Delivery records</h2>
           <div className="flex gap-2">
             <button type="button" className="btn-outline text-xs" onClick={load}>Refresh</button>
-            <button type="button" className="btn-outline text-xs" onClick={exportCsv}>Export CSV</button>
+            <button type="button" className="btn-primary !w-auto px-3 text-xs" onClick={exportCsv}>Export CSV</button>
           </div>
         </div>
 

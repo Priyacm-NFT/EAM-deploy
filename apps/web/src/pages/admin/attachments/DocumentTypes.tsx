@@ -122,7 +122,7 @@ export function DocumentTypesPage() {
         <h2 className="admin-section-title">Document types</h2>
 
         <div className="flex justify-end">
-          <button type="button" className="btn-outline" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
             {showCreate && !editId ? 'Cancel' : '+ New document type'}
           </button>
         </div>
@@ -168,7 +168,7 @@ export function DocumentTypesPage() {
               Enable virus scanning for this type
             </label>
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
               <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
             </div>
           </form>
@@ -217,7 +217,7 @@ export function DocumentTypesPage() {
                     )}
                   </td>
                   <td>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${dt.visibility === 'public' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'}`}>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${dt.visibility === 'public' ? 'bg-accent/15 text-accent-dark' : 'bg-slate-100 text-slate-700'}`}>
                       {dt.visibility}
                     </span>
                   </td>

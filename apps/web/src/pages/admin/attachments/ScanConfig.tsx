@@ -142,7 +142,7 @@ export function ScanConfigPage() {
         )}
         <div className="flex gap-3">
           <button type="button" className="btn-outline" onClick={load}>Refresh status</button>
-          <button type="button" className="btn-outline" disabled={scanning} onClick={runTestScan}>
+          <button type="button" className="btn-primary !w-auto px-4" disabled={scanning} onClick={runTestScan}>
             {scanning ? 'Running EICAR test…' : 'Run EICAR test scan'}
           </button>
         </div>
@@ -195,7 +195,7 @@ export function ScanConfigPage() {
             <input id="quar-email" className="form-input max-w-sm" type="email" value={settingsForm.quarantineAdminEmail} onChange={(e) => setSettingsForm({ ...settingsForm, quarantineAdminEmail: e.target.value })} placeholder="security@company.com" />
           </FormField>
 
-          <button type="submit" className="btn-outline" disabled={savingSettings}>{savingSettings ? 'Saving…' : 'Save settings'}</button>
+          <button type="submit" className="btn-primary !w-auto px-6" disabled={savingSettings}>{savingSettings ? 'Saving…' : 'Save settings'}</button>
         </form>
       </div>
 

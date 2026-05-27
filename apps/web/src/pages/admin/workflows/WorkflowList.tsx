@@ -119,7 +119,7 @@ export function WorkflowListPage() {
           </select>
           <button
             type="button"
-            className="btn-outline"
+            className="btn-primary !w-auto px-4"
             onClick={() => setShowCreate((v) => !v)}
           >
             {showCreate ? 'Cancel' : '+ New workflow'}
@@ -164,7 +164,7 @@ export function WorkflowListPage() {
               </FormField>
             </div>
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={creating}>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={creating}>
                 {creating ? 'Creating…' : 'Create workflow'}
               </button>
             </div>
@@ -200,7 +200,7 @@ export function WorkflowListPage() {
                   </td>
                   <td className="text-sm text-slate-600">{w.triggerCondition || '—'}</td>
                   <td>
-                    <span className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                    <span className="text-xs font-mono bg-accent/10 text-accent-dark px-2 py-0.5 rounded-full">
                       v{w.currentVersion}
                     </span>
                   </td>

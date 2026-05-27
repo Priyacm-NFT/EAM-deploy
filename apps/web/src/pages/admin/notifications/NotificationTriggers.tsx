@@ -145,7 +145,7 @@ export function NotificationTriggersPage() {
         <h2 className="admin-section-title">Triggers</h2>
 
         <div className="flex justify-end">
-          <button type="button" className="btn-outline" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
             {showCreate && !editId ? 'Cancel' : '+ New trigger'}
           </button>
         </div>
@@ -194,7 +194,7 @@ export function NotificationTriggersPage() {
               </label>
             </div>
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
               <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
             </div>
           </form>
@@ -233,7 +233,7 @@ export function NotificationTriggersPage() {
                     <td className="text-sm">{t.templateName ?? <span className="text-slate-400">In-app only</span>}</td>
                     <td>
                       <div className="flex flex-wrap gap-1">
-                        {recipientParts.slice(0, 3).map((r) => <span key={r} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{r}</span>)}
+                        {recipientParts.slice(0, 3).map((r) => <span key={r} className="text-xs bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded">{r}</span>)}
                         {recipientParts.length > 3 && <span className="text-xs text-slate-400">+{recipientParts.length - 3}</span>}
                       </div>
                     </td>

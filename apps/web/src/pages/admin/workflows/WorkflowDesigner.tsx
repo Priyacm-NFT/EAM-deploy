@@ -243,7 +243,7 @@ export function WorkflowDesignerPage() {
           <button type="button" className="btn-outline" onClick={() => { setSimMode(false); simulate(); }}>
             Simulate
           </button>
-          <button type="button" className="btn-outline" disabled={saving} onClick={() => save(false)}>
+          <button type="button" className="btn-primary !w-auto px-4" disabled={saving} onClick={() => save(false)}>
             {saving ? 'Saving…' : 'Save draft'}
           </button>
           <button type="button" className="btn-primary !w-auto px-4" disabled={saving} onClick={() => save(true)}>

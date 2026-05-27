@@ -249,7 +249,7 @@ export function ReportDesignerPage() {
 
         <aside className="lg:col-span-3 admin-section space-y-3">
           <h2 className="admin-section-title">Saved reports</h2>
-          <button type="button" className="btn-outline w-full" onClick={newReport}>
+          <button type="button" className="btn-primary w-full" onClick={newReport}>
             New report
           </button>
           <ul className="text-sm space-y-1 max-h-48 overflow-auto border border-slate-200 rounded-lg divide-y">

@@ -92,11 +92,7 @@ export function LoginPage() {
           <p className="text-sm text-center text-gray-500 mt-1">Enterprise Asset Management</p>
         </div>
 
-        {import.meta.env.DEV && (
-          <p className="text-xs text-center text-gray-500 mb-4 bg-gray-50 border rounded px-3 py-2">
-            Dev admin: <strong>admin@eam.local</strong> / <strong>AdminPass1!</strong>
-          </p>
-        )}
+
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {registered && (

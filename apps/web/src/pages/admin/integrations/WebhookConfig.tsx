@@ -120,7 +120,7 @@ export function WebhookConfigPage() {
         <h2 className="admin-section-title">Webhooks</h2>
 
         <div className="flex justify-end">
-          <button type="button" className="btn-outline" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
             {showCreate && !editId ? 'Cancel' : '+ New webhook'}
           </button>
         </div>
@@ -161,7 +161,7 @@ export function WebhookConfigPage() {
               </div>
             </div>
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
               <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
             </div>
           </form>
@@ -192,7 +192,7 @@ export function WebhookConfigPage() {
                   <td>
                     <div className="flex flex-wrap gap-1">
                       {wh.events.map((ev) => (
-                        <span key={ev} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{ev}</span>
+                        <span key={ev} className="text-xs bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded">{ev}</span>
                       ))}
                     </div>
                   </td>

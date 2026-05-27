@@ -217,7 +217,7 @@ export function RetentionPoliciesPage() {
                   </td>
                   <td className="text-sm">{c.documentType}</td>
                   <td>
-                    <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{c.entityType}</span>
+                    <span className="text-xs bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded">{c.entityType}</span>
                   </td>
                   <td className="text-xs text-slate-500">{new Date(c.expiredAt).toLocaleDateString()}</td>
                   <td>

@@ -116,7 +116,7 @@ export function AttachmentLibraryPage() {
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: 'Total files', value: attachments.length.toLocaleString(), color: 'text-slate-700 bg-white border-slate-200' },
-          { label: 'Total storage', value: formatBytes(totalSize), color: 'text-blue-700 bg-blue-50 border-blue-200' },
+          { label: 'Total storage', value: formatBytes(totalSize), color: 'text-accent-dark bg-accent/10 border-accent/20' },
           { label: 'Infected / flagged', value: infectedCount, color: infectedCount > 0 ? 'text-red-700 bg-red-50 border-red-200' : 'text-slate-600 bg-slate-50 border-slate-200' },
         ].map((s) => (
           <div key={s.label} className={`content-card border ${s.color} text-center`}>
@@ -186,7 +186,7 @@ export function AttachmentLibraryPage() {
                   </td>
                   <td className="text-xs text-slate-500">{a.documentType}</td>
                   <td>
-                    <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{a.entityType}</span>
+                    <span className="text-xs bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded">{a.entityType}</span>
                     <span className="block text-xs text-slate-400 font-mono">{a.entityId.slice(0, 8)}…</span>
                   </td>
                   <td className="text-sm">{formatBytes(a.fileSizeBytes)}</td>

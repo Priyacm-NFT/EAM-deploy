@@ -21,7 +21,7 @@ interface RunLog {
 const STATUS_STYLE: Record<string, string> = {
   success: 'bg-green-100 text-green-800',
   failed: 'bg-red-100 text-red-800',
-  running: 'bg-blue-100 text-blue-800',
+  running: 'bg-accent/15 text-accent-dark',
 };
 
 export function IntegrationHistoryPage() {
@@ -83,7 +83,7 @@ export function IntegrationHistoryPage() {
         {[
           { label: 'Total runs', value: logs.length, color: 'text-slate-700 bg-white border-slate-200' },
           { label: 'Failed', value: failedCount, color: 'text-red-700 bg-red-50 border-red-200' },
-          { label: 'Running now', value: runningCount, color: 'text-blue-700 bg-blue-50 border-blue-200' },
+          { label: 'Running now', value: runningCount, color: 'text-accent-dark bg-blue-50 border-accent/20' },
         ].map((s) => (
           <div key={s.label} className={`content-card border ${s.color} text-center`}>
             <p className="text-3xl font-bold">{s.value}</p>

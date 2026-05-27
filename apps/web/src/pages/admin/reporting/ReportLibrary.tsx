@@ -66,10 +66,10 @@ export function ReportLibraryPage() {
           <Link to="/admin/reporting/designer" className="btn-primary !w-auto px-4">
             Create report (designer)
           </Link>
-          <Link to="/admin/reporting/schedules" className="btn-outline">
+          <Link to="/admin/reporting/schedules" className="btn-primary !w-auto px-4">
             Scheduled reports
           </Link>
-          <Link to="/admin/reporting/bi" className="btn-outline">
+          <Link to="/admin/reporting/bi" className="btn-primary !w-auto px-4">
             BI connections
           </Link>
         </div>
@@ -138,3 +138,4 @@ export function ReportLibraryPage() {
     </IdentityPageLayout>
   );
 }
+

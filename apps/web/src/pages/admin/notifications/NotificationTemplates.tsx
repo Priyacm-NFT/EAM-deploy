@@ -114,7 +114,7 @@ export function NotificationTemplatesPage() {
         <h2 className="admin-section-title">Templates</h2>
 
         <div className="flex justify-end">
-          <button type="button" className="btn-outline" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); setPreview(null); }}>
+          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); setPreview(null); }}>
             {showCreate && !editId ? 'Cancel' : '+ New template'}
           </button>
         </div>
@@ -128,7 +128,7 @@ export function NotificationTemplatesPage() {
                   <button
                     key={f}
                     type="button"
-                    className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100 transition-colors"
+                    className="text-xs bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded border border-accent/20 hover:bg-accent/20 transition-colors"
                     onClick={() => setForm((fm) => ({ ...fm, htmlTemplate: fm.htmlTemplate + f }))}
                   >
                     {f}
@@ -164,7 +164,7 @@ export function NotificationTemplatesPage() {
             </FormField>
 
             <div className="flex gap-3">
-              <button type="submit" className="btn-outline" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
               <button type="button" className="btn-outline" disabled={previewing} onClick={runPreview}>{previewing ? 'Previewing…' : 'Preview'}</button>
               <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); setPreview(null); }}>Cancel</button>
             </div>
