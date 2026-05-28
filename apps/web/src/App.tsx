@@ -203,6 +203,29 @@ export default function App() {
             )}
           </>
         )}
+        {/* ── Signed-in user footer ── */}
+        {authenticated && user && (
+          <div className="mt-auto pt-3 border-t border-white/10 mx-1">
+            <div className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-white/8 transition-colors group">
+              {/* Avatar */}
+              <div
+                className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white uppercase"
+                style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}
+              >
+                {(user.displayName || user.email).slice(0, 1)}
+              </div>
+              {/* Name + email */}
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-xs font-semibold truncate leading-tight">
+                  {user.displayName || user.email.split('@')[0]}
+                </p>
+                <p className="text-white/45 text-[0.65rem] truncate leading-tight mt-0.5">
+                  {user.email}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       <div className="app-main">
