@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, getAccessToken, isLoggedIn } from '../api/client.js';
+import { api, getAccessToken, isLoggedIn, clearTokens, refreshSession } from '../api/client.js';
 
 export interface CurrentUser {
   id: string;
@@ -28,10 +28,16 @@ function userFromAccessToken(): CurrentUser | null {
     ) as {
       sub?: string;
       email?: string;
+      exp?: number;
       roles?: string[];
       permissions?: string[];
       mfa_verified?: boolean;
     };
+
+    // If the access token itself is expired, don't trust it
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      return null;
+    }
 
     return {
       id: payload.sub ?? '',
@@ -49,15 +55,19 @@ function userFromAccessToken(): CurrentUser | null {
 }
 
 async function fetchCurrentUser(): Promise<CurrentUser | null> {
-  const fromToken = userFromAccessToken();
   try {
     return await api<CurrentUser>('/auth/me');
   } catch {
-    return fromToken;
+    // api() already handles 401 by clearing tokens + redirecting.
+    // Any other error (network down etc.) — fall back to token payload.
+    return userFromAccessToken();
   }
 }
 
 export function useCurrentUser() {
+  // On first render, if the stored access token is expired, try a refresh
+  // before committing to "not logged in". This prevents the sidebar from
+  // flashing as empty on a page reload when the token just needs refreshing.
   const [user, setUser] = useState<CurrentUser | null>(() =>
     isLoggedIn() ? userFromAccessToken() : null,
   );
@@ -65,26 +75,57 @@ export function useCurrentUser() {
   const [authenticated, setAuthenticated] = useState(isLoggedIn());
 
   useEffect(() => {
-    function syncAuthState() {
+    let cancelled = false;
+
+    async function syncAuthState() {
       const loggedIn = isLoggedIn();
-      setAuthenticated(loggedIn);
 
       if (!loggedIn) {
-        setUser(null);
-        setLoading(false);
-        return;
+        // No tokens at all — check if there's a refresh token we can use
+        const hasRefresh = Boolean(localStorage.getItem('eam_refresh_token'));
+        if (hasRefresh) {
+          const ok = await refreshSession();
+          if (!ok) {
+            clearTokens();
+            if (!cancelled) { setUser(null); setAuthenticated(false); setLoading(false); }
+            return;
+          }
+          // Refreshed — fall through to the fetch below
+        } else {
+          if (!cancelled) { setUser(null); setAuthenticated(false); setLoading(false); }
+          return;
+        }
       }
 
-      setUser(userFromAccessToken());
-      setLoading(true);
-      fetchCurrentUser()
-        .then(setUser)
-        .finally(() => setLoading(false));
+      // We have (possibly just-refreshed) tokens — set optimistic state
+      const fromToken = userFromAccessToken();
+      if (!cancelled) {
+        setAuthenticated(true);
+        setUser(fromToken);
+        setLoading(true);
+      }
+
+      // Fetch authoritative user data (this also re-reads permissions from DB)
+      const fetched = await fetchCurrentUser();
+      if (!cancelled) {
+        if (fetched) {
+          setUser(fetched);
+          setAuthenticated(true);
+        } else {
+          // fetchCurrentUser returning null means tokens were cleared by api()
+          setUser(null);
+          setAuthenticated(false);
+        }
+        setLoading(false);
+      }
     }
 
-    syncAuthState();
-    window.addEventListener('eam-auth-change', syncAuthState);
-    return () => window.removeEventListener('eam-auth-change', syncAuthState);
+    void syncAuthState();
+    window.addEventListener('eam-auth-change', () => { void syncAuthState(); });
+    return () => {
+      cancelled = true;
+      window.removeEventListener('eam-auth-change', () => { void syncAuthState(); });
+    };
   }, []);
 
   return { user, loading, authenticated };

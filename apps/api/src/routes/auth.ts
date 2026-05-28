@@ -17,7 +17,7 @@ import {
   revokeSessionById,
 } from '@eam/auth';
 import { parseSessionPolicy } from '@eam/shared';
-import { db, users, tenants, audit } from '@eam/db';
+import { db, users, tenants, audit, groups, userGroups } from '@eam/db';
 import { issueTokens, getUserAgent } from '../lib/tokens.js';
 import { sendEmail } from '../lib/email.js';
 import {
@@ -29,6 +29,22 @@ import {
 } from '../lib/auth-state.js';
 
 const PASSWORD_RESET_TTL = 60 * 60;
+
+/** Finds the "All Users" default group for a tenant and adds the user to it. */
+async function assignDefaultGroup(tenantId: string, userId: string): Promise<void> {
+  const [defaultGroup] = await db
+    .select()
+    .from(groups)
+    .where(and(eq(groups.tenantId, tenantId), eq(groups.name, 'All Users')))
+    .limit(1);
+
+  if (defaultGroup) {
+    await db
+      .insert(userGroups)
+      .values({ userId, groupId: defaultGroup.id })
+      .onConflictDoNothing();
+  }
+}
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/register', async (request, reply) => {
@@ -68,6 +84,10 @@ export async function authRoutes(app: FastifyInstance) {
           passwordChangedAt: now,
         })
         .returning();
+
+      // Auto-assign every new user to the "All Users" group so they get
+      // the default permissions and the sidebar sections are visible.
+      await assignDefaultGroup(tenant.id, user!.id);
 
       await audit(db, {
         tenantId: tenant.id,

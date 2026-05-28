@@ -128,7 +128,7 @@ export function BIConnectionsPage() {
         <FormActions>
           <button
             type="button"
-            className="btn-outline"
+            className="btn-primary !w-auto px-4"
             onClick={() => setConfigJson(CONFIG_HINTS[adapterType] ?? '{}')}
           >
             Load template

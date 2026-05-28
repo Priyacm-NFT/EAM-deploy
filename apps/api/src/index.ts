@@ -30,7 +30,10 @@ export async function buildApp() {
     await seedDatabase(db);
     await ensureDevAdminUser();
   }
-  wireApiNotificationBridge();
+  // Skip Redis notification bridge in test environment to avoid connection hangs
+  if (process.env.DISABLE_NOTIFICATION_BRIDGE !== 'true') {
+    wireApiNotificationBridge();
+  }
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 
@@ -39,11 +42,23 @@ export async function buildApp() {
     origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173').split(','),
   });
 
+  // Rate limit only sensitive auth mutation endpoints (login, register, password reset).
+  // /auth/me and /auth/refresh are called on every page load and must NOT be rate limited.
   await app.register(rateLimit, {
-    max: 100,
+    max: 20,
     timeWindow: '1 minute',
     hook: 'onRequest',
-    allowList: (req) => !req.url.startsWith('/auth'),
+    allowList: (req) => {
+      const url = req.url;
+      // Only rate-limit these specific auth endpoints
+      const limited = [
+        '/auth/login',
+        '/auth/register',
+        '/auth/password/reset-request',
+        '/auth/password/reset',
+      ];
+      return !limited.some((path) => url.startsWith(path));
+    },
   });
 
   await app.register(swagger, {
@@ -91,3 +106,4 @@ if (isMain) {
     process.exit(1);
   });
 }
+

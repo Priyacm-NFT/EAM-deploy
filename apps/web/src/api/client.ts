@@ -41,20 +41,24 @@ export async function refreshSession(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
 
-  const res = await fetch(`${API_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-  });
+  try {
+    const res = await fetch(`${API_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
 
-  if (!res.ok) {
-    clearTokens();
+    if (!res.ok) {
+      clearTokens();
+      return false;
+    }
+
+    const data = (await res.json()) as TokenResponse;
+    setTokens(data.accessToken, data.refreshToken);
+    return true;
+  } catch {
     return false;
   }
-
-  const data = (await res.json()) as TokenResponse;
-  setTokens(data.accessToken, data.refreshToken);
-  return true;
 }
 
 export async function logout(): Promise<void> {
@@ -68,6 +72,21 @@ export async function logout(): Promise<void> {
   } finally {
     clearTokens();
   }
+}
+
+/**
+ * Whether an error from the API means the session is dead and the user
+ * should be silently redirected to /login rather than shown an error message.
+ */
+export function isSessionExpiredError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const msg = e.message.toLowerCase();
+  return (
+    msg.includes('session expired') ||
+    msg.includes('unauthorized') ||
+    msg.includes('jwt') ||
+    msg.includes('token')
+  );
 }
 
 export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -84,11 +103,21 @@ export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
   let res = await fetch(`${API_URL}${path}`, { ...opts, headers, body });
 
-  if (res.status === 401 && getRefreshToken()) {
-    const refreshed = await refreshSession();
-    if (refreshed) {
-      headers.Authorization = `Bearer ${getAccessToken()}`;
-      res = await fetch(`${API_URL}${path}`, { ...opts, headers, body });
+  if (res.status === 401) {
+    // Try to refresh once
+    if (getRefreshToken()) {
+      const refreshed = await refreshSession();
+      if (refreshed) {
+        headers.Authorization = `Bearer ${getAccessToken()}`;
+        res = await fetch(`${API_URL}${path}`, { ...opts, headers, body });
+      }
+    }
+    // If still 401 after refresh attempt, tokens are dead — clear and redirect
+    if (res.status === 401) {
+      clearTokens();
+      window.location.replace('/login');
+      // Return a never-resolving promise so calling code doesn't run
+      return new Promise(() => {});
     }
   }
 
@@ -120,6 +149,10 @@ export async function authFetch(path: string, opts: RequestInit = {}): Promise<R
     if (refreshed) {
       headers.Authorization = `Bearer ${getAccessToken()}`;
       res = await fetch(`${API_URL}${path}`, { ...opts, headers, body });
+    }
+    if (res.status === 401) {
+      clearTokens();
+      window.location.replace('/login');
     }
   }
 

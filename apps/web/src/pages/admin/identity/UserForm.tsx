@@ -212,13 +212,13 @@ export function UserFormPage() {
           <div className="admin-section">
             <h2 className="admin-section-title">Admin actions</h2>
             <FormActions>
-              <button type="button" className="btn-outline" onClick={forcePasswordReset}>
+              <button type="button" className="btn-primary !w-auto px-4" onClick={forcePasswordReset}>
                 Force password reset
               </button>
-              <button type="button" className="btn-outline" onClick={forceLogout}>
+              <button type="button" className="btn-primary !w-auto px-4" onClick={forceLogout}>
                 Force logout all sessions
               </button>
-              <button type="button" className="btn-outline" onClick={impersonate}>
+              <button type="button" className="btn-primary !w-auto px-4" onClick={impersonate}>
                 Impersonate user
               </button>
             </FormActions>

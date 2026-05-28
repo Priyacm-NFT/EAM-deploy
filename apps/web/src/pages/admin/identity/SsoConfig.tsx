@@ -202,7 +202,7 @@ export function SsoConfigPage() {
         <FormActions>
           <button
             type="button"
-            className="btn-outline"
+            className="btn-primary !w-auto px-4"
             onClick={() => setForm((f) => ({ ...f, configJson: CONFIG_HINTS[f.type] }))}
           >
             Load template
@@ -237,11 +237,11 @@ export function SsoConfigPage() {
                 </div>
                 <div className="flex flex-wrap gap-2 text-sm">
                   {(p.type === 'LDAP' || p.type === 'AD') && (
-                    <button type="button" className="btn-outline !py-1.5 !px-3" onClick={() => sync(p.id)}>
+                    <button type="button" className="btn-primary !w-auto !py-1.5 !px-3" onClick={() => sync(p.id)}>
                       Sync users
                     </button>
                   )}
-                  <button type="button" className="btn-outline !py-1.5 !px-3" onClick={() => test(p.id)}>
+                  <button type="button" className="btn-primary !w-auto !py-1.5 !px-3" onClick={() => test(p.id)}>
                     Test connection
                   </button>
                   {p.isActive && (
@@ -258,3 +258,4 @@ export function SsoConfigPage() {
     </IdentityPageLayout>
   );
 }
+
