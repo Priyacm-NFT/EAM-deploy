@@ -6,6 +6,7 @@ import {
   integrationConnections,
   integrationJobs,
   integrationRunLog,
+  webhookSubscriptions,
 } from '@eam/db';
 import {
   getAdapter,
@@ -358,6 +359,334 @@ export async function adminIntegrationRoutes(app: FastifyInstance) {
       reply.header('Content-Type', out.contentType);
       reply.header('Content-Disposition', `attachment; filename="${out.filename}"`);
       return out.body;
+    },
+  );
+
+  // ─── Connection PUT / DELETE ──────────────────────────────────────────────────
+
+  app.put(
+    '/admin/integrations/connections/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Update integration connection' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        name?: string;
+        config?: Record<string, unknown>;
+        isActive?: boolean;
+      };
+
+      const updates: Partial<typeof integrationConnections.$inferInsert> = {};
+      if (body.name != null) updates.name = body.name;
+      if (body.config != null) updates.config = body.config;
+      if (body.isActive != null) updates.isActive = body.isActive;
+
+      const [row] = await db
+        .update(integrationConnections)
+        .set(updates)
+        .where(eq(integrationConnections.id, id))
+        .returning();
+
+      if (!row || row.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      return row;
+    },
+  );
+
+  app.delete(
+    '/admin/integrations/connections/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Delete integration connection' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const [conn] = await db
+        .select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, id))
+        .limit(1);
+      if (!conn || conn.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      await db.delete(integrationConnections).where(eq(integrationConnections.id, id));
+      return reply.code(204).send();
+    },
+  );
+
+  // ─── Job PUT / PATCH / DELETE ─────────────────────────────────────────────────
+
+  app.put(
+    '/admin/integrations/jobs/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Update integration job' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        jobType?: string;
+        scheduleCron?: string;
+        triggerEvent?: string;
+        mappingConfig?: Record<string, unknown>;
+        isActive?: boolean;
+      };
+
+      const updates: Partial<typeof integrationJobs.$inferInsert> = {};
+      if (body.jobType != null) updates.jobType = body.jobType;
+      if (body.scheduleCron != null) updates.scheduleCron = body.scheduleCron;
+      if (body.triggerEvent != null) updates.triggerEvent = body.triggerEvent;
+      if (body.mappingConfig != null) updates.mappingConfig = body.mappingConfig;
+      if (body.isActive != null) updates.isActive = body.isActive;
+
+      const [row] = await db
+        .update(integrationJobs)
+        .set(updates)
+        .where(eq(integrationJobs.id, id))
+        .returning();
+
+      if (!row || row.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      return row;
+    },
+  );
+
+  app.patch(
+    '/admin/integrations/jobs/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Partial update integration job' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        isActive?: boolean;
+        scheduleCron?: string;
+      };
+
+      const updates: Partial<typeof integrationJobs.$inferInsert> = {};
+      if (body.isActive != null) updates.isActive = body.isActive;
+      if (body.scheduleCron != null) updates.scheduleCron = body.scheduleCron;
+
+      const [row] = await db
+        .update(integrationJobs)
+        .set(updates)
+        .where(eq(integrationJobs.id, id))
+        .returning();
+
+      if (!row || row.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      return row;
+    },
+  );
+
+  app.delete(
+    '/admin/integrations/jobs/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Delete integration job' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const [job] = await db
+        .select()
+        .from(integrationJobs)
+        .where(eq(integrationJobs.id, id))
+        .limit(1);
+      if (!job || job.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      await db.delete(integrationJobs).where(eq(integrationJobs.id, id));
+      return reply.code(204).send();
+    },
+  );
+
+  // ─── Global Run Log ───────────────────────────────────────────────────────────
+
+  app.get(
+    '/admin/integrations/run-log',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Global integration run log' },
+    },
+    async (request) => {
+      const query = request.query as { limit?: string; page?: string };
+      const limit = Math.min(200, Math.max(1, Number(query.limit ?? 100)));
+      const page = Math.max(1, Number(query.page ?? 1));
+      const offset = (page - 1) * limit;
+
+      // Join with jobs to scope to this tenant
+      const jobs = await db
+        .select({ id: integrationJobs.id })
+        .from(integrationJobs)
+        .where(eq(integrationJobs.tenantId, request.user!.tenantId));
+
+      if (!jobs.length) return { data: [], total: 0 };
+
+      const jobIds = jobs.map((j: { id: string }) => j.id);
+      const allLogs = await db
+        .select()
+        .from(integrationRunLog)
+        .orderBy(desc(integrationRunLog.startedAt))
+        .limit(limit * 3); // over-fetch then filter
+
+      const tenantLogs = allLogs.filter((l: { jobId: string }) => jobIds.includes(l.jobId));
+      const paginated = tenantLogs.slice(offset, offset + limit);
+
+      return { data: paginated, total: tenantLogs.length, page, limit };
+    },
+  );
+
+  // ─── Webhook Subscriptions CRUD ───────────────────────────────────────────────
+
+  app.get(
+    '/admin/integrations/webhooks',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'List webhook subscriptions' },
+    },
+    async (request) => {
+      return db
+        .select()
+        .from(webhookSubscriptions)
+        .where(eq(webhookSubscriptions.tenantId, request.user!.tenantId))
+        .orderBy(desc(webhookSubscriptions.createdAt));
+    },
+  );
+
+  app.post(
+    '/admin/integrations/webhooks',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Create webhook subscription' },
+    },
+    async (request, reply) => {
+      const body = request.body as {
+        url: string;
+        secret: string;
+        events: string[];
+        isActive?: boolean;
+      };
+
+      const [row] = await db
+        .insert(webhookSubscriptions)
+        .values({
+          tenantId: request.user!.tenantId,
+          url: body.url,
+          secret: body.secret,
+          events: body.events,
+          isActive: body.isActive ?? true,
+        })
+        .returning();
+
+      return reply.code(201).send(row);
+    },
+  );
+
+  app.put(
+    '/admin/integrations/webhooks/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Update webhook subscription' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        url?: string;
+        secret?: string;
+        events?: string[];
+        isActive?: boolean;
+      };
+
+      const updates: Partial<typeof webhookSubscriptions.$inferInsert> = {};
+      if (body.url != null) updates.url = body.url;
+      if (body.secret != null) updates.secret = body.secret;
+      if (body.events != null) updates.events = body.events;
+      if (body.isActive != null) updates.isActive = body.isActive;
+
+      const [row] = await db
+        .update(webhookSubscriptions)
+        .set(updates)
+        .where(eq(webhookSubscriptions.id, id))
+        .returning();
+
+      if (!row || row.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      return row;
+    },
+  );
+
+  app.delete(
+    '/admin/integrations/webhooks/:id',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Delete webhook subscription' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const [wh] = await db
+        .select()
+        .from(webhookSubscriptions)
+        .where(eq(webhookSubscriptions.id, id))
+        .limit(1);
+      if (!wh || wh.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      await db.delete(webhookSubscriptions).where(eq(webhookSubscriptions.id, id));
+      return reply.code(204).send();
+    },
+  );
+
+  app.post(
+    '/admin/integrations/webhooks/:id/test',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Test webhook delivery' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const [wh] = await db
+        .select()
+        .from(webhookSubscriptions)
+        .where(eq(webhookSubscriptions.id, id))
+        .limit(1);
+      if (!wh || wh.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+
+      // Send a test payload to the webhook URL
+      try {
+        const testPayload = JSON.stringify({
+          event: 'webhook.test',
+          timestamp: new Date().toISOString(),
+          data: { message: 'EAM webhook test delivery' },
+        });
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
+        const resp = await fetch(wh.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-EAM-Signature': wh.secret,
+          },
+          body: testPayload,
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+
+        return { ok: resp.ok, status: resp.status, url: wh.url };
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Webhook delivery failed',
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
     },
   );
 }
