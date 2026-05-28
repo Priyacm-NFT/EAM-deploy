@@ -6,3 +6,4 @@ export * from './integration.js';
 export * from './reporting.js';
 export * from './notifications.js';
 export * from './entities.js';
+export * from './eam-reporting.js';

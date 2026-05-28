@@ -144,6 +144,30 @@ export async function reportRoutes(app: FastifyInstance) {
     },
   );
 
+  // Run a built-in report subject directly (returns rows for the standard reports page)
+  app.get(
+    '/reports/run/:subjectId',
+    { ...authGuard },
+    async (request, reply) => {
+      const { subjectId } = request.params as { subjectId: string };
+      const tid = request.user!.tenantId;
+
+      const [subject] = await db.select().from(reportSubjects).where(eq(reportSubjects.id, subjectId)).limit(1);
+      if (!subject) return reply.code(404).send({ error: 'Report subject not found' });
+
+      try {
+        // Execute the base query with the tenant context
+        const { sql: drizzleSql } = await import('drizzle-orm');
+        const rows = await db.execute(drizzleSql.raw(
+          subject.baseQuery.replace(/:tenantId/g, `'${tid}'`).replace(/\$tenantId/g, `'${tid}'`) + ' LIMIT 200',
+        ));
+        return Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
+      } catch (err) {
+        return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
   app.post(
     '/reports/definitions/:id/run',
     { ...authGuard, schema: { tags: ['Reports'], summary: 'Run report and return download URL' } },

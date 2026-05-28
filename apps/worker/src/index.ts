@@ -9,6 +9,8 @@ import { registerWorkflowHandlers } from './workflow.js';
 import { registerIntegrationJobHandlers } from './integration-jobs.js';
 import { registerReportHandlers, startReportScheduleCron } from './reports.js';
 import { registerNotificationHandlers } from './notifications.js';
+import { startSlaMonitorCron, runSlaCheck } from './sla-monitor.js';
+import { startPmSchedulerCron } from './pm-scheduler.js';
 
 const connection = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
@@ -96,5 +98,11 @@ registerWorkflowHandlers(connection, sendEmailQueue);
 registerIntegrationJobHandlers(connection);
 registerReportHandlers(connection, sendEmailQueue);
 await startReportScheduleCron(connection);
+startSlaMonitorCron(connection);
+startPmSchedulerCron(connection);
+
+// SLA worker — processes the queue triggered by cron
+const { Worker: BullWorker } = await import('bullmq');
+new BullWorker('sla-monitor', async () => { await runSlaCheck(); }, { connection });
 
 console.log('EAM worker started');

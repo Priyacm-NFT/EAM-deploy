@@ -10,6 +10,17 @@ import { entityDefinitions } from './schema/config.js';
 import { reportSubjects } from './schema/reporting.js';
 import { documentTypes } from './schema/attachments.js';
 import { notificationTemplates, notificationTriggers } from './schema/notifications.js';
+import {
+  organisations,
+  sites,
+  locations,
+  statusSets,
+  statusTransitions,
+  failureCodes,
+  labourCrafts,
+  assetClassifications,
+} from './schema/entities.js';
+import { EAM_REPORT_SUBJECTS } from './schema/eam-reporting.js';
 
 const DEFAULT_PERMISSIONS = [
   { resource: 'admin', action: 'users:manage', description: 'Manage users and identity' },
@@ -19,6 +30,24 @@ const DEFAULT_PERMISSIONS = [
   { resource: 'admin', action: 'attachments:manage', description: 'Manage attachments and document types' },
   { resource: 'admin', action: 'reporting:manage', description: 'Manage reports' },
   { resource: 'admin', action: 'notifications:manage', description: 'Manage notifications' },
+  // Phase 1 permissions
+  { resource: 'assets', action: 'read', description: 'View assets and locations' },
+  { resource: 'assets', action: 'write', description: 'Create and update assets' },
+  { resource: 'service_requests', action: 'read', description: 'View service requests' },
+  { resource: 'service_requests', action: 'write', description: 'Create and update service requests' },
+  { resource: 'work_orders', action: 'read', description: 'View work orders' },
+  { resource: 'work_orders', action: 'write', description: 'Create and update work orders' },
+  { resource: 'work_orders', action: 'approve', description: 'Approve work orders' },
+  { resource: 'pm', action: 'read', description: 'View preventive maintenance' },
+  { resource: 'pm', action: 'write', description: 'Manage preventive maintenance' },
+  { resource: 'permits', action: 'read', description: 'View permits' },
+  { resource: 'permits', action: 'write', description: 'Create and update permits' },
+  { resource: 'permits', action: 'approve', description: 'Approve permits' },
+  { resource: 'inventory', action: 'read', description: 'View inventory' },
+  { resource: 'inventory', action: 'write', description: 'Manage inventory transactions' },
+  { resource: 'labour', action: 'read', description: 'View labour records' },
+  { resource: 'labour', action: 'write', description: 'Manage labour and crews' },
+  { resource: 'reports', action: 'read', description: 'Run and view reports' },
 ];
 
 export async function seedDatabase(db: Database): Promise<{ tenantId: string; adminUserId: string }> {
@@ -26,6 +55,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
   if (existing.length > 0) {
     await removeLegacyDemoRoles(db);
     await ensureMissingPermissions(db, existing[0]!.id);
+    await seedPhase1Data(db, existing[0]!.id);
     const admin = await db.select().from(users).where(eq(users.email, 'admin@eam.local')).limit(1);
     return { tenantId: existing[0]!.id, adminUserId: admin[0]?.id ?? '' };
   }
@@ -60,6 +90,11 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     { name: 'WorkOrder', label: 'Work Order', tableName: 'work_orders' },
     { name: 'ServiceRequest', label: 'Service Request', tableName: 'service_requests' },
     { name: 'Location', label: 'Location', tableName: 'locations' },
+    { name: 'JobPlan', label: 'Job Plan', tableName: 'job_plans' },
+    { name: 'PMaster', label: 'Preventive Maintenance', tableName: 'pm_masters' },
+    { name: 'Permit', label: 'Permit to Work', tableName: 'permits' },
+    { name: 'Item', label: 'Inventory Item', tableName: 'items' },
+    { name: 'Storeroom', label: 'Storeroom', tableName: 'storerooms' },
   ];
 
   for (const e of entities) {
@@ -72,6 +107,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     });
   }
 
+  // Seed P0 report subjects
   await db.insert(reportSubjects).values([
     {
       name: 'work_orders',
@@ -102,13 +138,54 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     },
   ]);
 
-  await db.insert(documentTypes).values({
-    tenantId: tenant!.id,
-    name: 'Safety Document',
-    label: 'Safety Document',
-    allowedExtensions: ['pdf', 'jpg', 'png'],
-    isSystem: true,
-  });
+  // Seed Phase 1 — 15 standard EAM report subjects
+  for (const rs of EAM_REPORT_SUBJECTS) {
+    await db.insert(reportSubjects).values({
+      name: rs.name,
+      label: rs.label,
+      baseQuery: rs.baseQuery.trim(),
+      availableFields: rs.availableFields as unknown as Record<string, unknown>[],
+      isSystem: true,
+    });
+  }
+
+  await db.insert(documentTypes).values([
+    {
+      tenantId: tenant!.id,
+      name: 'Safety Document',
+      label: 'Safety Document',
+      allowedExtensions: ['pdf', 'jpg', 'png'],
+      isSystem: true,
+    },
+    {
+      tenantId: tenant!.id,
+      name: 'Inspection Photo',
+      label: 'Inspection Photo',
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'heic'],
+      isSystem: true,
+    },
+    {
+      tenantId: tenant!.id,
+      name: 'Certificate',
+      label: 'Certificate',
+      allowedExtensions: ['pdf'],
+      isSystem: true,
+    },
+    {
+      tenantId: tenant!.id,
+      name: 'PO Copy',
+      label: 'Purchase Order Copy',
+      allowedExtensions: ['pdf', 'docx'],
+      isSystem: true,
+    },
+    {
+      tenantId: tenant!.id,
+      name: 'CAD Drawing',
+      label: 'CAD Drawing',
+      allowedExtensions: ['dwg', 'dxf', 'pdf'],
+      isSystem: true,
+    },
+  ]);
 
   const [woTemplate] = await db
     .insert(notificationTemplates)
@@ -123,29 +200,337 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     })
     .returning();
 
+  const [srTemplate] = await db
+    .insert(notificationTemplates)
+    .values({
+      tenantId: tenant!.id,
+      name: 'SR Acknowledged',
+      subjectTemplate: 'Service Request {{sr_num}} received',
+      htmlTemplate:
+        '<p>Hello {{requester.name}}, your service request {{sr_num}} has been received and is being reviewed.</p>',
+      textTemplate: 'SR {{sr_num}} received and under review.',
+      isSystem: true,
+    })
+    .returning();
+
+  const [slaTemplate] = await db
+    .insert(notificationTemplates)
+    .values({
+      tenantId: tenant!.id,
+      name: 'SLA Breach',
+      subjectTemplate: 'SLA Breached — Service Request {{sr_num}}',
+      htmlTemplate:
+        '<p>Service Request {{sr_num}} (Priority: {{priority}}) has breached its SLA target of {{sla_target_hours}} hours.</p>',
+      textTemplate: 'SLA breached for SR {{sr_num}}.',
+      isSystem: true,
+    })
+    .returning();
+
+  const [permitTemplate] = await db
+    .insert(notificationTemplates)
+    .values({
+      tenantId: tenant!.id,
+      name: 'Permit Expiring',
+      subjectTemplate: 'Permit {{permit_num}} expiring soon',
+      htmlTemplate:
+        '<p>Permit {{permit_num}} ({{type}}) for WO {{wo_num}} expires at {{valid_to}}.</p>',
+      textTemplate: 'Permit {{permit_num}} expires at {{valid_to}}.',
+      isSystem: true,
+    })
+    .returning();
+
+  const [pmTemplate] = await db
+    .insert(notificationTemplates)
+    .values({
+      tenantId: tenant!.id,
+      name: 'PM Work Order Generated',
+      subjectTemplate: 'PM Work Order {{wo_num}} generated',
+      htmlTemplate:
+        '<p>A PM work order {{wo_num}} has been automatically generated for {{asset_description}}. Due: {{target_finish_date}}.</p>',
+      textTemplate: 'PM WO {{wo_num}} generated for {{asset_description}}.',
+      isSystem: true,
+    })
+    .returning();
+
   await db.insert(notificationTriggers).values([
     {
       tenantId: tenant!.id,
       eventType: 'WO_ASSIGNED',
       entityType: 'WorkOrder',
       templateId: woTemplate!.id,
-      distributionConfig: {
-        rules: [{ type: 'FIELD', value: 'assigneeUserId' }],
-      },
+      distributionConfig: { rules: [{ type: 'FIELD', value: 'assignedToUserId' }] },
       isActive: true,
     },
     {
       tenantId: tenant!.id,
       eventType: 'WF_TASK_ASSIGNED',
       templateId: woTemplate!.id,
-      distributionConfig: {
-        rules: [{ type: 'FIELD', value: 'assigneeUserId' }],
-      },
+      distributionConfig: { rules: [{ type: 'FIELD', value: 'assigneeUserId' }] },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
+      eventType: 'SR_CREATED',
+      entityType: 'ServiceRequest',
+      templateId: srTemplate!.id,
+      distributionConfig: { rules: [{ type: 'FIELD', value: 'requesterId' }] },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
+      eventType: 'SR_SLA_BREACHED',
+      entityType: 'ServiceRequest',
+      templateId: slaTemplate!.id,
+      distributionConfig: { rules: [{ type: 'ROLE', value: 'supervisor' }] },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
+      eventType: 'PERMIT_EXPIRING',
+      entityType: 'Permit',
+      templateId: permitTemplate!.id,
+      distributionConfig: { rules: [{ type: 'FIELD', value: 'requestedByUserId' }] },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
+      eventType: 'PM_WO_GENERATED',
+      entityType: 'WorkOrder',
+      templateId: pmTemplate!.id,
+      distributionConfig: { rules: [{ type: 'ROLE', value: 'planner' }] },
       isActive: true,
     },
   ]);
 
+  await seedPhase1Data(db, tenant!.id);
+
   return { tenantId: tenant!.id, adminUserId: '' };
+}
+
+/** Seeds Phase 1 reference data: org/site/location hierarchy, status sets, failure codes, crafts, asset classifications. */
+async function seedPhase1Data(db: Database, tenantId: string): Promise<void> {
+  // Idempotency guard: skip if org already exists
+  const existingOrg = await db
+    .select()
+    .from(organisations)
+    .where(eq(organisations.tenantId, tenantId))
+    .limit(1);
+  if (existingOrg.length > 0) return;
+
+  // ── Organisation / Site / Location hierarchy ────────────────────────────────
+  const [org] = await db
+    .insert(organisations)
+    .values({
+      tenantId,
+      name: 'Default Organisation',
+      code: 'DEFAULT',
+      description: 'Default organisation seeded at setup',
+      glAccount: '1000',
+      costCenter: 'CC001',
+    })
+    .returning();
+
+  const [site] = await db
+    .insert(sites)
+    .values({
+      tenantId,
+      orgId: org!.id,
+      name: 'Main Site',
+      siteNum: 'SITE001',
+      description: 'Primary operating site',
+      timezone: 'UTC',
+      glAccount: '1100',
+      costCenter: 'CC001',
+    })
+    .returning();
+
+  const [rootLocation] = await db
+    .insert(locations)
+    .values({
+      tenantId,
+      siteId: site!.id,
+      orgId: org!.id,
+      code: 'LOC001',
+      name: 'Main Building',
+      description: 'Main building — root location',
+      type: 'FUNCTIONAL',
+    })
+    .returning();
+
+  // Sub-locations
+  await db.insert(locations).values([
+    {
+      tenantId,
+      siteId: site!.id,
+      orgId: org!.id,
+      parentId: rootLocation!.id,
+      code: 'LOC001-FL1',
+      name: 'Floor 1',
+      type: 'OPERATING',
+    },
+    {
+      tenantId,
+      siteId: site!.id,
+      orgId: org!.id,
+      parentId: rootLocation!.id,
+      code: 'LOC001-UTIL',
+      name: 'Utilities Room',
+      type: 'OPERATING',
+    },
+  ]);
+
+  // ── Status sets ─────────────────────────────────────────────────────────────
+  const [srSet] = await db
+    .insert(statusSets)
+    .values({
+      tenantId,
+      name: 'SR_DEFAULT',
+      label: 'Service Request Statuses',
+      entityType: 'ServiceRequest',
+      description: 'Default status flow for service requests',
+      isSystem: true,
+    })
+    .returning();
+
+  await db.insert(statusTransitions).values([
+    { statusSetId: srSet!.id, fromStatus: 'NEW', toStatus: 'QUEUED', label: 'Queue' },
+    { statusSetId: srSet!.id, fromStatus: 'QUEUED', toStatus: 'IN_PROGRESS', label: 'Start Work' },
+    { statusSetId: srSet!.id, fromStatus: 'IN_PROGRESS', toStatus: 'RESOLVED', label: 'Resolve', requiresComment: true },
+    { statusSetId: srSet!.id, fromStatus: 'IN_PROGRESS', toStatus: 'CLOSED', label: 'Close', requiresComment: true },
+    { statusSetId: srSet!.id, fromStatus: 'IN_PROGRESS', toStatus: 'CONVERTED', label: 'Convert to WO' },
+    { statusSetId: srSet!.id, fromStatus: 'QUEUED', toStatus: 'CANCELLED', label: 'Cancel', requiresComment: true },
+    { statusSetId: srSet!.id, fromStatus: 'NEW', toStatus: 'CANCELLED', label: 'Cancel', requiresComment: true },
+  ]);
+
+  const [woSet] = await db
+    .insert(statusSets)
+    .values({
+      tenantId,
+      name: 'WO_DEFAULT',
+      label: 'Work Order Statuses',
+      entityType: 'WorkOrder',
+      description: 'Default Maximo-aligned status flow for work orders',
+      isSystem: true,
+    })
+    .returning();
+
+  await db.insert(statusTransitions).values([
+    { statusSetId: woSet!.id, fromStatus: 'WAPPR', toStatus: 'APPR', label: 'Approve', requiredRole: 'supervisor' },
+    { statusSetId: woSet!.id, fromStatus: 'WAPPR', toStatus: 'CAN', label: 'Cancel', requiresComment: true },
+    { statusSetId: woSet!.id, fromStatus: 'APPR', toStatus: 'INPRG', label: 'Start Work' },
+    { statusSetId: woSet!.id, fromStatus: 'APPR', toStatus: 'HOLD', label: 'Put on Hold', requiresComment: true },
+    { statusSetId: woSet!.id, fromStatus: 'APPR', toStatus: 'CAN', label: 'Cancel', requiresComment: true },
+    { statusSetId: woSet!.id, fromStatus: 'INPRG', toStatus: 'COMP', label: 'Complete' },
+    { statusSetId: woSet!.id, fromStatus: 'INPRG', toStatus: 'HOLD', label: 'Put on Hold', requiresComment: true },
+    { statusSetId: woSet!.id, fromStatus: 'COMP', toStatus: 'CLOSE', label: 'Close', requiredRole: 'supervisor' },
+    { statusSetId: woSet!.id, fromStatus: 'COMP', toStatus: 'INPRG', label: 'Reopen' },
+    { statusSetId: woSet!.id, fromStatus: 'HOLD', toStatus: 'APPR', label: 'Resume' },
+  ]);
+
+  const [permitSet] = await db
+    .insert(statusSets)
+    .values({
+      tenantId,
+      name: 'PERMIT_DEFAULT',
+      label: 'Permit to Work Statuses',
+      entityType: 'Permit',
+      description: 'Default status flow for permits',
+      isSystem: true,
+    })
+    .returning();
+
+  await db.insert(statusTransitions).values([
+    { statusSetId: permitSet!.id, fromStatus: 'DRAFT', toStatus: 'PENDING_APPROVAL', label: 'Submit for Approval' },
+    { statusSetId: permitSet!.id, fromStatus: 'PENDING_APPROVAL', toStatus: 'ACTIVE', label: 'Approve', requiredRole: 'safety_officer' },
+    { statusSetId: permitSet!.id, fromStatus: 'PENDING_APPROVAL', toStatus: 'REJECTED', label: 'Reject', requiresComment: true },
+    { statusSetId: permitSet!.id, fromStatus: 'ACTIVE', toStatus: 'SUSPENDED', label: 'Suspend', requiresComment: true },
+    { statusSetId: permitSet!.id, fromStatus: 'ACTIVE', toStatus: 'CLOSED', label: 'Close Work' },
+    { statusSetId: permitSet!.id, fromStatus: 'SUSPENDED', toStatus: 'ACTIVE', label: 'Reactivate' },
+  ]);
+
+  // ── Failure Codes ────────────────────────────────────────────────────────────
+  const problemCodes = [
+    { code: 'P-LEAK', description: 'Fluid Leak' },
+    { code: 'P-NOISE', description: 'Abnormal Noise' },
+    { code: 'P-OVERHEAT', description: 'Overheating' },
+    { code: 'P-VIBRATION', description: 'Excessive Vibration' },
+    { code: 'P-FAIL', description: 'Complete Failure' },
+    { code: 'P-PERF', description: 'Performance Degradation' },
+    { code: 'P-CORROSION', description: 'Corrosion / Rust' },
+    { code: 'P-BLOCKAGE', description: 'Blockage / Clogging' },
+  ];
+  const causeCodes = [
+    { code: 'C-WEAR', description: 'Normal Wear and Tear' },
+    { code: 'C-MISUSE', description: 'Operator Error / Misuse' },
+    { code: 'C-LACK_PM', description: 'Lack of Preventive Maintenance' },
+    { code: 'C-OVERLOAD', description: 'Overload Condition' },
+    { code: 'C-INSTALL', description: 'Improper Installation' },
+    { code: 'C-DESIGN', description: 'Design Deficiency' },
+    { code: 'C-CONTAMINATION', description: 'Contamination' },
+  ];
+  const remedyCodes = [
+    { code: 'R-REPLACE', description: 'Replace Component' },
+    { code: 'R-REPAIR', description: 'Repair in Place' },
+    { code: 'R-ADJUST', description: 'Adjust / Calibrate' },
+    { code: 'R-CLEAN', description: 'Clean / Flush' },
+    { code: 'R-LUBRICATE', description: 'Lubricate' },
+    { code: 'R-INSPECT', description: 'Inspect and Monitor' },
+    { code: 'R-RETIGHTEN', description: 'Re-tighten / Re-torque' },
+  ];
+
+  for (const c of problemCodes) {
+    await db.insert(failureCodes).values({ tenantId, type: 'PROBLEM', code: c.code, description: c.description });
+  }
+  for (const c of causeCodes) {
+    await db.insert(failureCodes).values({ tenantId, type: 'CAUSE', code: c.code, description: c.description });
+  }
+  for (const c of remedyCodes) {
+    await db.insert(failureCodes).values({ tenantId, type: 'REMEDY', code: c.code, description: c.description });
+  }
+
+  // ── Labour Crafts ────────────────────────────────────────────────────────────
+  const crafts = [
+    { craftCode: 'MECH', description: 'Mechanical Technician', defaultRate: '45.00' },
+    { craftCode: 'ELEC', description: 'Electrical Technician', defaultRate: '50.00' },
+    { craftCode: 'INST', description: 'Instrumentation Technician', defaultRate: '55.00' },
+    { craftCode: 'CIVIL', description: 'Civil / Structural Technician', defaultRate: '40.00' },
+    { craftCode: 'IT', description: 'IT / Controls Technician', defaultRate: '60.00' },
+    { craftCode: 'GEN', description: 'General Labour', defaultRate: '30.00' },
+  ];
+  for (const c of crafts) {
+    await db.insert(labourCrafts).values({ tenantId, ...c });
+  }
+
+  // ── Asset Classifications ────────────────────────────────────────────────────
+  const [mechClass] = await db
+    .insert(assetClassifications)
+    .values({ tenantId, classCode: 'MECH', description: 'Mechanical Equipment' })
+    .returning();
+
+  await db.insert(assetClassifications).values([
+    { tenantId, classCode: 'PUMP', description: 'Pumps', parentId: mechClass!.id },
+    { tenantId, classCode: 'COMPRESSOR', description: 'Compressors', parentId: mechClass!.id },
+    { tenantId, classCode: 'HVAC', description: 'HVAC Equipment', parentId: mechClass!.id },
+    { tenantId, classCode: 'CONVEYOR', description: 'Conveyors', parentId: mechClass!.id },
+  ]);
+
+  const [elecClass] = await db
+    .insert(assetClassifications)
+    .values({ tenantId, classCode: 'ELEC', description: 'Electrical Equipment' })
+    .returning();
+
+  await db.insert(assetClassifications).values([
+    { tenantId, classCode: 'MOTOR', description: 'Electric Motors', parentId: elecClass!.id },
+    { tenantId, classCode: 'SWITCHGEAR', description: 'Switchgear / Panels', parentId: elecClass!.id },
+    { tenantId, classCode: 'TRANSFORMER', description: 'Transformers', parentId: elecClass!.id },
+    { tenantId, classCode: 'UPS', description: 'UPS Systems', parentId: elecClass!.id },
+  ]);
+
+  await db.insert(assetClassifications).values([
+    { tenantId, classCode: 'VEHICLE', description: 'Fleet / Vehicles' },
+    { tenantId, classCode: 'BUILDING', description: 'Buildings & Infrastructure' },
+    { tenantId, classCode: 'IT_ASSET', description: 'IT Assets' },
+  ]);
 }
 
 /** Adds any permissions missing from an existing DB (safe to run on every startup). */

@@ -17,6 +17,14 @@ import { notificationRoutes } from './routes/notifications.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { chatRoutes } from './routes/chat.js';
 import { presenceRoutes } from './routes/presence.js';
+import { assetRoutes } from './routes/assets.js';
+import { serviceRequestRoutes } from './routes/service-requests.js';
+import { workOrderRoutes } from './routes/work-orders.js';
+import { jobPlanRoutes } from './routes/job-plans.js';
+import { pmRoutes } from './routes/pm.js';
+import { permitRoutes } from './routes/permits.js';
+import { inventoryRoutes } from './routes/inventory.js';
+import { labourRoutes } from './routes/labour.js';
 import { setupSocketIO } from './socket.js';
 import { wireApiNotificationBridge } from './lib/notification-bridge.js';
 
@@ -84,6 +92,14 @@ export async function buildApp() {
   await app.register(dashboardRoutes);
   await app.register(chatRoutes);
   await app.register(presenceRoutes);
+  await app.register(assetRoutes);
+  await app.register(serviceRequestRoutes);
+  await app.register(workOrderRoutes);
+  await app.register(jobPlanRoutes);
+  await app.register(pmRoutes);
+  await app.register(permitRoutes);
+  await app.register(inventoryRoutes);
+  await app.register(labourRoutes);
 
   return app;
 }

@@ -44,6 +44,27 @@ import { NotificationTemplatesPage } from './pages/admin/notifications/Notificat
 import { NotificationTriggersPage } from './pages/admin/notifications/NotificationTriggers.js';
 import { SmtpConfigPage } from './pages/admin/notifications/SmtpConfig.js';
 import { DeliveryLogPage } from './pages/admin/notifications/DeliveryLog.js';
+// P1: EAM Core
+import { LocationTreePage } from './pages/assets/LocationTree.js';
+import { AssetListPage } from './pages/assets/AssetList.js';
+import { AssetFormPage } from './pages/assets/AssetForm.js';
+import { AssetDetailPage } from './pages/assets/AssetDetail.js';
+import { SRListPage } from './pages/service-requests/SRList.js';
+import { SRFormPage } from './pages/service-requests/SRForm.js';
+import { SRDetailPage } from './pages/service-requests/SRDetail.js';
+import { WOListPage } from './pages/work-orders/WOList.js';
+import { WOFormPage } from './pages/work-orders/WOForm.js';
+import { WODetailPage } from './pages/work-orders/WODetail.js';
+import { JobPlanListPage } from './pages/job-plans/JobPlanList.js';
+import { JobPlanDetailPage } from './pages/job-plans/JobPlanDetail.js';
+import { PMMasterListPage } from './pages/pm/PMMasterList.js';
+import { PMForecastPage } from './pages/pm/PMForecast.js';
+import { PermitListPage } from './pages/permits/PermitList.js';
+import { PermitDetailPage } from './pages/permits/PermitDetail.js';
+import { ItemMasterListPage } from './pages/inventory/ItemMasterList.js';
+import { TransactionLogPage } from './pages/inventory/TransactionLog.js';
+import { LabourPage } from './pages/labour/LabourPage.js';
+import { StandardReportsPage } from './pages/StandardReports.js';
 // Org structure, config extras
 import { OrgStructurePage } from './pages/admin/org/OrgStructure.js';
 import { PicklistManagerPage } from './pages/admin/config/PicklistManager.js';
@@ -67,6 +88,12 @@ function SidebarSection({ label }: { label: string }) {
 export default function App() {
   const { user, authenticated } = useCurrentUser();
 
+  const canReadAssets       = hasPermission(user, 'assets:read');
+  const canReadWO           = hasPermission(user, 'work_orders:read');
+  const canReadSR           = hasPermission(user, 'service_requests:read');
+  const canReadInventory    = hasPermission(user, 'inventory:read');
+  const canReadPermits      = hasPermission(user, 'permits:read');
+  const canReadPM           = hasPermission(user, 'pm:read');
   const canManageIdentity   = hasPermission(user, 'admin:users:manage');
   const canManageConfig     = hasPermission(user, 'admin:config:manage');
   const canManageReporting  = hasPermission(user, 'admin:reporting:manage');
@@ -94,6 +121,82 @@ export default function App() {
             <SidebarLink to="/account" label="Account" />
             <SidebarLink to="/chat" label="Chat" />
           </nav>
+        )}
+
+        {/* P1: EAM Core modules */}
+        {authenticated && (canReadAssets || canReadWO || canReadSR || canReadInventory || canReadPermits || canReadPM) && (
+          <>
+            <div className="app-sidebar-divider" />
+            <p className="app-sidebar-section">EAM</p>
+
+            {canReadAssets && (
+              <>
+                <SidebarSection label="Assets" />
+                <nav className="app-sidebar-nav" aria-label="Assets">
+                  <SidebarLink to="/assets" label="Assets" />
+                  <SidebarLink to="/locations" label="Locations" />
+                </nav>
+              </>
+            )}
+
+            {canReadSR && (
+              <>
+                <SidebarSection label="Service" />
+                <nav className="app-sidebar-nav" aria-label="Service">
+                  <SidebarLink to="/service-requests" label="Service Requests" />
+                </nav>
+              </>
+            )}
+
+            {canReadWO && (
+              <>
+                <SidebarSection label="Maintenance" />
+                <nav className="app-sidebar-nav" aria-label="Maintenance">
+                  <SidebarLink to="/work-orders" label="Work Orders" />
+                  <SidebarLink to="/job-plans" label="Job Plans" />
+                  <SidebarLink to="/pm" label="PM Masters" />
+                  <SidebarLink to="/pm/forecast" label="PM Forecast" />
+                </nav>
+              </>
+            )}
+
+            {canReadPermits && (
+              <>
+                <SidebarSection label="Safety" />
+                <nav className="app-sidebar-nav" aria-label="Safety">
+                  <SidebarLink to="/permits" label="Permits to Work" />
+                </nav>
+              </>
+            )}
+
+            {canReadInventory && (
+              <>
+                <SidebarSection label="Inventory" />
+                <nav className="app-sidebar-nav" aria-label="Inventory">
+                  <SidebarLink to="/inventory" label="Item Master" />
+                  <SidebarLink to="/inventory/transactions" label="Transactions" />
+                </nav>
+              </>
+            )}
+
+            {canReadWO && (
+              <>
+                <SidebarSection label="People" />
+                <nav className="app-sidebar-nav" aria-label="Labour">
+                  <SidebarLink to="/labour" label="Labour & Crews" />
+                </nav>
+              </>
+            )}
+
+            {canReadWO && (
+              <>
+                <SidebarSection label="Reports" />
+                <nav className="app-sidebar-nav" aria-label="Reports">
+                  <SidebarLink to="/reports/standard" label="Standard Reports" />
+                </nav>
+              </>
+            )}
+          </>
         )}
 
         {showAdminNav && (
@@ -277,6 +380,51 @@ export default function App() {
             <Route path="/admin/notifications/triggers" element={<NotificationTriggersPage />} />
             <Route path="/admin/notifications/smtp" element={<SmtpConfigPage />} />
             <Route path="/admin/notifications/delivery-log" element={<DeliveryLogPage />} />
+
+            {/* P1: Assets & Locations */}
+            <Route path="/locations" element={<LocationTreePage />} />
+            <Route path="/assets" element={<AssetListPage />} />
+            <Route path="/assets/new" element={<AssetFormPage />} />
+            <Route path="/assets/:id" element={<AssetDetailPage />} />
+            <Route path="/assets/:id/edit" element={<AssetFormPage />} />
+
+            {/* P1: Service Requests */}
+            <Route path="/service-requests" element={<SRListPage />} />
+            <Route path="/service-requests/new" element={<SRFormPage />} />
+            <Route path="/service-requests/:id" element={<SRDetailPage />} />
+            <Route path="/service-requests/:id/edit" element={<SRFormPage />} />
+
+            {/* P1: Work Orders */}
+            <Route path="/work-orders" element={<WOListPage />} />
+            <Route path="/work-orders/new" element={<WOFormPage />} />
+            <Route path="/work-orders/:id" element={<WODetailPage />} />
+            <Route path="/work-orders/:id/edit" element={<WOFormPage />} />
+
+            {/* P1: Job Plans */}
+            <Route path="/job-plans" element={<JobPlanListPage />} />
+            <Route path="/job-plans/new" element={<JobPlanDetailPage />} />
+            <Route path="/job-plans/:id" element={<JobPlanDetailPage />} />
+            <Route path="/job-plans/:id/edit" element={<JobPlanDetailPage />} />
+
+            {/* P1: Preventive Maintenance */}
+            <Route path="/pm" element={<PMMasterListPage />} />
+            <Route path="/pm/forecast" element={<PMForecastPage />} />
+            <Route path="/pm/:id" element={<PMMasterListPage />} />
+
+            {/* P1: Permits to Work */}
+            <Route path="/permits" element={<PermitListPage />} />
+            <Route path="/permits/new" element={<PermitDetailPage />} />
+            <Route path="/permits/:id" element={<PermitDetailPage />} />
+
+            {/* P1: Inventory */}
+            <Route path="/inventory" element={<ItemMasterListPage />} />
+            <Route path="/inventory/transactions" element={<TransactionLogPage />} />
+
+            {/* P1: Labour */}
+            <Route path="/labour" element={<LabourPage />} />
+
+            {/* P1: Standard Reports */}
+            <Route path="/reports/standard" element={<StandardReportsPage />} />
           </Routes>
         </div>
       </div>

@@ -3,7 +3,7 @@ import type { Database } from '@eam/db';
 import { serviceRequests, workOrders } from '@eam/db';
 
 export const CLOSED_SR_STATUSES = ['CLOSED', 'CANCELLED', 'RESOLVED'] as const;
-export const CLOSED_WO_STATUSES = ['CLOSED', 'COMP', 'CAN', 'CANCELLED', 'COMPLETED'] as const;
+export const CLOSED_WO_STATUSES = ['COMP', 'CLOSE', 'CAN'] as const;
 
 export type DashboardWidget =
   | { id: string; type: 'kpi'; title: string; value: number }
