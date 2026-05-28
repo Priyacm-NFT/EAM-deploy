@@ -123,3 +123,75 @@ export const userPresence = pgTable('user_presence', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
   socketId: text('socket_id'),
 });
+
+// --- Org structure ---
+
+export const organisations = pgTable(
+  'organisations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    code: text('code').notNull(),
+    description: text('description'),
+    address: text('address'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('organisations_tenant_idx').on(t.tenantId)],
+);
+
+export const sites = pgTable(
+  'sites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    orgId: uuid('org_id').references(() => organisations.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    siteNum: text('site_num').notNull(),
+    description: text('description'),
+    address: text('address'),
+    timezone: text('timezone').default('UTC'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('sites_tenant_idx').on(t.tenantId)],
+);
+
+// --- Status model ---
+
+export const statusSets = pgTable('status_sets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  label: text('label').notNull(),
+  entityType: text('entity_type').notNull(),
+  description: text('description'),
+  isSystem: boolean('is_system').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const statusTransitions = pgTable('status_transitions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  statusSetId: uuid('status_set_id')
+    .notNull()
+    .references(() => statusSets.id, { onDelete: 'cascade' }),
+  fromStatus: text('from_status').notNull(),
+  toStatus: text('to_status').notNull(),
+  label: text('label'),
+  requiresComment: boolean('requires_comment').notNull().default(false),
+  requiredRole: text('required_role'),
+  notifyRoles: text('notify_roles').array().default([]),
+  conditionExpression: text('condition_expression'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});

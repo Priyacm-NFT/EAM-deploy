@@ -44,6 +44,11 @@ import { NotificationTemplatesPage } from './pages/admin/notifications/Notificat
 import { NotificationTriggersPage } from './pages/admin/notifications/NotificationTriggers.js';
 import { SmtpConfigPage } from './pages/admin/notifications/SmtpConfig.js';
 import { DeliveryLogPage } from './pages/admin/notifications/DeliveryLog.js';
+// Org structure, config extras
+import { OrgStructurePage } from './pages/admin/org/OrgStructure.js';
+import { PicklistManagerPage } from './pages/admin/config/PicklistManager.js';
+import { StatusModelPage } from './pages/admin/config/StatusModel.js';
+import { ConfigVersionsPage } from './pages/admin/config/ConfigVersions.js';
 
 function SidebarLink({ to, label }: { to: string; label: string }) {
   const { pathname } = useLocation();
@@ -115,6 +120,10 @@ export default function App() {
                 <SidebarSection label="Configuration" />
                 <nav className="app-sidebar-nav" aria-label="Configuration">
                   <SidebarLink to="/admin/config" label="Entities & Fields" />
+                  <SidebarLink to="/admin/config/picklists" label="Picklists" />
+                  <SidebarLink to="/admin/config/status-model" label="Status Model" />
+                  <SidebarLink to="/admin/config/versions" label="Config Versions" />
+                  <SidebarLink to="/admin/org" label="Org & Sites" />
                 </nav>
               </>
             )}
@@ -165,6 +174,17 @@ export default function App() {
                   <SidebarLink to="/admin/reporting/designer" label="Report Designer" />
                   <SidebarLink to="/admin/reporting/schedules" label="Schedules" />
                   <SidebarLink to="/admin/reporting/bi" label="BI Connections" />
+                </nav>
+              </>
+            )}
+
+            {/* P0-7: Dashboard / Chat (admin) */}
+            {canManageConfig && (
+              <>
+                <SidebarSection label="Org Management" />
+                <nav className="app-sidebar-nav" aria-label="Org">
+                  <SidebarLink to="/admin/org" label="Organisations & Sites" />
+                  <SidebarLink to="/admin/config/status-model" label="Status Model" />
                 </nav>
               </>
             )}
@@ -245,6 +265,12 @@ export default function App() {
             <Route path="/admin/reporting/library" element={<ReportLibraryPage />} />
             <Route path="/admin/reporting/schedules" element={<ScheduledReportsPage />} />
             <Route path="/admin/reporting/bi" element={<BIConnectionsPage />} />
+
+            {/* Org structure & Status model */}
+            <Route path="/admin/org" element={<OrgStructurePage />} />
+            <Route path="/admin/config/picklists" element={<PicklistManagerPage />} />
+            <Route path="/admin/config/status-model" element={<StatusModelPage />} />
+            <Route path="/admin/config/versions" element={<ConfigVersionsPage />} />
 
             {/* P0-8: Notifications */}
             <Route path="/admin/notifications/templates" element={<NotificationTemplatesPage />} />
