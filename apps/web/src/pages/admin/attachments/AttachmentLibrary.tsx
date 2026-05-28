@@ -48,7 +48,9 @@ export function AttachmentLibraryPage() {
   const PAGE_SIZE = 20;
 
   function load() {
-    api<Attachment[]>('/admin/attachments/library').then(setAttachments).catch(() => setAttachments([]));
+    api<{ data: Attachment[]; total: number }>('/admin/attachments/library')
+      .then((res) => setAttachments(res.data ?? []))
+      .catch(() => setAttachments([]));
   }
 
   useEffect(() => { load(); }, []);
@@ -227,3 +229,4 @@ export function AttachmentLibraryPage() {
     </IdentityPageLayout>
   );
 }
+

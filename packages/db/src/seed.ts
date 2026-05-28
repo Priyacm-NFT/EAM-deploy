@@ -151,7 +151,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
 /** Adds any permissions missing from an existing DB (safe to run on every startup). */
 async function ensureMissingPermissions(db: Database, _tenantId: string): Promise<void> {
   const existing = await db.select().from(permissions);
-  const existingKeys = new Set(existing.map((p) => `${p.resource}:${p.action}`));
+  const existingKeys = new Set(existing.map((p: { resource: string; action: string }) => `${p.resource}:${p.action}`));
   const missing = DEFAULT_PERMISSIONS.filter(
     (p) => !existingKeys.has(`${p.resource}:${p.action}`),
   );

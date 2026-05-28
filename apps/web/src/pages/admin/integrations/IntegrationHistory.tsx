@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api } from '../../../api/client.js';
 import {
   IdentityPageLayout,
@@ -36,7 +36,9 @@ export function IntegrationHistoryPage() {
   const PAGE_SIZE = 25;
 
   function load() {
-    api<RunLog[]>('/admin/integrations/run-log').then(setLogs).catch(() => setLogs([]));
+    api<{ data: RunLog[]; total: number }>('/admin/integrations/run-log')
+      .then((res) => setLogs(res.data ?? []))
+      .catch(() => setLogs([]));
   }
 
   useEffect(() => { load(); }, []);
@@ -129,8 +131,8 @@ export function IntegrationHistoryPage() {
                 <tr><td colSpan={7} className="text-center text-slate-400 py-10">No run records found.</td></tr>
               )}
               {paginated.map((log) => (
-                <>
-                  <tr key={log.id}>
+                <Fragment key={log.id}>
+                  <tr>
                     <td className="font-medium text-primary">{log.jobType.replace('_', ' ')}</td>
                     <td className="text-sm text-slate-600">{log.connectionName}</td>
                     <td className="text-xs text-slate-500">{new Date(log.startedAt).toLocaleString()}</td>
@@ -166,7 +168,7 @@ export function IntegrationHistoryPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -183,3 +185,4 @@ export function IntegrationHistoryPage() {
     </IdentityPageLayout>
   );
 }
+
