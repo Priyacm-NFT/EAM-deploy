@@ -36,6 +36,7 @@ export function AssetDetailPage() {
   const [kpis, setKpis] = useState<Kpis | null>(null);
   const [history, setHistory] = useState<MoveHistory[]>([]);
   const [error, setError] = useState('');
+  const [loadFailed, setLoadFailed] = useState(false);
   const [qrData, setQrData] = useState('');
 
   // Meter reading dialog
@@ -46,7 +47,9 @@ export function AssetDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    api<Asset>(`/assets/${id}`).then(setAsset).catch((e) => setError(String(e)));
+    api<Asset>(`/assets/${id}`)
+      .then(setAsset)
+      .catch((e) => { setError(String(e)); setLoadFailed(true); });
     api<Meter[]>(`/assets/${id}/meters`).then(setMeters).catch(() => {});
     api<WorkOrder[]>(`/work-orders?assetId=${id}`).then(setWorkOrders).catch(() => {});
     api<Kpis>(`/assets/${id}/kpis`).then(setKpis).catch(() => {});
@@ -73,7 +76,27 @@ export function AssetDetailPage() {
     }
   };
 
-  if (!asset) return <div className="admin-page"><p className="text-slate-400">Loading…</p></div>;
+  if (!asset) return (
+    <div className="admin-page flex flex-col items-center justify-center min-h-[300px] gap-4">
+      {loadFailed ? (
+        <>
+          <p className="text-red-500 font-medium">Failed to load asset.</p>
+          <p className="text-slate-400 text-sm">{error}</p>
+          <button className="btn-outline !w-auto px-4" onClick={() => window.history.back()}>
+            ← Go back
+          </button>
+        </>
+      ) : (
+        <div className="flex items-center gap-3 text-slate-400">
+          <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          Loading asset…
+        </div>
+      )}
+    </div>
+  );
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },

@@ -27,11 +27,14 @@ export function WOFormPage() {
 
   useEffect(() => {
     Promise.all([
-      api<Asset[]>('/assets'),
+      api<{ data: Asset[] }>('/assets'),
       api<Location[]>('/locations'),
-      api<JobPlan[]>('/job-plans'),
-    ]).then(([a, l, jp]) => { setAssets(a); setLocations(l); setJobPlans(jp); })
-      .catch((e) => setError(String(e)));
+      api<{ data: JobPlan[] }>('/job-plans'),
+    ]).then(([a, l, jp]) => {
+      setAssets(a.data ?? []);
+      setLocations(Array.isArray(l) ? l : []);
+      setJobPlans(jp.data ?? []);
+    }).catch((e) => setError(String(e)));
 
     if (!isNew) {
       api<typeof form & { id: string }>(`/work-orders/${id}`).then((wo) => {

@@ -18,45 +18,53 @@ export function SRFormPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    subject: '', description: '', priority: 'MEDIUM', channel: 'WEB',
-    assetId: '', locationId: '', category: '', reporterName: '', reporterEmail: '',
+    description: '', priority: 'MEDIUM', channel: 'WEB',
+    assetId: '', locationId: '', category: '',
   });
 
   useEffect(() => {
-    Promise.all([
-      api<Asset[]>('/assets'),
-      api<Location[]>('/locations'),
-    ]).then(([a, l]) => { setAssets(a); setLocations(l); }).catch((e) => setError(String(e)));
+    // /assets returns {data: Asset[], page, pageSize} — unwrap safely
+    api<{ data: Asset[] } | Asset[]>('/assets?pageSize=200')
+      .then((r) => setAssets(Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? []))
+      .catch(() => {});
+
+    // /locations returns a tree array — use flat=true for a simple list
+    api<Location[]>('/locations?flat=true')
+      .then(setLocations)
+      .catch(() => {});
 
     if (!isNew) {
-      api<typeof form & { id: string }>(`/service-requests/${id}`).then((sr) => {
-        setForm({
-          subject: sr.subject, description: (sr as { description?: string }).description ?? '',
-          priority: sr.priority, channel: sr.channel,
+      api<typeof form & { id: string }>(`/service-requests/${id}`)
+        .then((sr) => setForm({
+          description: (sr as { description?: string }).description ?? '',
+          priority: sr.priority,
+          channel: sr.channel,
           assetId: (sr as { assetId?: string }).assetId ?? '',
           locationId: (sr as { locationId?: string }).locationId ?? '',
-          category: sr.category ?? '',
-          reporterName: (sr as { reporterName?: string }).reporterName ?? '',
-          reporterEmail: (sr as { reporterEmail?: string }).reporterEmail ?? '',
-        });
-      }).catch((e) => setError(String(e)));
+          category: (sr as { category?: string }).category ?? '',
+        }))
+        .catch((e) => setError(String(e)));
     }
   }, [id, isNew]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = async () => {
+    if (!form.description.trim()) { setError('Description is required'); return; }
     setSaving(true); setError('');
     try {
       const payload = {
-        ...form,
+        description: form.description,
+        priority: form.priority,
+        channel: form.channel,
         assetId: form.assetId || undefined,
         locationId: form.locationId || undefined,
         category: form.category || undefined,
-        reporterEmail: form.reporterEmail || undefined,
       };
       if (isNew) {
-        const created = await api<{ id: string }>('/service-requests', { method: 'POST', body: JSON.stringify(payload) });
+        const created = await api<{ id: string }>('/service-requests', {
+          method: 'POST', body: JSON.stringify(payload),
+        });
         navigate(`/service-requests/${created.id}`);
       } else {
         await api(`/service-requests/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -72,54 +80,63 @@ export function SRFormPage() {
       backTo={isNew ? '/service-requests' : `/service-requests/${id}`}
     >
       {error && <MessageBanner type="error" text={error} />}
-      <div className="admin-section grid grid-cols-2 gap-4">
+
+      <div className="admin-section grid grid-cols-2 gap-4 max-w-3xl">
         <div className="col-span-2">
-          <FormField label="Subject *" htmlFor="subject">
-            <input id="subject" className="form-input" value={form.subject} onChange={(e) => set('subject', e.target.value)} />
+          <FormField label="Description *" htmlFor="desc">
+            <textarea id="desc" className="form-input" rows={3}
+              placeholder="Describe the fault or service needed…"
+              value={form.description} onChange={(e) => set('description', e.target.value)} />
           </FormField>
         </div>
-        <div className="col-span-2">
-          <FormField label="Description" htmlFor="desc">
-            <textarea id="desc" className="form-input" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} />
-          </FormField>
-        </div>
+
         <FormField label="Priority" htmlFor="priority">
-          <select id="priority" className="form-input" value={form.priority} onChange={(e) => set('priority', e.target.value)}>
+          <select id="priority" className="form-input" value={form.priority}
+            onChange={(e) => set('priority', e.target.value)}>
             {['URGENT', 'HIGH', 'MEDIUM', 'LOW'].map((p) => <option key={p}>{p}</option>)}
           </select>
         </FormField>
+
         <FormField label="Channel" htmlFor="channel">
-          <select id="channel" className="form-input" value={form.channel} onChange={(e) => set('channel', e.target.value)}>
-            {['WEB', 'EMAIL', 'PHONE', 'MOBILE', 'WALK_IN', 'IOT'].map((c) => <option key={c}>{c}</option>)}
+          <select id="channel" className="form-input" value={form.channel}
+            onChange={(e) => set('channel', e.target.value)}>
+            {['WEB', 'EMAIL', 'MOBILE', 'WALK_IN', 'API'].map((c) => <option key={c}>{c}</option>)}
           </select>
         </FormField>
+
         <FormField label="Category" htmlFor="category">
-          <input id="category" className="form-input" value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. ELECTRICAL, HVAC…" />
+          <input id="category" className="form-input" value={form.category}
+            placeholder="e.g. ELECTRICAL, HVAC…"
+            onChange={(e) => set('category', e.target.value)} />
         </FormField>
+
         <FormField label="Asset" htmlFor="assetId">
-          <select id="assetId" className="form-input" value={form.assetId} onChange={(e) => set('assetId', e.target.value)}>
+          <select id="assetId" className="form-input" value={form.assetId}
+            onChange={(e) => set('assetId', e.target.value)}>
             <option value="">— None —</option>
-            {assets.map((a) => <option key={a.id} value={a.id}>{a.assetNum} – {a.description}</option>)}
+            {assets.map((a) => (
+              <option key={a.id} value={a.id}>{a.assetNum} – {a.description}</option>
+            ))}
           </select>
         </FormField>
+
         <FormField label="Location" htmlFor="locationId">
-          <select id="locationId" className="form-input" value={form.locationId} onChange={(e) => set('locationId', e.target.value)}>
+          <select id="locationId" className="form-input" value={form.locationId}
+            onChange={(e) => set('locationId', e.target.value)}>
             <option value="">— None —</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.code} – {l.name}</option>)}
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>{l.code} – {l.name}</option>
+            ))}
           </select>
-        </FormField>
-        <FormField label="Reporter name" htmlFor="reporterName">
-          <input id="reporterName" className="form-input" value={form.reporterName} onChange={(e) => set('reporterName', e.target.value)} />
-        </FormField>
-        <FormField label="Reporter email" htmlFor="reporterEmail">
-          <input id="reporterEmail" type="email" className="form-input" value={form.reporterEmail} onChange={(e) => set('reporterEmail', e.target.value)} />
         </FormField>
       </div>
+
       <FormActions>
         <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? 'Saving…' : isNew ? 'Create Service Request' : 'Save Changes'}
         </button>
-        <button type="button" className="btn-link" onClick={() => navigate(isNew ? '/service-requests' : `/service-requests/${id}`)}>
+        <button type="button" className="btn-link"
+          onClick={() => navigate(isNew ? '/service-requests' : `/service-requests/${id}`)}>
           Cancel
         </button>
       </FormActions>

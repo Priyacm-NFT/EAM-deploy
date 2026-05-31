@@ -34,7 +34,9 @@ export function WOListPage() {
     if (status) params.set('status', status);
     if (type) params.set('type', type);
     if (priority) params.set('priority', priority);
-    api<WO[]>(`/work-orders?${params}`).then(setWos).catch((e) => setError(String(e)));
+    api<{ data: WO[] }>(`/work-orders?${params}`)
+  .then((res) => setWos(res.data ?? []))
+  .catch((e) => setError(String(e)));
   }, [status, type, priority]);
 
   return (

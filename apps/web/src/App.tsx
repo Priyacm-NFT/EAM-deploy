@@ -57,11 +57,15 @@ import { WOFormPage } from './pages/work-orders/WOForm.js';
 import { WODetailPage } from './pages/work-orders/WODetail.js';
 import { JobPlanListPage } from './pages/job-plans/JobPlanList.js';
 import { JobPlanDetailPage } from './pages/job-plans/JobPlanDetail.js';
+import { JobPlanFormPage } from './pages/job-plans/JobPlanForm.js';
 import { PMMasterListPage } from './pages/pm/PMMasterList.js';
+import { PMFormPage } from './pages/pm/PMForm.js';
 import { PMForecastPage } from './pages/pm/PMForecast.js';
 import { PermitListPage } from './pages/permits/PermitList.js';
 import { PermitDetailPage } from './pages/permits/PermitDetail.js';
+import { PermitFormPage } from './pages/permits/PermitForm.js';
 import { ItemMasterListPage } from './pages/inventory/ItemMasterList.js';
+import { StoreroomListPage } from './pages/inventory/StoreroomList.js';
 import { TransactionLogPage } from './pages/inventory/TransactionLog.js';
 import { LabourPage } from './pages/labour/LabourPage.js';
 import { StandardReportsPage } from './pages/StandardReports.js';
@@ -402,23 +406,25 @@ export default function App() {
 
             {/* P1: Job Plans */}
             <Route path="/job-plans" element={<JobPlanListPage />} />
-            <Route path="/job-plans/new" element={<JobPlanDetailPage />} />
+            <Route path="/job-plans/new" element={<JobPlanFormPage />} />
             <Route path="/job-plans/:id" element={<JobPlanDetailPage />} />
             <Route path="/job-plans/:id/edit" element={<JobPlanDetailPage />} />
 
             {/* P1: Preventive Maintenance */}
             <Route path="/pm" element={<PMMasterListPage />} />
+            <Route path="/pm/new" element={<PMFormPage />} />
             <Route path="/pm/forecast" element={<PMForecastPage />} />
             <Route path="/pm/:id" element={<PMMasterListPage />} />
 
             {/* P1: Permits to Work */}
             <Route path="/permits" element={<PermitListPage />} />
-            <Route path="/permits/new" element={<PermitDetailPage />} />
+            <Route path="/permits/new" element={<PermitFormPage />} />
             <Route path="/permits/:id" element={<PermitDetailPage />} />
 
             {/* P1: Inventory */}
             <Route path="/inventory" element={<ItemMasterListPage />} />
             <Route path="/inventory/transactions" element={<TransactionLogPage />} />
+            <Route path="/inventory/storerooms" element={<StoreroomListPage />} />
 
             {/* P1: Labour */}
             <Route path="/labour" element={<LabourPage />} />
@@ -431,3 +437,4 @@ export default function App() {
     </div>
   );
 }
+
