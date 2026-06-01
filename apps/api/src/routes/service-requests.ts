@@ -221,7 +221,7 @@ export async function serviceRequestRoutes(app: FastifyInstance) {
     if (body.toStatus === 'CLOSED' || body.toStatus === 'RESOLVED') {
       updates.closedAt = new Date();
       if (body.toStatus === 'RESOLVED') updates.resolvedAt = new Date();
-      updates.closureNotes = body.comment;
+      updates.closureNotes = body.comment ?? null;
     }
 
     const [updated] = await db.update(serviceRequests).set(updates)
@@ -234,7 +234,7 @@ export async function serviceRequestRoutes(app: FastifyInstance) {
       action: `STATUS_${body.toStatus}`,
       resource: 'ServiceRequest',
       resourceId: id,
-      metadata: { fromStatus: sr.status, toStatus: body.toStatus, comment: body.comment },
+      metadata: { fromStatus: sr.status, toStatus: body.toStatus, comment: body.comment ?? null },
     });
 
     return updated;

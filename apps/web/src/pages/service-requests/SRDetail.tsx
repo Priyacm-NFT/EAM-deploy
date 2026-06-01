@@ -40,7 +40,7 @@ export function SRDetailPage() {
     setTransitioning(true);
     try {
       await api(`/service-requests/${id}/transition`, {
-        method: 'POST', body: JSON.stringify({ status: newStatus }),
+        method: 'POST', body: JSON.stringify({ toStatus: newStatus }),
       });
       load();
     } catch (e) { setError(String(e)); }
@@ -99,9 +99,15 @@ export function SRDetailPage() {
           )}
         </div>
         {sr.convertedToWoId && (
-          <p className="text-sm text-slate-600">
-            Converted to <Link to={`/work-orders/${sr.convertedToWoId}`} className="text-blue-600 underline">{sr.convertedToWoNum ?? sr.convertedToWoId}</Link>
-          </p>
+          <Link
+            to={`/work-orders/${sr.convertedToWoId}`}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-semibold no-underline hover:bg-slate-700 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            View Work Order
+          </Link>
         )}
       </div>
 

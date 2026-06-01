@@ -249,7 +249,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
       action: `STATUS_${body.toStatus}`,
       resource: 'WorkOrder',
       resourceId: id,
-      metadata: { fromStatus: wo.status, toStatus: body.toStatus, comment: body.comment },
+      metadata: { fromStatus: wo.status, toStatus: body.toStatus, comment: body.comment ?? null },
     });
 
     void dispatchWebhookEvent(tid, 'WO_STATUS_CHANGED', { woId: id, fromStatus: wo.status, toStatus: body.toStatus });

@@ -630,10 +630,10 @@ export const woSafety = pgTable(
 // ─── Preventive Maintenance ───────────────────────────────────────────────────
 
 export const pmFrequencyTypeEnum = pgEnum('pm_frequency_type', [
-  'TIME',
+  'CALENDAR',
   'METER',
+  'CALENDAR_AND_METER',
   'SEASONAL',
-  'CONDITION',
 ]);
 
 export const pmIntervalUnitEnum = pgEnum('pm_interval_unit', [
@@ -660,7 +660,7 @@ export const pmMasters = pgTable(
     locationId: uuid('location_id').references(() => locations.id),
     siteId: uuid('site_id').references(() => sites.id),
     jobPlanId: uuid('job_plan_id').references(() => jobPlans.id),
-    frequencyType: pmFrequencyTypeEnum('frequency_type').notNull().default('TIME'),
+    frequencyType: pmFrequencyTypeEnum('frequency_type').notNull().default('CALENDAR'),
     interval: integer('interval'),
     intervalUnit: pmIntervalUnitEnum('interval_unit'),
     seasonalMonth: integer('seasonal_month'),

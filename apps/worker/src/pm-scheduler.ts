@@ -32,7 +32,7 @@ async function generatePmWorkOrder(pm: typeof pmMasters.$inferSelect): Promise<v
 
   // Advance nextDueDate
   const d = new Date(pm.nextDueDate ?? new Date());
-  if (pm.frequencyType === 'TIME' && pm.interval && pm.intervalUnit) {
+  if (['CALENDAR', 'CALENDAR_AND_METER'].includes(pm.frequencyType) && pm.interval && pm.intervalUnit) {
     switch (pm.intervalUnit) {
       case 'DAY': d.setDate(d.getDate() + pm.interval); break;
       case 'WEEK': d.setDate(d.getDate() + pm.interval * 7); break;

@@ -264,7 +264,8 @@ function computeNextDueDate(
     const year = seasonalMonth && d.getMonth() + 1 > seasonalMonth ? d.getFullYear() + 1 : d.getFullYear();
     return new Date(year, (seasonalMonth ?? 1) - 1, seasonalDay ?? 1);
   }
-  if (frequencyType === 'TIME' && interval) {
+  if (frequencyType === 'CALENDAR' || frequencyType === 'CALENDAR_AND_METER') {
+    if (!interval) return d;
     switch (intervalUnit) {
       case 'HOUR': d.setHours(d.getHours() + interval); break;
       case 'DAY': d.setDate(d.getDate() + interval); break;
@@ -277,7 +278,7 @@ function computeNextDueDate(
 }
 
 function generateProjections(pm: typeof pmMasters.$inferSelect, horizonDays: number): Date[] {
-  if (pm.frequencyType !== 'TIME' || !pm.interval) return [];
+  if (!['CALENDAR', 'CALENDAR_AND_METER'].includes(pm.frequencyType) || !pm.interval) return [];
   const dates: Date[] = [];
   const endDate = new Date(Date.now() + horizonDays * 86400000);
   let d = pm.nextDueDate ? new Date(pm.nextDueDate) : new Date();
