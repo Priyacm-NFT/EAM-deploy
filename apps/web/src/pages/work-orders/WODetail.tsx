@@ -67,7 +67,7 @@ export function WODetailPage() {
   const transition = async (newStatus: string) => {
     setTransitioning(true);
     try {
-      await api(`/work-orders/${id}/transition`, { method: 'POST', body: JSON.stringify({ status: newStatus }) });
+      await api(`/work-orders/${id}/transition`, { method: 'POST', body: JSON.stringify({ toStatus: newStatus }) });
       await load();
     } catch (e) { setError(String(e)); }
     finally { setTransitioning(false); }
