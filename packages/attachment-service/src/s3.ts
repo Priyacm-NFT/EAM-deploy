@@ -37,3 +37,9 @@ export async function objectExists(key: string): Promise<boolean> {
     return false;
   }
 }
+export async function deleteObject(key: string): Promise<void> {
+  const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+  const client = createS3Client();
+  const bucket = process.env.MINIO_BUCKET ?? 'eam-attachments';
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}

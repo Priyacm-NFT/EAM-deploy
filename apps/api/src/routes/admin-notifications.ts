@@ -9,12 +9,14 @@ import {
   userNotificationPrefs,
 } from '@eam/db';
 import { renderTemplate } from '@eam/notification-service';
-import { requirePermission } from '../plugins/auth.js';
-import { authenticate } from '../plugins/auth.js';
+import { requirePermission, authenticate } from '../plugins/auth.js';
 
 const adminGuard = { preHandler: requirePermission('admin:notifications:manage') };
 
 export async function adminNotificationRoutes(app: FastifyInstance) {
+
+  // ─── Templates ───────────────────────────────────────────────────────────────
+
   app.get('/admin/notifications/templates', adminGuard, async (request) => {
     return db
       .select()
@@ -42,6 +44,32 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
     return row;
   });
 
+  app.put('/admin/notifications/templates/:id', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Partial<{
+      name: string;
+      subjectTemplate: string;
+      htmlTemplate: string;
+      textTemplate: string;
+      isActive: boolean;
+    }>;
+    const [row] = await db
+      .update(notificationTemplates)
+      .set(body)
+      .where(and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, request.user!.tenantId)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'Template not found' });
+    return row;
+  });
+
+  app.delete('/admin/notifications/templates/:id', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await db
+      .delete(notificationTemplates)
+      .where(and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, request.user!.tenantId)));
+    return reply.code(204).send();
+  });
+
   app.post('/admin/notifications/templates/preview', adminGuard, async (request) => {
     const body = request.body as {
       subjectTemplate: string;
@@ -58,6 +86,8 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
       html: renderTemplate(body.htmlTemplate, data),
     };
   });
+
+  // ─── Triggers ────────────────────────────────────────────────────────────────
 
   app.get('/admin/notifications/triggers', adminGuard, async (request) => {
     return db
@@ -94,7 +124,7 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
     return row;
   });
 
-  app.patch('/admin/notifications/triggers/:id', adminGuard, async (request) => {
+  app.patch('/admin/notifications/triggers/:id', adminGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<{
       isActive: boolean;
@@ -105,30 +135,31 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
     const [row] = await db
       .update(notificationTriggers)
       .set(body)
-      .where(
-        and(
-          eq(notificationTriggers.id, id),
-          eq(notificationTriggers.tenantId, request.user!.tenantId),
-        ),
-      )
+      .where(and(eq(notificationTriggers.id, id), eq(notificationTriggers.tenantId, request.user!.tenantId)))
       .returning();
+    if (!row) return reply.code(404).send({ error: 'Trigger not found' });
     return row;
   });
 
-  app.get('/admin/notifications/delivery-log', adminGuard, async (request) => {
-    const tenantId = request.user!.tenantId;
-    const triggers = await db
-      .select({ id: notificationTriggers.id })
-      .from(notificationTriggers)
-      .where(eq(notificationTriggers.tenantId, tenantId));
-    const triggerIds = triggers.map((t) => t.id);
-    if (triggerIds.length === 0) return [];
+  app.delete('/admin/notifications/triggers/:id', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await db
+      .delete(notificationTriggers)
+      .where(and(eq(notificationTriggers.id, id), eq(notificationTriggers.tenantId, request.user!.tenantId)));
+    return reply.code(204).send();
+  });
+
+  // ─── Delivery log ─────────────────────────────────────────────────────────────
+
+  app.get('/admin/notifications/delivery-log', adminGuard, async (_request) => {
     return db
       .select()
       .from(notificationDeliveryLog)
       .orderBy(desc(notificationDeliveryLog.sentAt))
       .limit(200);
   });
+
+  // ─── SMTP Configuration ───────────────────────────────────────────────────────
 
   app.get('/admin/notifications/smtp', adminGuard, async (request) => {
     return db
@@ -155,6 +186,7 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
       password?: string;
       fromEmail: string;
       fromName?: string;
+      isActive?: boolean;
     };
     const [row] = await db
       .insert(smtpConfigurations)
@@ -167,27 +199,87 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
         password: body.password,
         fromEmail: body.fromEmail,
         fromName: body.fromName,
+        isActive: body.isActive ?? true,
       })
       .returning();
     return row;
   });
 
-  app.post('/admin/notifications/smtp/test', adminGuard, async (request) => {
-    const body = request.body as { to: string };
-    const nodemailer = await import('nodemailer');
-    const transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST ?? 'localhost',
-      port: Number(process.env.SMTP_PORT ?? 1025),
-      secure: process.env.SMTP_SECURE === 'true',
-    });
-    await transport.sendMail({
-      from: process.env.SMTP_FROM ?? 'eam@localhost',
-      to: body.to,
-      subject: 'EAM SMTP test',
-      html: '<p>SMTP configuration test succeeded.</p>',
-    });
-    return { ok: true };
+  app.put('/admin/notifications/smtp/:id', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Partial<{
+      host: string;
+      port: number;
+      secure: boolean;
+      username: string;
+      password: string;
+      fromEmail: string;
+      fromName: string;
+      isActive: boolean;
+    }>;
+    const updateData: Record<string, unknown> = { ...body };
+    if (!body.password) delete updateData.password; // don't overwrite with blank
+    const [row] = await db
+      .update(smtpConfigurations)
+      .set(updateData as typeof smtpConfigurations.$inferInsert)
+      .where(and(eq(smtpConfigurations.id, id), eq(smtpConfigurations.tenantId, request.user!.tenantId)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'SMTP config not found' });
+    return row;
   });
+
+  app.delete('/admin/notifications/smtp/:id', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await db
+      .delete(smtpConfigurations)
+      .where(and(eq(smtpConfigurations.id, id), eq(smtpConfigurations.tenantId, request.user!.tenantId)));
+    return reply.code(204).send();
+  });
+
+  app.post('/admin/notifications/smtp/test', adminGuard, async (request, _reply) => {
+    const body = request.body as { toEmail: string };
+    const tid = request.user!.tenantId;
+
+    // Try to find active SMTP config for tenant
+    const [cfg] = await db
+      .select()
+      .from(smtpConfigurations)
+      .where(and(eq(smtpConfigurations.tenantId, tid), eq(smtpConfigurations.isActive, true)))
+      .limit(1);
+
+    const nodemailer = await import('nodemailer');
+    const transport = cfg
+      ? nodemailer.createTransport({
+          host: cfg.host,
+          port: cfg.port,
+          secure: cfg.secure,
+          auth: cfg.username ? { user: cfg.username, pass: cfg.password ?? '' } : undefined,
+        })
+      : nodemailer.createTransport({
+          host: process.env.SMTP_HOST ?? 'localhost',
+          port: Number(process.env.SMTP_PORT ?? 1025),
+          secure: false,
+        });
+
+    await transport.sendMail({
+      from: cfg ? (cfg.fromName ? `"${cfg.fromName}" <${cfg.fromEmail}>` : cfg.fromEmail) : (process.env.SMTP_FROM ?? 'eam@localhost'),
+      to: body.toEmail,
+      subject: 'EAM Platform — SMTP test',
+      html: '<p>Your SMTP configuration is working correctly.</p><p>This is a test email from EAM Platform.</p>',
+    });
+
+    // Update last tested status
+    if (cfg) {
+      await db
+        .update(smtpConfigurations)
+        .set({ isActive: cfg.isActive })
+        .where(eq(smtpConfigurations.id, cfg.id));
+    }
+
+    return { ok: true, sentTo: body.toEmail };
+  });
+
+  // ─── User Notification Preferences ───────────────────────────────────────────
 
   app.get('/users/me/notification-prefs', { preHandler: authenticate }, async (request) => {
     return db
@@ -196,7 +288,7 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
       .where(eq(userNotificationPrefs.userId, request.user!.id));
   });
 
-  app.put('/users/me/notification-prefs/:triggerId', { preHandler: authenticate }, async (request) => {
+  app.put('/users/me/notification-prefs/:triggerId', { preHandler: authenticate }, async (request, reply) => {
     const { triggerId } = request.params as { triggerId: string };
     const body = request.body as {
       emailEnabled?: boolean;
@@ -211,7 +303,7 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
       .limit(1);
 
     if (trigger?.isMandatory && body.emailEnabled === false) {
-      throw { statusCode: 400, message: 'Mandatory notifications cannot be disabled' };
+      return reply.code(400).send({ error: 'Mandatory notifications cannot be disabled' });
     }
 
     const [existing] = await db

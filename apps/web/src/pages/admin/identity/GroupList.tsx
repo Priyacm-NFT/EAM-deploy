@@ -31,9 +31,7 @@ export function GroupListPage() {
       .catch((e) => setError(String(e)));
   }
 
-  useEffect(() => {
-    loadGroups();
-  }, []);
+  useEffect(() => { loadGroups(); }, []);
 
   const filtered = groups.filter(
     (g) =>
@@ -43,9 +41,7 @@ export function GroupListPage() {
 
   async function createGroup(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
-    setMsg('');
-    setCreating(true);
+    setError(''); setMsg(''); setCreating(true);
     try {
       await api('/admin/groups', { method: 'POST', body: JSON.stringify(createForm) });
       setCreateForm(emptyCreateForm);
@@ -53,8 +49,17 @@ export function GroupListPage() {
       loadGroups();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Create failed');
-    } finally {
-      setCreating(false);
+    } finally { setCreating(false); }
+  }
+
+  async function deleteGroup(id: string, name: string) {
+    if (!window.confirm(`Delete group "${name}"? This cannot be undone.`)) return;
+    try {
+      await api(`/admin/groups/${id}`, { method: 'DELETE' });
+      setMsg(`Group "${name}" deleted.`);
+      loadGroups();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
     }
   }
 
@@ -64,23 +69,12 @@ export function GroupListPage() {
         <h2 className="admin-section-title">Create group</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Group name" htmlFor="group-name">
-            <input
-              id="group-name"
-              type="text"
-              className="form-input"
-              value={createForm.name}
-              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-              required
-            />
+            <input id="group-name" type="text" className="form-input" value={createForm.name}
+              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} required />
           </FormField>
           <FormField label="Description" htmlFor="group-desc">
-            <input
-              id="group-desc"
-              type="text"
-              className="form-input"
-              value={createForm.description}
-              onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-            />
+            <input id="group-desc" type="text" className="form-input" value={createForm.description}
+              onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })} />
           </FormField>
         </div>
         <FormActions>
@@ -95,17 +89,12 @@ export function GroupListPage() {
         {msg && <MessageBanner type="success" text={msg} />}
         {error && <MessageBanner type="error" text={error} />}
         <FormField label="Search" htmlFor="group-search">
-          <input
-            id="group-search"
-            type="search"
-            className="form-input max-w-md"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
+          <input id="group-search" type="search" className="form-input max-w-md" value={filter}
+            onChange={(e) => setFilter(e.target.value)} />
         </FormField>
         <ul className="divide-y divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
           {filtered.length === 0 && (
-            <li className="p-8 text-center text-slate-500">No groups found. Create one using the form above.</li>
+            <li className="p-8 text-center text-slate-500">No groups found.</li>
           )}
           {filtered.map((g) => (
             <li key={g.id} className="p-4 flex justify-between items-start gap-4 bg-white hover:bg-slate-50">
@@ -114,9 +103,15 @@ export function GroupListPage() {
                 <p className="text-sm text-slate-500 mt-0.5">{g.description || 'No description'}</p>
                 <span className="text-xs text-slate-400 mt-1 inline-block">Source: {g.source}</span>
               </div>
-              <Link to={`/admin/identity/groups/${g.id}`} className="btn-link shrink-0">
-                Edit
-              </Link>
+              <div className="flex gap-3 shrink-0">
+                <Link to={`/admin/identity/groups/${g.id}`} className="btn-link">Edit</Link>
+                {g.source !== 'system' && (
+                  <button type="button" className="btn-danger text-xs"
+                    onClick={() => deleteGroup(g.id, g.name)}>
+                    Delete
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ul>

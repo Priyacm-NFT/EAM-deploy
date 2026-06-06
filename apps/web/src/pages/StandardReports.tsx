@@ -2,11 +2,22 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../components/identity/IdentityLayout.js';
 
-interface ReportSubject { id: string; label: string; category: string; description: string | null }
+interface ReportSubject {
+  id: string;
+  label: string;
+  category: string | null;
+  description: string | null;
+}
 
 const REPORT_CATEGORIES = [
-  'Work Orders', 'Assets', 'Service Requests', 'Preventive Maintenance',
-  'Inventory', 'Labour', 'Permits', 'Audit',
+  'Work Orders',
+  'Assets',
+  'Service Requests',
+  'Preventive Maintenance',
+  'Inventory',
+  'Labour',
+  'Permits',
+  'Audit',
 ];
 
 export function StandardReportsPage() {
@@ -17,7 +28,9 @@ export function StandardReportsPage() {
   const [filter, setFilter] = useState('');
 
   useEffect(() => {
-    api<ReportSubject[]>('/reports/subjects').then(setSubjects).catch((e) => setError(String(e)));
+    api<ReportSubject[]>('/reports/subjects')
+      .then(setSubjects)
+      .catch((e) => setError(String(e)));
   }, []);
 
   const runReport = async (subjectId: string) => {
@@ -33,23 +46,48 @@ export function StandardReportsPage() {
     }
   };
 
+  // FIX: guard against null/undefined category with ?? fallback
   const filtered = subjects.filter(
-    (s) => !filter || s.label.toLowerCase().includes(filter.toLowerCase()) || s.category.toLowerCase().includes(filter.toLowerCase()),
+    (s) =>
+      !filter ||
+      s.label.toLowerCase().includes(filter.toLowerCase()) ||
+      (s.category ?? '').toLowerCase().includes(filter.toLowerCase()),
   );
 
+  // Subjects that don't match any known category — show under their own category or fallback
+  const allCategorised = REPORT_CATEGORIES.flatMap((cat) =>
+    filtered.filter((s) => (s.category ?? 'Work Orders') === cat),
+  );
+  const uncategorised = filtered.filter((s) => !allCategorised.includes(s));
+
   return (
-    <IdentityPageLayout title="Standard Reports" subtitle="15 built-in EAM operational reports">
+    <IdentityPageLayout
+      title="Standard Reports"
+      subtitle={`${subjects.length} built-in EAM operational reports`}
+    >
       {error && <MessageBanner type="error" text={error} />}
 
       <div className="admin-section mb-4">
         <label className="block">
           <span className="form-label">Search reports</span>
-          <input className="form-input max-w-sm" placeholder="Filter by name or category…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <input
+            className="form-input max-w-sm"
+            placeholder="Filter by name or category…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
         </label>
       </div>
 
+      {subjects.length === 0 && !error && (
+        <div className="admin-section">
+          <p className="text-slate-500 text-sm">No reports available.</p>
+        </div>
+      )}
+
       {REPORT_CATEGORIES.map((cat) => {
-        const catReports = filtered.filter((s) => s.category === cat);
+        // FIX: use ?? 'Work Orders' so null category still matches
+        const catReports = filtered.filter((s) => (s.category ?? 'Work Orders') === cat);
         if (catReports.length === 0) return null;
         return (
           <div key={cat} className="admin-section mb-4">
@@ -60,7 +98,9 @@ export function StandardReportsPage() {
                   <div className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded">
                     <div className="flex-1">
                       <p className="font-medium text-sm">{s.label}</p>
-                      {s.description && <p className="text-xs text-slate-400 mt-0.5">{s.description}</p>}
+                      {s.description && (
+                        <p className="text-xs text-slate-400 mt-0.5">{s.description}</p>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -75,28 +115,51 @@ export function StandardReportsPage() {
                   {results[s.id] && (
                     <div className="mt-2 bg-slate-50 border border-slate-200 rounded overflow-x-auto">
                       <div className="p-2 flex justify-between items-center">
-                        <span className="text-xs text-slate-500">{(results[s.id] as unknown[]).length} rows</span>
-                        <button type="button" className="btn-link text-xs" onClick={() => setResults((prev) => { const n = { ...prev }; delete n[s.id]; return n; })}>Clear</button>
+                        <span className="text-xs text-slate-500">
+                          {(results[s.id] as unknown[]).length} rows
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-link text-xs"
+                          onClick={() =>
+                            setResults((prev) => {
+                              const n = { ...prev };
+                              delete n[s.id];
+                              return n;
+                            })
+                          }
+                        >
+                          Clear
+                        </button>
                       </div>
                       {(results[s.id] as unknown[]).length > 0 && (
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-slate-200">
-                              {Object.keys((results[s.id] as Record<string, unknown>[])[0]!).map((col) => (
-                                <th key={col} className="py-1.5 px-3 text-left text-slate-500 font-medium">{col}</th>
+                              {Object.keys(
+                                (results[s.id] as Record<string, unknown>[])[0]!,
+                              ).map((col) => (
+                                <th
+                                  key={col}
+                                  className="py-1.5 px-3 text-left text-slate-500 font-medium"
+                                >
+                                  {col}
+                                </th>
                               ))}
                             </tr>
                           </thead>
                           <tbody>
-                            {(results[s.id] as Record<string, unknown>[]).slice(0, 50).map((row, i) => (
-                              <tr key={i} className="border-b border-slate-100">
-                                {Object.values(row).map((val, j) => (
-                                  <td key={j} className="py-1.5 px-3 text-slate-700">
-                                    {val === null || val === undefined ? '—' : String(val)}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
+                            {(results[s.id] as Record<string, unknown>[])
+                              .slice(0, 50)
+                              .map((row, i) => (
+                                <tr key={i} className="border-b border-slate-100">
+                                  {Object.values(row).map((val, j) => (
+                                    <td key={j} className="py-1.5 px-3 text-slate-700">
+                                      {val === null || val === undefined ? '—' : String(val)}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
                           </tbody>
                         </table>
                       )}
@@ -108,6 +171,35 @@ export function StandardReportsPage() {
           </div>
         );
       })}
+
+      {/* Catch-all for any reports not in the known categories */}
+      {uncategorised.length > 0 && (
+        <div className="admin-section mb-4">
+          <h2 className="admin-section-title mb-3">Other</h2>
+          <div className="space-y-3">
+            {uncategorised.map((s) => (
+              <div key={s.id}>
+                <div className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded">
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">{s.label}</p>
+                    {s.description && (
+                      <p className="text-xs text-slate-400 mt-0.5">{s.description}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-primary !w-auto px-4 text-sm"
+                    onClick={() => runReport(s.id)}
+                    disabled={running === s.id}
+                  >
+                    {running === s.id ? 'Running…' : 'Run'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </IdentityPageLayout>
   );
 }

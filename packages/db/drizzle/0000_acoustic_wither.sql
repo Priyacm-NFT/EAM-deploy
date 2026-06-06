@@ -1,13 +1,22 @@
-CREATE TYPE "public"."auth_source" AS ENUM('LOCAL', 'AD', 'LDAP', 'SAML', 'OIDC');--> statement-breakpoint
-CREATE TYPE "public"."group_source" AS ENUM('LOCAL', 'AD', 'LDAP');--> statement-breakpoint
-CREATE TYPE "public"."idp_type" AS ENUM('SAML', 'OIDC', 'LDAP', 'AD');--> statement-breakpoint
-CREATE TYPE "public"."field_rule_type" AS ENUM('REQUIRED', 'READONLY', 'HIDDEN', 'VISIBLE');--> statement-breakpoint
-CREATE TYPE "public"."field_type" AS ENUM('TEXT', 'NUMBER', 'DATE', 'DATETIME', 'BOOLEAN', 'PICKLIST', 'MULTI_SELECT', 'LOOKUP', 'FORMULA', 'ATTACHMENT', 'URL', 'EMAIL', 'PHONE');--> statement-breakpoint
-CREATE TYPE "public"."scan_status" AS ENUM('PENDING', 'CLEAN', 'INFECTED', 'FAILED');--> statement-breakpoint
-CREATE TYPE "public"."virus_scan_action" AS ENUM('QUARANTINE', 'REJECT', 'ALERT');--> statement-breakpoint
-CREATE TYPE "public"."visibility" AS ENUM('PUBLIC', 'ROLE_RESTRICTED');--> statement-breakpoint
-CREATE TYPE "public"."adapter_type" AS ENUM('REST', 'SOAP', 'KAFKA', 'RABBITMQ', 'SFTP', 'JDBC', 'WEBHOOK_OUTBOUND');--> statement-breakpoint
-CREATE TABLE "audit_logs" (
+DO $$ BEGIN CREATE TYPE "public"."auth_source" AS ENUM('LOCAL', 'AD', 'LDAP', 'SAML', 'OIDC'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."group_source" AS ENUM('LOCAL', 'AD', 'LDAP'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."idp_type" AS ENUM('SAML', 'OIDC', 'LDAP', 'AD'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."field_rule_type" AS ENUM('REQUIRED', 'READONLY', 'HIDDEN', 'VISIBLE'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."field_type" AS ENUM('TEXT', 'NUMBER', 'DATE', 'DATETIME', 'BOOLEAN', 'PICKLIST', 'MULTI_SELECT', 'LOOKUP', 'FORMULA', 'ATTACHMENT', 'URL', 'EMAIL', 'PHONE'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."scan_status" AS ENUM('PENDING', 'CLEAN', 'INFECTED', 'FAILED'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."virus_scan_action" AS ENUM('QUARANTINE', 'REJECT', 'ALERT'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."visibility" AS ENUM('PUBLIC', 'ROLE_RESTRICTED'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."adapter_type" AS ENUM('REST', 'SOAP', 'KAFKA', 'RABBITMQ', 'SFTP', 'JDBC', 'WEBHOOK_OUTBOUND'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "audit_logs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid,
 	"user_id" uuid,
@@ -19,13 +28,13 @@ CREATE TABLE "audit_logs" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "group_roles" (
+CREATE TABLE IF NOT EXISTS "group_roles" (
 	"group_id" uuid NOT NULL,
 	"role_id" uuid NOT NULL,
 	CONSTRAINT "group_roles_group_id_role_id_pk" PRIMARY KEY("group_id","role_id")
 );
 --> statement-breakpoint
-CREATE TABLE "groups" (
+CREATE TABLE IF NOT EXISTS "groups" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -36,7 +45,7 @@ CREATE TABLE "groups" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "identity_providers" (
+CREATE TABLE IF NOT EXISTS "identity_providers" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"type" "idp_type" NOT NULL,
@@ -45,27 +54,27 @@ CREATE TABLE "identity_providers" (
 	"is_active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "mfa_recovery_codes" (
+CREATE TABLE IF NOT EXISTS "mfa_recovery_codes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
 	"code_hash" text NOT NULL,
 	"used_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "permissions" (
+CREATE TABLE IF NOT EXISTS "permissions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"resource" text NOT NULL,
 	"action" text NOT NULL,
 	"description" text
 );
 --> statement-breakpoint
-CREATE TABLE "role_permissions" (
+CREATE TABLE IF NOT EXISTS "role_permissions" (
 	"role_id" uuid NOT NULL,
 	"permission_id" uuid NOT NULL,
 	CONSTRAINT "role_permissions_role_id_permission_id_pk" PRIMARY KEY("role_id","permission_id")
 );
 --> statement-breakpoint
-CREATE TABLE "roles" (
+CREATE TABLE IF NOT EXISTS "roles" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -74,7 +83,7 @@ CREATE TABLE "roles" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "sessions" (
+CREATE TABLE IF NOT EXISTS "sessions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
 	"tenant_id" uuid NOT NULL,
@@ -86,7 +95,7 @@ CREATE TABLE "sessions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "tenants" (
+CREATE TABLE IF NOT EXISTS "tenants" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
 	"slug" text NOT NULL,
@@ -96,14 +105,14 @@ CREATE TABLE "tenants" (
 	CONSTRAINT "tenants_slug_unique" UNIQUE("slug")
 );
 --> statement-breakpoint
-CREATE TABLE "user_groups" (
+CREATE TABLE IF NOT EXISTS "user_groups" (
 	"user_id" uuid NOT NULL,
 	"group_id" uuid NOT NULL,
 	"joined_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "user_groups_user_id_group_id_pk" PRIMARY KEY("user_id","group_id")
 );
 --> statement-breakpoint
-CREATE TABLE "users" (
+CREATE TABLE IF NOT EXISTS "users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"email" text NOT NULL,
@@ -123,7 +132,7 @@ CREATE TABLE "users" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "config_versions" (
+CREATE TABLE IF NOT EXISTS "config_versions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"entity_type" text NOT NULL,
@@ -134,7 +143,7 @@ CREATE TABLE "config_versions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "entity_definitions" (
+CREATE TABLE IF NOT EXISTS "entity_definitions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -145,7 +154,7 @@ CREATE TABLE "entity_definitions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "field_definitions" (
+CREATE TABLE IF NOT EXISTS "field_definitions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"entity_id" uuid NOT NULL,
@@ -168,7 +177,7 @@ CREATE TABLE "field_definitions" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "field_rules" (
+CREATE TABLE IF NOT EXISTS "field_rules" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"entity_id" uuid NOT NULL,
@@ -180,7 +189,7 @@ CREATE TABLE "field_rules" (
 	"display_order" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "form_layouts" (
+CREATE TABLE IF NOT EXISTS "form_layouts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"entity_id" uuid NOT NULL,
@@ -192,7 +201,7 @@ CREATE TABLE "form_layouts" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "picklist_definitions" (
+CREATE TABLE IF NOT EXISTS "picklist_definitions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -200,7 +209,7 @@ CREATE TABLE "picklist_definitions" (
 	"is_system" boolean DEFAULT false NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "picklist_values" (
+CREATE TABLE IF NOT EXISTS "picklist_values" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"picklist_id" uuid NOT NULL,
 	"value" text NOT NULL,
@@ -212,7 +221,7 @@ CREATE TABLE "picklist_values" (
 	"effective_to" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "schema_migrations" (
+CREATE TABLE IF NOT EXISTS "schema_migrations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"table_name" text NOT NULL,
@@ -225,7 +234,7 @@ CREATE TABLE "schema_migrations" (
 	"error" text
 );
 --> statement-breakpoint
-CREATE TABLE "table_views" (
+CREATE TABLE IF NOT EXISTS "table_views" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"entity_id" uuid NOT NULL,
@@ -238,7 +247,7 @@ CREATE TABLE "table_views" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "workflow_definitions" (
+CREATE TABLE IF NOT EXISTS "workflow_definitions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -253,7 +262,7 @@ CREATE TABLE "workflow_definitions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "workflow_history" (
+CREATE TABLE IF NOT EXISTS "workflow_history" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"instance_id" uuid NOT NULL,
 	"node_id" text,
@@ -266,7 +275,7 @@ CREATE TABLE "workflow_history" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "workflow_instances" (
+CREATE TABLE IF NOT EXISTS "workflow_instances" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"workflow_def_id" uuid NOT NULL,
 	"entity_type" text NOT NULL,
@@ -280,7 +289,7 @@ CREATE TABLE "workflow_instances" (
 	"error" text
 );
 --> statement-breakpoint
-CREATE TABLE "workflow_tasks" (
+CREATE TABLE IF NOT EXISTS "workflow_tasks" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"instance_id" uuid NOT NULL,
 	"node_id" text NOT NULL,
@@ -296,14 +305,14 @@ CREATE TABLE "workflow_tasks" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "attachment_links" (
+CREATE TABLE IF NOT EXISTS "attachment_links" (
 	"attachment_id" uuid NOT NULL,
 	"entity_type" text NOT NULL,
 	"entity_id" uuid NOT NULL,
 	CONSTRAINT "attachment_links_attachment_id_entity_type_entity_id_pk" PRIMARY KEY("attachment_id","entity_type","entity_id")
 );
 --> statement-breakpoint
-CREATE TABLE "attachments" (
+CREATE TABLE IF NOT EXISTS "attachments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"document_type_id" uuid NOT NULL,
@@ -327,7 +336,7 @@ CREATE TABLE "attachments" (
 	"deleted_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "document_types" (
+CREATE TABLE IF NOT EXISTS "document_types" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -344,7 +353,7 @@ CREATE TABLE "document_types" (
 	"is_system" boolean DEFAULT false NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "integration_connections" (
+CREATE TABLE IF NOT EXISTS "integration_connections" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -354,7 +363,7 @@ CREATE TABLE "integration_connections" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "integration_jobs" (
+CREATE TABLE IF NOT EXISTS "integration_jobs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"connection_id" uuid NOT NULL,
@@ -367,7 +376,7 @@ CREATE TABLE "integration_jobs" (
 	"next_run_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "integration_run_log" (
+CREATE TABLE IF NOT EXISTS "integration_run_log" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"job_id" uuid NOT NULL,
 	"status" text NOT NULL,
@@ -378,7 +387,7 @@ CREATE TABLE "integration_run_log" (
 	"finished_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "webhook_subscriptions" (
+CREATE TABLE IF NOT EXISTS "webhook_subscriptions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"url" text NOT NULL,
@@ -388,7 +397,7 @@ CREATE TABLE "webhook_subscriptions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "report_bi_connections" (
+CREATE TABLE IF NOT EXISTS "report_bi_connections" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"adapter_type" text NOT NULL,
@@ -401,7 +410,7 @@ CREATE TABLE "report_bi_connections" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "report_definitions" (
+CREATE TABLE IF NOT EXISTS "report_definitions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -414,7 +423,7 @@ CREATE TABLE "report_definitions" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "report_run_log" (
+CREATE TABLE IF NOT EXISTS "report_run_log" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"report_id" uuid NOT NULL,
 	"schedule_id" uuid,
@@ -426,7 +435,7 @@ CREATE TABLE "report_run_log" (
 	"finished_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "report_schedules" (
+CREATE TABLE IF NOT EXISTS "report_schedules" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"report_id" uuid NOT NULL,
@@ -439,7 +448,7 @@ CREATE TABLE "report_schedules" (
 	"is_active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "report_subjects" (
+CREATE TABLE IF NOT EXISTS "report_subjects" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
 	"label" text NOT NULL,
@@ -450,7 +459,7 @@ CREATE TABLE "report_subjects" (
 	CONSTRAINT "report_subjects_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint
-CREATE TABLE "in_app_notifications" (
+CREATE TABLE IF NOT EXISTS "in_app_notifications" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -464,7 +473,7 @@ CREATE TABLE "in_app_notifications" (
 	"expires_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "notification_delivery_log" (
+CREATE TABLE IF NOT EXISTS "notification_delivery_log" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"trigger_id" uuid,
 	"entity_id" uuid,
@@ -476,7 +485,7 @@ CREATE TABLE "notification_delivery_log" (
 	"sent_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "notification_digest_queue" (
+CREATE TABLE IF NOT EXISTS "notification_digest_queue" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"trigger_id" uuid NOT NULL,
@@ -490,7 +499,7 @@ CREATE TABLE "notification_digest_queue" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "notification_templates" (
+CREATE TABLE IF NOT EXISTS "notification_templates" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"name" text NOT NULL,
@@ -502,7 +511,7 @@ CREATE TABLE "notification_templates" (
 	"is_active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "notification_triggers" (
+CREATE TABLE IF NOT EXISTS "notification_triggers" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"event_type" text NOT NULL,
@@ -516,7 +525,7 @@ CREATE TABLE "notification_triggers" (
 	"is_active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "smtp_configurations" (
+CREATE TABLE IF NOT EXISTS "smtp_configurations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"host" text NOT NULL,
@@ -529,7 +538,7 @@ CREATE TABLE "smtp_configurations" (
 	"is_active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "user_notification_prefs" (
+CREATE TABLE IF NOT EXISTS "user_notification_prefs" (
 	"user_id" uuid NOT NULL,
 	"trigger_id" uuid NOT NULL,
 	"email_enabled" boolean DEFAULT true NOT NULL,
@@ -538,7 +547,7 @@ CREATE TABLE "user_notification_prefs" (
 	CONSTRAINT "user_notification_prefs_user_id_trigger_id_pk" PRIMARY KEY("user_id","trigger_id")
 );
 --> statement-breakpoint
-CREATE TABLE "assets" (
+CREATE TABLE IF NOT EXISTS "assets" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"asset_num" text NOT NULL,
@@ -550,7 +559,7 @@ CREATE TABLE "assets" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "chat_messages" (
+CREATE TABLE IF NOT EXISTS "chat_messages" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"from_user_id" uuid NOT NULL,
@@ -564,7 +573,7 @@ CREATE TABLE "chat_messages" (
 	"deleted_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "dashboard_layouts" (
+CREATE TABLE IF NOT EXISTS "dashboard_layouts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"user_id" uuid,
@@ -575,7 +584,7 @@ CREATE TABLE "dashboard_layouts" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "locations" (
+CREATE TABLE IF NOT EXISTS "locations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"parent_id" uuid,
@@ -584,7 +593,7 @@ CREATE TABLE "locations" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "service_requests" (
+CREATE TABLE IF NOT EXISTS "service_requests" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"sr_num" text NOT NULL,
@@ -599,7 +608,7 @@ CREATE TABLE "service_requests" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "user_presence" (
+CREATE TABLE IF NOT EXISTS "user_presence" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"status" text DEFAULT 'OFFLINE' NOT NULL,
@@ -607,7 +616,7 @@ CREATE TABLE "user_presence" (
 	"socket_id" text
 );
 --> statement-breakpoint
-CREATE TABLE "work_orders" (
+CREATE TABLE IF NOT EXISTS "work_orders" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"wo_num" text NOT NULL,
@@ -726,4 +735,3 @@ CREATE INDEX "attachments_entity_idx" ON "attachments" USING btree ("entity_type
 CREATE INDEX "assets_tenant_idx" ON "assets" USING btree ("tenant_id");--> statement-breakpoint
 CREATE INDEX "locations_tenant_idx" ON "locations" USING btree ("tenant_id");--> statement-breakpoint
 CREATE INDEX "service_requests_tenant_idx" ON "service_requests" USING btree ("tenant_id");--> statement-breakpoint
-CREATE INDEX "work_orders_tenant_idx" ON "work_orders" USING btree ("tenant_id");

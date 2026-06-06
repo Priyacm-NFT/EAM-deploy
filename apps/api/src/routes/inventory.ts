@@ -90,8 +90,18 @@ export async function inventoryRoutes(app: FastifyInstance) {
   });
 
   app.post('/storerooms', adminGuard, async (request, reply) => {
-    const body = request.body as Partial<typeof storerooms.$inferInsert>;
+    const body = request.body as Record<string, unknown>;
     const tid = request.user!.tenantId;
+
+    // Auto-generate storeroom_num from code field or sequential number
+    const storeroomNum = (body['storeroomNum'] || body['storeroom_num'] || body['code']) as string | undefined;
+    if (storeroomNum) {
+      body['storeroomNum'] = storeroomNum;
+    } else {
+      const count = await db.select({ id: storerooms.id }).from(storerooms).where(eq(storerooms.tenantId, tid));
+      body['storeroomNum'] = `SR-${String(count.length + 1).padStart(4, '0')}`;
+    }
+
     const [row] = await db.insert(storerooms).values({ tenantId: tid, ...body } as typeof storerooms.$inferInsert).returning();
     return reply.code(201).send(row);
   });

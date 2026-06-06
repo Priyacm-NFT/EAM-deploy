@@ -33,23 +33,54 @@ export async function permitRoutes(app: FastifyInstance) {
 
   // ─── Create ───────────────────────────────────────────────────────────────────
 
-  app.post('/permits', writeGuard, async (request, reply) => {
-    const body = request.body as {
-      type: string;
-      woId?: string;
-      assetId?: string;
-      locationId?: string;
-      validFrom?: string;
-      validTo?: string;
-      notes?: string;
-      checklistItems?: Array<{
-        category: string;
-        description: string;
-        sequence?: number;
-        isRequired?: boolean;
-      }>;
-    };
+  app.post('/permits', {
+    ...writeGuard,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['type', 'description'],
+        properties: {
+          type: { type: 'string', minLength: 1 },
+          description: { type: 'string', minLength: 1 },
+          woId: { type: 'string' },
+          assetId: { type: 'string' },
+          locationId: { type: 'string' },
+          validFrom: { type: 'string' },
+          validTo: { type: 'string' },
+          notes: { type: 'string' },
+          checklistItems: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['category', 'description'],
+              properties: {
+                category: { type: 'string' },
+                description: { type: 'string' },
+                sequence: { type: 'number' },
+                isRequired: { type: 'boolean' },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const tid = request.user!.tenantId;
+
+    // Defensive: treat body as unknown to safely extract fields
+    const rawBody = request.body as Record<string, unknown>;
+    request.log.info({ rawBody }, 'POST /permits received body');
+
+    const descriptionRaw = rawBody['description'];
+    const descriptionStr = typeof descriptionRaw === 'string' ? descriptionRaw.trim() : '';
+    if (!descriptionStr) {
+      return reply.code(400).send({ error: 'Description is required', debug_received: rawBody });
+    }
+
+    const typeStr = typeof rawBody['type'] === 'string' ? rawBody['type'] : '';
+    if (!typeStr) {
+      return reply.code(400).send({ error: 'Type is required' });
+    }
 
     const count = await db.select({ id: permits.id }).from(permits).where(eq(permits.tenantId, tid));
     const permitNum = `PTW-${String(count.length + 1).padStart(5, '0')}`;
@@ -57,19 +88,20 @@ export async function permitRoutes(app: FastifyInstance) {
     const [row] = await db.insert(permits).values({
       tenantId: tid,
       permitNum,
-      type: body.type as typeof permits.$inferInsert.type,
-      woId: body.woId,
-      assetId: body.assetId,
-      locationId: body.locationId,
-      validFrom: body.validFrom ? new Date(body.validFrom) : undefined,
-      validTo: body.validTo ? new Date(body.validTo) : undefined,
-      notes: body.notes,
+      type: typeStr as typeof permits.$inferInsert.type,
+      description: descriptionStr,
+      woId: typeof rawBody['woId'] === 'string' ? rawBody['woId'] : undefined,
+      assetId: typeof rawBody['assetId'] === 'string' ? rawBody['assetId'] : undefined,
+      locationId: typeof rawBody['locationId'] === 'string' ? rawBody['locationId'] : undefined,
+      validFrom: typeof rawBody['validFrom'] === 'string' && rawBody['validFrom'] ? new Date(rawBody['validFrom'] as string) : undefined,
+      validTo: typeof rawBody['validTo'] === 'string' && rawBody['validTo'] ? new Date(rawBody['validTo'] as string) : undefined,
+      notes: typeof rawBody['notes'] === 'string' ? rawBody['notes'] : undefined,
       requestedByUserId: request.user!.id,
     }).returning();
 
     // Create default checklist based on type
-    const defaultItems = getDefaultChecklistItems(body.type);
-    const customItems = body.checklistItems ?? [];
+    const defaultItems = getDefaultChecklistItems(typeStr);
+    const customItems = (Array.isArray(rawBody['checklistItems']) ? rawBody['checklistItems'] : []) as Array<{ category: string; description: string; sequence?: number; isRequired?: boolean }>;
     const allItems = [...defaultItems, ...customItems];
 
     if (allItems.length > 0) {
@@ -85,7 +117,7 @@ export async function permitRoutes(app: FastifyInstance) {
     }
 
     // Create approval steps
-    const approvalSteps = getApprovalSteps(body.type);
+    const approvalSteps = getApprovalSteps(typeStr);
     if (approvalSteps.length > 0) {
       await db.insert(permitApprovals).values(
         approvalSteps.map((step, i) => ({

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+//import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
@@ -21,7 +22,7 @@ export function ItemMasterListPage() {
   const [showNew, setShowNew] = useState(false);
   const [newItem, setNewItem] = useState({ itemNum: '', description: '', itemType: 'STOCKED', unit: 'EA', unitCost: '' });
   const [newBusy, setNewBusy] = useState(false);
-  const navigate = useNavigate();
+  
 
   const loadItems = () => {
     setError('');

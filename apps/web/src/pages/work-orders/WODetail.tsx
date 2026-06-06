@@ -25,17 +25,28 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   COMP: ['CLOSE', 'INPRG'],
 };
 
+// Safe fetch — returns empty array on any error (missing columns, 500, etc.)
+async function safeFetch(url: string): Promise<Record<string, unknown>[]> {
+  try {
+    const result = await api<Record<string, unknown>[]>(url);
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
 export function WODetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>('overview');
   const [wo, setWo] = useState<WO | null>(null);
-  const [tasks, setTasks] = useState<Array<{ id: string; description: string; sequence: number; status: string }>>([]);
-  const [labour, setLabour] = useState<Array<{ id: string; craft: string; regularHours: string; overtimeHours: string; totalCost: string | null; approved: boolean; workDate: string }>>([]);
-  const [materials, setMaterials] = useState<Array<{ id: string; itemNum: string | null; description: string; qty: string; unitCost: string | null; totalCost: string | null }>>([]);
-  const [tools, setTools] = useState<Array<{ id: string; toolName: string; hours: string; cost: string | null }>>([]);
-  const [safety, setSafety] = useState<Array<{ id: string; hazardDescription: string; controlMeasure: string }>>([]);
+  const [tasks, setTasks] = useState<Record<string, unknown>[]>([]);
+  const [labour, setLabour] = useState<Record<string, unknown>[]>([]);
+  const [materials, setMaterials] = useState<Record<string, unknown>[]>([]);
+  const [tools, setTools] = useState<Record<string, unknown>[]>([]);
+  const [safety, setSafety] = useState<Record<string, unknown>[]>([]);
   const [costs, setCosts] = useState<{ laborCost: string; materialCost: string; serviceCost: string; toolCost: string; total: string } | null>(null);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [transitioning, setTransitioning] = useState(false);
   const [applyingJP, setApplyingJP] = useState(false);
   const [showClose, setShowClose] = useState(false);
@@ -44,17 +55,23 @@ export function WODetailPage() {
 
   const load = async () => {
     if (!id) return;
+    setLoadError('');
     try {
-      const [w, t, l, m, tl, s] = await Promise.all([
-        api<WO>(`/work-orders/${id}`),
-        api<typeof tasks>(`/work-orders/${id}/tasks`),
-        api<typeof labour>(`/work-orders/${id}/labour`),
-        api<typeof materials>(`/work-orders/${id}/materials`),
-        api<typeof tools>(`/work-orders/${id}/tools`),
-        api<typeof safety>(`/work-orders/${id}/safety`),
-      ]);
-      setWo(w); setTasks(t); setLabour(l); setMaterials(m); setTools(tl); setSafety(s);
-    } catch (e) { setError(String(e)); }
+      const wo = await api<WO>(`/work-orders/${id}`);
+      setWo(wo);
+    } catch (e) {
+      setLoadError(String(e));
+      return;
+    }
+    // Load child tabs independently — errors in any won't block the page
+    const [t, l, m, tl, s] = await Promise.all([
+      safeFetch(`/work-orders/${id}/tasks`),
+      safeFetch(`/work-orders/${id}/labour`),
+      safeFetch(`/work-orders/${id}/materials`),
+      safeFetch(`/work-orders/${id}/tools`),
+      safeFetch(`/work-orders/${id}/safety`),
+    ]);
+    setTasks(t); setLabour(l); setMaterials(m); setTools(tl); setSafety(s);
   };
 
   useEffect(() => { load(); }, [id]);
@@ -94,6 +111,19 @@ export function WODetailPage() {
     } catch (e) { setError(String(e)); }
     finally { setClosing(false); }
   };
+
+  // Helper to safely read any field from a row
+  const str = (row: Record<string, unknown>, key: string): string =>
+    row[key] != null ? String(row[key]) : '—';
+  const bool = (row: Record<string, unknown>, key: string): boolean =>
+    Boolean(row[key]);
+
+  if (loadError) return (
+    <div className="admin-page">
+      <p className="text-red-500 text-sm">Failed to load work order: {loadError}</p>
+      <button className="btn-link mt-2" onClick={load}>Retry</button>
+    </div>
+  );
 
   if (!wo) return <div className="admin-page"><p className="text-slate-400">Loading…</p></div>;
 
@@ -216,11 +246,11 @@ export function WODetailPage() {
                 <th className="pb-2 pr-4">Seq</th><th className="pb-2 pr-4">Description</th><th className="pb-2">Status</th>
               </tr></thead>
               <tbody>
-                {tasks.map((t) => (
-                  <tr key={t.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4 text-slate-400">{t.sequence}</td>
-                    <td className="py-2 pr-4">{t.description}</td>
-                    <td className="py-2 text-slate-500">{t.status}</td>
+                {tasks.map((t, i) => (
+                  <tr key={str(t, 'id') || i} className="border-b border-slate-100">
+                    <td className="py-2 pr-4 text-slate-400">{str(t, 'sequence')}</td>
+                    <td className="py-2 pr-4">{str(t, 'description')}</td>
+                    <td className="py-2 text-slate-500">{str(t, 'status')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -239,14 +269,14 @@ export function WODetailPage() {
                 <th className="pb-2 pr-4">Craft</th><th className="pb-2 pr-4">Date</th><th className="pb-2 pr-4">Reg hrs</th><th className="pb-2 pr-4">OT hrs</th><th className="pb-2 pr-4">Cost</th><th className="pb-2">Approved</th>
               </tr></thead>
               <tbody>
-                {labour.map((l) => (
-                  <tr key={l.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{l.craft}</td>
-                    <td className="py-2 pr-4 text-slate-500">{new Date(l.workDate).toLocaleDateString()}</td>
-                    <td className="py-2 pr-4">{l.regularHours}</td>
-                    <td className="py-2 pr-4">{l.overtimeHours}</td>
-                    <td className="py-2 pr-4">{l.totalCost ? `$${parseFloat(l.totalCost).toLocaleString()}` : '—'}</td>
-                    <td className="py-2">{l.approved ? '✓' : '—'}</td>
+                {labour.map((l, i) => (
+                  <tr key={str(l, 'id') || i} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{str(l, 'craft')}</td>
+                    <td className="py-2 pr-4 text-slate-500">{l['work_date'] || l['workDate'] ? new Date(String(l['work_date'] ?? l['workDate'])).toLocaleDateString() : '—'}</td>
+                    <td className="py-2 pr-4">{str(l, 'regular_hours') !== '—' ? str(l, 'regular_hours') : str(l, 'regularHours')}</td>
+                    <td className="py-2 pr-4">{str(l, 'overtime_hours') !== '—' ? str(l, 'overtime_hours') : str(l, 'overtimeHours')}</td>
+                    <td className="py-2 pr-4">{l['total_cost'] || l['totalCost'] ? `$${parseFloat(String(l['total_cost'] ?? l['totalCost'])).toLocaleString()}` : '—'}</td>
+                    <td className="py-2">{bool(l, 'approved') ? '✓' : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -262,16 +292,16 @@ export function WODetailPage() {
           {materials.length === 0 ? <p className="text-slate-400 text-sm">No materials.</p> : (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                <th className="pb-2 pr-4">Item #</th><th className="pb-2 pr-4">Description</th><th className="pb-2 pr-4">Qty</th><th className="pb-2 pr-4">Unit cost</th><th className="pb-2">Total</th>
+                <th className="pb-2 pr-4">Item #</th><th className="pb-2 pr-4">Description</th><th className="pb-2 pr-4">Qty planned</th><th className="pb-2 pr-4">Unit cost</th><th className="pb-2">Total</th>
               </tr></thead>
               <tbody>
-                {materials.map((m) => (
-                  <tr key={m.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4 font-mono text-xs text-slate-500">{m.itemNum ?? '—'}</td>
-                    <td className="py-2 pr-4">{m.description}</td>
-                    <td className="py-2 pr-4">{m.qty}</td>
-                    <td className="py-2 pr-4">{m.unitCost ? `$${parseFloat(m.unitCost).toFixed(2)}` : '—'}</td>
-                    <td className="py-2">{m.totalCost ? `$${parseFloat(m.totalCost).toLocaleString()}` : '—'}</td>
+                {materials.map((m, i) => (
+                  <tr key={str(m, 'id') || i} className="border-b border-slate-100">
+                    <td className="py-2 pr-4 font-mono text-xs text-slate-500">{str(m, 'item_num') !== '—' ? str(m, 'item_num') : str(m, 'itemNum')}</td>
+                    <td className="py-2 pr-4">{str(m, 'description')}</td>
+                    <td className="py-2 pr-4">{str(m, 'qty_planned') !== '—' ? str(m, 'qty_planned') : str(m, 'qtyPlanned')}</td>
+                    <td className="py-2 pr-4">{m['unit_cost'] || m['unitCost'] ? `$${parseFloat(String(m['unit_cost'] ?? m['unitCost'])).toFixed(2)}` : '—'}</td>
+                    <td className="py-2">{m['total_cost'] || m['totalCost'] ? `$${parseFloat(String(m['total_cost'] ?? m['totalCost'])).toLocaleString()}` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -287,14 +317,14 @@ export function WODetailPage() {
           {tools.length === 0 ? <p className="text-slate-400 text-sm">No tools.</p> : (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                <th className="pb-2 pr-4">Tool</th><th className="pb-2 pr-4">Hours</th><th className="pb-2">Cost</th>
+                <th className="pb-2 pr-4">Description</th><th className="pb-2 pr-4">Qty planned</th><th className="pb-2">Cost</th>
               </tr></thead>
               <tbody>
-                {tools.map((t) => (
-                  <tr key={t.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{t.toolName}</td>
-                    <td className="py-2 pr-4">{t.hours}</td>
-                    <td className="py-2">{t.cost ? `$${parseFloat(t.cost).toLocaleString()}` : '—'}</td>
+                {tools.map((t, i) => (
+                  <tr key={str(t, 'id') || i} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{str(t, 'description')}</td>
+                    <td className="py-2 pr-4">{str(t, 'qty_planned') !== '—' ? str(t, 'qty_planned') : str(t, 'qtyPlanned')}</td>
+                    <td className="py-2">{t['total_cost'] || t['totalCost'] ? `$${parseFloat(String(t['total_cost'] ?? t['totalCost'])).toLocaleString()}` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -313,10 +343,10 @@ export function WODetailPage() {
                 <th className="pb-2 pr-4">Hazard</th><th className="pb-2">Control measure</th>
               </tr></thead>
               <tbody>
-                {safety.map((s) => (
-                  <tr key={s.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{s.hazardDescription}</td>
-                    <td className="py-2">{s.controlMeasure}</td>
+                {safety.map((s, i) => (
+                  <tr key={str(s, 'id') || i} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{str(s, 'hazard') !== '—' ? str(s, 'hazard') : str(s, 'hazardDescription')}</td>
+                    <td className="py-2">{str(s, 'control') !== '—' ? str(s, 'control') : str(s, 'controlMeasure')}</td>
                   </tr>
                 ))}
               </tbody>

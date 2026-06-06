@@ -32,9 +32,7 @@ export function RoleListPage() {
       .catch((e) => setError(String(e)));
   }
 
-  useEffect(() => {
-    loadRoles();
-  }, []);
+  useEffect(() => { loadRoles(); }, []);
 
   const filtered = roles.filter(
     (r) =>
@@ -44,9 +42,7 @@ export function RoleListPage() {
 
   async function createRole(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
-    setMsg('');
-    setCreating(true);
+    setError(''); setMsg(''); setCreating(true);
     try {
       const created = await api<{ id: string }>('/admin/roles', {
         method: 'POST',
@@ -58,8 +54,17 @@ export function RoleListPage() {
       navigate(`/admin/identity/roles/${created.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Create failed');
-    } finally {
-      setCreating(false);
+    } finally { setCreating(false); }
+  }
+
+  async function deleteRole(id: string, name: string) {
+    if (!window.confirm(`Delete role "${name}"? This cannot be undone.`)) return;
+    try {
+      await api(`/admin/roles/${id}`, { method: 'DELETE' });
+      setMsg(`Role "${name}" deleted.`);
+      loadRoles();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
     }
   }
 
@@ -69,32 +74,18 @@ export function RoleListPage() {
         <h2 className="admin-section-title">Create role</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Role name" htmlFor="role-name">
-            <input
-              id="role-name"
-              type="text"
-              className="form-input"
-              value={createForm.name}
-              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-              required
-            />
+            <input id="role-name" type="text" className="form-input" value={createForm.name}
+              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} required />
           </FormField>
           <FormField label="Description" htmlFor="role-desc">
-            <input
-              id="role-desc"
-              type="text"
-              className="form-input"
-              value={createForm.description}
-              onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-            />
+            <input id="role-desc" type="text" className="form-input" value={createForm.description}
+              onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })} />
           </FormField>
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-          <input
-            type="checkbox"
-            className="rounded border-slate-300 text-accent focus:ring-accent"
+          <input type="checkbox" className="rounded border-slate-300 text-accent focus:ring-accent"
             checked={createForm.requireMfa}
-            onChange={(e) => setCreateForm({ ...createForm, requireMfa: e.target.checked })}
-          />
+            onChange={(e) => setCreateForm({ ...createForm, requireMfa: e.target.checked })} />
           Require MFA for users with this role
         </label>
         <FormActions>
@@ -109,17 +100,12 @@ export function RoleListPage() {
         {msg && <MessageBanner type="success" text={msg} />}
         {error && <MessageBanner type="error" text={error} />}
         <FormField label="Search" htmlFor="role-search">
-          <input
-            id="role-search"
-            type="search"
-            className="form-input max-w-md"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
+          <input id="role-search" type="search" className="form-input max-w-md" value={filter}
+            onChange={(e) => setFilter(e.target.value)} />
         </FormField>
         <ul className="divide-y divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
           {filtered.length === 0 && (
-            <li className="p-8 text-center text-slate-500">No roles found. Create one using the form above.</li>
+            <li className="p-8 text-center text-slate-500">No roles found.</li>
           )}
           {filtered.map((r) => (
             <li key={r.id} className="p-4 flex justify-between items-center gap-4 bg-white hover:bg-slate-50">
@@ -132,9 +118,13 @@ export function RoleListPage() {
                   </span>
                 )}
               </div>
-              <Link to={`/admin/identity/roles/${r.id}`} className="btn-link shrink-0">
-                Edit permissions
-              </Link>
+              <div className="flex gap-3 shrink-0">
+                <Link to={`/admin/identity/roles/${r.id}`} className="btn-link">Edit permissions</Link>
+                <button type="button" className="btn-danger text-xs"
+                  onClick={() => deleteRole(r.id, r.name)}>
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
         </ul>

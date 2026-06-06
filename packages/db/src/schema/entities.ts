@@ -755,6 +755,7 @@ export const permits = pgTable(
     woId: uuid('wo_id').references(() => workOrders.id),
     assetId: uuid('asset_id').references(() => assets.id),
     locationId: uuid('location_id').references(() => locations.id),
+    description: text('description').notNull(),
     status: permitStatusEnum('status').notNull().default('DRAFT'),
     issuedByUserId: uuid('issued_by_user_id').references(() => users.id),
     requestedByUserId: uuid('requested_by_user_id').references(() => users.id),

@@ -41,16 +41,38 @@ export type InAppPushFn = (userId: string, notification: {
 }) => void | Promise<void>;
 
 function distributionRules(config: Record<string, unknown>): DistributionRule[] {
+  // Format 1: explicit rules array [{type, value}]
   const rules = config.rules;
-  if (!Array.isArray(rules)) return [];
-  return rules.filter(
-    (r): r is DistributionRule =>
-      typeof r === 'object' &&
-      r !== null &&
-      'type' in r &&
-      'value' in r &&
-      typeof (r as DistributionRule).type === 'string',
-  );
+  if (Array.isArray(rules) && rules.length > 0) {
+    return rules.filter(
+      (r): r is DistributionRule =>
+        typeof r === 'object' &&
+        r !== null &&
+        'type' in r &&
+        'value' in r &&
+        typeof (r as DistributionRule).type === 'string',
+    );
+  }
+
+  // Format 2: frontend format {notifyAssignee, notifyRequester, roles, emails}
+  const result: DistributionRule[] = [];
+  if (config.notifyAssignee) {
+    result.push({ type: 'FIELD', value: 'assignedToUserId' });
+  }
+  if (config.notifyRequester) {
+    result.push({ type: 'FIELD', value: 'requestedByUserId' });
+  }
+  if (Array.isArray(config.roles)) {
+    for (const role of config.roles as string[]) {
+      if (role) result.push({ type: 'ROLE', value: role });
+    }
+  }
+  if (Array.isArray(config.emails)) {
+    for (const email of config.emails as string[]) {
+      if (email) result.push({ type: 'STATIC_EMAIL', value: email });
+    }
+  }
+  return result;
 }
 
 export class NotificationDispatcher {
@@ -189,6 +211,18 @@ export class NotificationDispatcher {
                 entityType: row.entityType ?? undefined,
                 entityId: row.entityId ?? undefined,
               },
+            });
+          }
+
+          // FIX 9: log in-app delivery — only EMAIL was logged before
+          if (row) {
+            await this.db.insert(notificationDeliveryLog).values({
+              triggerId: trigger.id,
+              entityId: payload.entityId as string | undefined,
+              recipientUserId: recipient.userId,
+              recipientEmail: recipient.email,
+              channel: 'IN_APP',
+              status: 'DELIVERED',
             });
           }
         }

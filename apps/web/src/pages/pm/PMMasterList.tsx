@@ -73,6 +73,7 @@ export function PMMasterListPage() {
                     <td className="py-2 pr-4 text-slate-500">{pm.assetNum ?? '—'}</td>
                     <td className="py-2 pr-4 text-slate-500">{pm.siteName ?? '—'}</td>
                     <td className="py-2">
+                      <button type="button" className="btn-link text-xs" onClick={() => navigate(`/pm/${pm.id}`)}>Edit</button>
                       <button type="button" className="btn-link text-xs" onClick={() => generateNow(pm.id)}>Generate WO</button>
                     </td>
                   </tr>

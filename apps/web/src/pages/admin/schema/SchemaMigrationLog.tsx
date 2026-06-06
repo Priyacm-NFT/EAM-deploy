@@ -7,30 +7,15 @@ import {
 
 interface MigrationRow {
   id: string;
-  entityName: string;
+  tableName: string;
   columnName: string;
-  columnType: string;
-  operation: 'ADD_COLUMN' | 'DROP_COLUMN' | 'ALTER_COLUMN' | 'ADD_INDEX' | 'DROP_INDEX';
-  status: 'applied' | 'pending' | 'failed' | 'rolled_back';
-  adminEmail: string;
-  appliedAt: string | null;
-  createdAt: string;
+  operation: string;
+  status: string;
+  executedBy: string | null;
+  executedAt: string;
+  error: string | null;
+  sqlExecuted: string;
 }
-
-const STATUS_STYLES: Record<MigrationRow['status'], string> = {
-  applied: 'bg-green-100 text-green-800',
-  pending: 'bg-yellow-100 text-yellow-800',
-  failed: 'bg-red-100 text-red-800',
-  rolled_back: 'bg-slate-100 text-slate-600',
-};
-
-const OP_LABELS: Record<MigrationRow['operation'], string> = {
-  ADD_COLUMN: 'Add column',
-  DROP_COLUMN: 'Drop column',
-  ALTER_COLUMN: 'Alter column',
-  ADD_INDEX: 'Add index',
-  DROP_INDEX: 'Drop index',
-};
 
 export function SchemaMigrationLogPage() {
   const [rows, setRows] = useState<MigrationRow[]>([]);
@@ -41,7 +26,7 @@ export function SchemaMigrationLogPage() {
   const [rollingBack, setRollingBack] = useState<string | null>(null);
 
   function load() {
-    api<MigrationRow[]>('/admin/schema/migrations')
+    api<MigrationRow[]>('/admin/config/migrations')
       .then(setRows)
       .catch(() => setRows([]));
   }
@@ -51,9 +36,8 @@ export function SchemaMigrationLogPage() {
   const filtered = rows.filter((r) => {
     const matchText =
       !filter ||
-      r.entityName.toLowerCase().includes(filter.toLowerCase()) ||
-      r.columnName.toLowerCase().includes(filter.toLowerCase()) ||
-      r.adminEmail.toLowerCase().includes(filter.toLowerCase());
+      r.tableName.toLowerCase().includes(filter.toLowerCase()) ||
+      r.columnName.toLowerCase().includes(filter.toLowerCase());
     const matchStatus = !statusFilter || r.status === statusFilter;
     return matchText && matchStatus;
   });
@@ -61,10 +45,9 @@ export function SchemaMigrationLogPage() {
   async function rollback(id: string) {
     if (!window.confirm('Roll back this migration? This will undo the DDL change.')) return;
     setRollingBack(id);
-    setError('');
-    setMsg('');
+    setError(''); setMsg('');
     try {
-      await api(`/admin/schema/migrations/${id}/rollback`, { method: 'POST' });
+      await api(`/admin/config/migrations/${id}/rollback`, { method: 'POST' });
       setMsg('Migration rolled back successfully.');
       load();
     } catch (e) {
@@ -75,9 +58,24 @@ export function SchemaMigrationLogPage() {
   }
 
   const counts = {
-    applied: rows.filter((r) => r.status === 'applied').length,
-    pending: rows.filter((r) => r.status === 'pending').length,
-    failed: rows.filter((r) => r.status === 'failed').length,
+    applied: rows.filter((r) => r.status === 'SUCCESS').length,
+    pending: rows.filter((r) => r.status === 'PENDING').length,
+    failed: rows.filter((r) => r.status === 'FAILED').length,
+  };
+
+  const statusStyle: Record<string, string> = {
+    SUCCESS: 'bg-green-100 text-green-800',
+    PENDING: 'bg-yellow-100 text-yellow-800',
+    FAILED: 'bg-red-100 text-red-800',
+    ROLLED_BACK: 'bg-slate-100 text-slate-600',
+  };
+
+  const opLabel: Record<string, string> = {
+    ADD_COLUMN: 'Add column',
+    DROP_COLUMN: 'Drop column',
+    RENAME_COLUMN: 'Rename column',
+    ADD_INDEX: 'Add index',
+    DROP_INDEX: 'Drop index',
   };
 
   return (
@@ -92,7 +90,7 @@ export function SchemaMigrationLogPage() {
         {[
           { label: 'Applied', count: counts.applied, color: 'text-green-700 bg-green-50 border-green-200' },
           { label: 'Pending', count: counts.pending, color: 'text-yellow-700 bg-yellow-50 border-yellow-200' },
-          { label: 'Failed', count: counts.failed, color: 'text-red-700 bg-red-50 border-red-200' },
+          { label: 'Failed',  count: counts.failed,  color: 'text-red-700 bg-red-50 border-red-200' },
         ].map((stat) => (
           <div key={stat.label} className={`content-card border ${stat.color} text-center`}>
             <p className="text-3xl font-bold">{stat.count}</p>
@@ -107,7 +105,7 @@ export function SchemaMigrationLogPage() {
         <div className="flex flex-wrap gap-3">
           <input
             type="search"
-            placeholder="Search entity, column, or admin…"
+            placeholder="Search entity, column…"
             className="form-input max-w-xs"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -118,23 +116,21 @@ export function SchemaMigrationLogPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="">All statuses</option>
-            <option value="applied">Applied</option>
-            <option value="pending">Pending</option>
-            <option value="failed">Failed</option>
-            <option value="rolled_back">Rolled back</option>
+            <option value="SUCCESS">Applied</option>
+            <option value="PENDING">Pending</option>
+            <option value="FAILED">Failed</option>
+            <option value="ROLLED_BACK">Rolled back</option>
           </select>
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 mt-4">
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Entity</th>
-                <th>Column / index</th>
-                <th>Type</th>
+                <th>Entity (table)</th>
+                <th>Column</th>
                 <th>Operation</th>
                 <th>Status</th>
-                <th>Applied by</th>
                 <th>Applied at</th>
                 <th>Actions</th>
               </tr>
@@ -142,29 +138,26 @@ export function SchemaMigrationLogPage() {
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="text-center text-slate-400 py-10">
-                    No migrations match your filters. Custom fields added in the Configuration Engine
-                    will appear here.
+                  <td colSpan={6} className="text-center text-slate-400 py-10">
+                    No migrations match your filters. Custom fields added in the Configuration Engine will appear here.
                   </td>
                 </tr>
               )}
               {filtered.map((m) => (
                 <tr key={m.id}>
-                  <td className="font-mono text-xs font-medium text-primary">{m.entityName}</td>
+                  <td className="font-mono text-xs font-medium text-primary">{m.tableName}</td>
                   <td className="font-mono text-xs">{m.columnName}</td>
-                  <td className="font-mono text-xs text-slate-500">{m.columnType}</td>
-                  <td>{OP_LABELS[m.operation]}</td>
+                  <td>{opLabel[m.operation] ?? m.operation}</td>
                   <td>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLES[m.status]}`}>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusStyle[m.status] ?? 'bg-slate-100 text-slate-600'}`}>
                       {m.status}
                     </span>
                   </td>
-                  <td className="text-slate-600 text-xs">{m.adminEmail}</td>
                   <td className="text-slate-500 text-xs">
-                    {m.appliedAt ? new Date(m.appliedAt).toLocaleString() : '—'}
+                    {m.executedAt ? new Date(m.executedAt).toLocaleString() : '—'}
                   </td>
                   <td>
-                    {m.status === 'applied' && (
+                    {m.status === 'SUCCESS' && (
                       <button
                         type="button"
                         className="btn-danger text-xs"
@@ -174,11 +167,11 @@ export function SchemaMigrationLogPage() {
                         {rollingBack === m.id ? 'Rolling back…' : 'Rollback'}
                       </button>
                     )}
-                    {m.status === 'failed' && (
+                    {m.status === 'FAILED' && (
                       <button
                         type="button"
                         className="btn-link text-xs"
-                        onClick={() => api(`/admin/schema/migrations/${m.id}/retry`, { method: 'POST' }).then(load)}
+                        onClick={() => api(`/admin/config/migrations/${m.id}/retry`, { method: 'POST' }).then(load)}
                       >
                         Retry
                       </button>
@@ -193,3 +186,4 @@ export function SchemaMigrationLogPage() {
     </IdentityPageLayout>
   );
 }
+

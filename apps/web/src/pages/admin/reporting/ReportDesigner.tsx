@@ -29,6 +29,21 @@ export function ReportDesignerPage() {
     [subject, selectedFields],
   );
 
+  // Resolve friendly subject id → real DB table name
+  const SUBJECT_TO_TABLE: Record<string, string> = {
+    wo_backlog:         'work_orders',
+    wo_cost_summary:    'work_orders',
+    overdue_pms:        'work_orders',
+    asset_availability: 'assets',
+    service_requests:   'service_requests',
+    assets:             'assets',
+    work_orders:        'work_orders',
+  };
+
+  function resolveBaseTable(id: string): string {
+    return SUBJECT_TO_TABLE[id] ?? id;
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -38,6 +53,7 @@ export function ReportDesignerPage() {
         ]);
         setSubjects(s);
         setReports(r);
+        if (s.length > 0 && !subjectId) setSubjectId(s[0].id);
       } catch (e) {
         setError(String(e));
       }
@@ -51,7 +67,7 @@ export function ReportDesignerPage() {
     setSelectedFields(row.definition.fields ?? []);
     setChartType(row.definition.chartType ?? 'bar');
     setPreviewRows([]);
-    setMsg(`Loaded “${row.name}”`);
+    setMsg(`Loaded "${row.name}"`);
   };
 
   const newReport = () => {
@@ -65,20 +81,16 @@ export function ReportDesignerPage() {
   };
 
   const save = async () => {
-    if (!name.trim()) {
-      setError('Enter a report name');
-      return;
-    }
-    if (!subjectId) {
-      setError('Select a data subject');
-      return;
-    }
+    if (!name.trim()) { setError('Enter a report name'); return; }
+    if (!subjectId)   { setError('Select a data subject'); return; }
     setError('');
     setSaving(true);
     try {
       const body = {
         name: name.trim(),
         subjectId,
+        // Always send the real table name so the backend query builder accepts it
+        baseTable: resolveBaseTable(subjectId),
         definition: { fields: selectedFields, chartType, chartConfig: { type: chartType } },
       };
       if (activeId) {
@@ -136,6 +148,7 @@ export function ReportDesignerPage() {
       {msg && <MessageBanner type="success" text={msg} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Left — available fields */}
         <aside className="lg:col-span-3 admin-section">
           <h2 className="admin-section-title">Available fields</h2>
           <FormField label="Data subject" htmlFor="report-subject">
@@ -156,6 +169,14 @@ export function ReportDesignerPage() {
               ))}
             </select>
           </FormField>
+
+          {/* Show resolved table name so it's clear what DB table will be queried */}
+          {subjectId && (
+            <p className="text-xs text-slate-400 mb-2">
+              Table: <code>{resolveBaseTable(subjectId)}</code>
+            </p>
+          )}
+
           {!subjectId ? (
             <p className="text-sm text-slate-500">Choose a subject to see fields.</p>
           ) : (
@@ -177,6 +198,7 @@ export function ReportDesignerPage() {
           )}
         </aside>
 
+        {/* Centre — canvas */}
         <section
           className="lg:col-span-6 admin-section"
           onDragOver={(e) => e.preventDefault()}
@@ -193,13 +215,16 @@ export function ReportDesignerPage() {
               placeholder="Type your report name"
             />
           </FormField>
-          <p className="text-sm text-slate-600 mb-2">Drag fields from the left panel into this area.</p>
+          <p className="text-sm text-slate-600 mb-2">
+            Drag fields from the left panel into this area.
+          </p>
           <div className="flex flex-wrap gap-2 min-h-[120px] p-3 border border-dashed border-slate-300 rounded-lg bg-slate-50/50">
             {selectedFields.length === 0 && (
               <span className="text-sm text-slate-400 self-center">Drop fields here</span>
             )}
             {selectedFields.map((key) => {
-              const label = subject?.availableFields.find((f) => f.key === key)?.label ?? key;
+              const label =
+                subject?.availableFields.find((f) => f.key === key)?.label ?? key;
               return (
                 <span
                   key={key}
@@ -209,7 +234,9 @@ export function ReportDesignerPage() {
                   <button
                     type="button"
                     className="text-orange-800 hover:text-red-600"
-                    onClick={() => setSelectedFields((p) => p.filter((k) => k !== key))}
+                    onClick={() =>
+                      setSelectedFields((p) => p.filter((k) => k !== key))
+                    }
                   >
                     ×
                   </button>
@@ -230,23 +257,38 @@ export function ReportDesignerPage() {
               <option value="table">Table only</option>
             </select>
           </FormField>
+
+          {/* Preview table */}
           {previewRows.length > 0 && (
             <div className="mt-4 overflow-auto max-h-48 border border-slate-200 rounded-lg text-xs">
               <table className="admin-table">
+                <thead>
+                  <tr>
+                    {Object.keys(previewRows[0]).map((col) => (
+                      <th key={col} className="px-2 py-1 text-left font-medium text-slate-600">
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
-                  {previewRows.slice(0, 5).map((row, i) => (
-                    <tr key={i}>
+                  {previewRows.slice(0, 10).map((row, i) => (
+                    <tr key={i} className="border-t border-slate-100">
                       {Object.values(row).map((v, j) => (
-                        <td key={j}>{String(v ?? '')}</td>
+                        <td key={j} className="px-2 py-1">{String(v ?? '')}</td>
                       ))}
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="text-xs text-slate-400 p-2">
+                Showing {Math.min(previewRows.length, 10)} of {previewRows.length} rows
+              </p>
             </div>
           )}
         </section>
 
+        {/* Right — saved reports */}
         <aside className="lg:col-span-3 admin-section space-y-3">
           <h2 className="admin-section-title">Saved reports</h2>
           <button type="button" className="btn-primary w-full" onClick={newReport}>
@@ -269,14 +311,22 @@ export function ReportDesignerPage() {
             ))}
           </ul>
           <FormActions>
-            <button type="button" className="btn-primary !w-auto flex-1" disabled={saving} onClick={save}>
+            <button
+              type="button"
+              className="btn-primary !w-auto flex-1"
+              disabled={saving}
+              onClick={save}
+            >
               {saving ? 'Saving…' : 'Save report'}
             </button>
             <button type="button" className="btn-outline flex-1" onClick={preview}>
               Preview data
             </button>
           </FormActions>
-          <Link to="/admin/reporting/library" className="btn-link text-sm block text-center">
+          <Link
+            to="/admin/reporting/library"
+            className="btn-link text-sm block text-center"
+          >
             View report library
           </Link>
         </aside>

@@ -5,6 +5,7 @@ export const reportSubjects = pgTable('report_subjects', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull().unique(),
   label: text('label').notNull(),
+  category: text('category').notNull().default('Work Orders'), // ADDED
   baseQuery: text('base_query').notNull(),
   availableFields: jsonb('available_fields').$type<unknown[]>().notNull().default([]),
   joins: jsonb('joins').$type<unknown[]>().default([]),

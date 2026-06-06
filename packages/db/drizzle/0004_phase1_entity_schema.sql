@@ -141,3 +141,4 @@ DO $$ BEGIN
     FOREIGN KEY ("class_id") REFERENCES "public"."asset_classifications"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
+

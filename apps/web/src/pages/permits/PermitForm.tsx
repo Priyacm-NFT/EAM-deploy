@@ -1,3 +1,5 @@
+
+
 /**
  * PermitForm.tsx
  * NEW file — handles /permits/new
@@ -8,7 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
-const PERMIT_TYPES = ['HOT_WORK','CONFINED_SPACE','ELECTRICAL','HEIGHT','EXCAVATION','GENERAL','LOTO'] as const;
+const PERMIT_TYPES = ['HOT_WORK','CONFINED_SPACE','ELECTRICAL','HEIGHT','EXCAVATION','CHEMICAL','GENERAL'] as const;
 
 export function PermitFormPage() {
   const navigate = useNavigate();
@@ -56,7 +58,7 @@ export function PermitFormPage() {
           <FormField label="Permit type *" htmlFor="ptype">
             <select id="ptype" className="form-input" value={form.type}
               onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as typeof form.type }))}>
-              {PERMIT_TYPES.map((t) => <option key={t}>{t.replace(/_/g, ' ')}</option>)}
+              {PERMIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
             </select>
           </FormField>
 

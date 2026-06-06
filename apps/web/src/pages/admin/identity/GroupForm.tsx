@@ -74,6 +74,23 @@ export function GroupFormPage() {
     }
   }
 
+  async function saveRoles() {
+    if (!id) return;
+    setError('');
+    setSaving(true);
+    try {
+      await api(`/admin/groups/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, description, roleIds }),
+      });
+      setMsg('Roles saved. Users must sign in again for changes to apply.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function addMember() {
     if (!id || !memberUserId) return;
     setMsg('');
@@ -88,6 +105,18 @@ export function GroupFormPage() {
       setMsg('Member added. They must sign in again for permissions to apply.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add member');
+    }
+  }
+
+  async function removeMember(userId: string) {
+    if (!id) return;
+    setMsg(''); setError('');
+    try {
+      await api(`/admin/groups/${id}/members/${userId}`, { method: 'DELETE' });
+      setMembers((prev) => prev.filter((m) => m.id !== userId));
+      setMsg('Member removed. They must sign in again for changes to apply.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to remove member');
     }
   }
 
@@ -159,7 +188,12 @@ export function GroupFormPage() {
             ))}
           </div>
         )}
-        <p className="text-xs text-slate-500 mt-2">Save the group after changing roles.</p>
+        <div className="mt-4">
+          <button type="button" className="btn-primary !w-auto px-6" onClick={saveRoles} disabled={saving}>
+            {saving ? 'Saving…' : 'Save roles'}
+          </button>
+          <p className="text-xs text-slate-500 mt-2">Users must sign in again for role changes to apply.</p>
+        </div>
       </div>
 
       <div className="admin-section">
@@ -169,9 +203,18 @@ export function GroupFormPage() {
         ) : (
           <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg mb-4">
             {members.map((m) => (
-              <li key={m.id} className="px-4 py-3 text-sm text-slate-800">
-                <span className="font-medium">{m.displayName}</span>
-                <span className="text-slate-500"> · {m.email}</span>
+              <li key={m.id} className="px-4 py-3 text-sm text-slate-800 flex items-center justify-between">
+                <span>
+                  <span className="font-medium">{m.displayName}</span>
+                  <span className="text-slate-500"> · {m.email}</span>
+                </span>
+                <button
+                  type="button"
+                  className="text-red-500 hover:text-red-700 text-xs font-medium ml-4"
+                  onClick={() => removeMember(m.id)}
+                >
+                  Remove
+                </button>
               </li>
             ))}
           </ul>

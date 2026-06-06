@@ -27,6 +27,8 @@ import { inventoryRoutes } from './routes/inventory.js';
 import { labourRoutes } from './routes/labour.js';
 import { setupSocketIO } from './socket.js';
 import { wireApiNotificationBridge } from './lib/notification-bridge.js';
+import { NotificationDispatcher } from '@eam/notification-service';
+import { globalEventBus } from '@eam/shared';
 
 export { setupSocketIO };
 
@@ -43,6 +45,10 @@ export async function buildApp() {
     wireApiNotificationBridge();
   }
 
+  // Attach notification dispatcher to event bus so triggers fire on events
+  const dispatcher = new NotificationDispatcher(db);
+  dispatcher.attach(globalEventBus);
+
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 
   await app.register(helmet);
@@ -50,15 +56,12 @@ export async function buildApp() {
     origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173').split(','),
   });
 
-  // Rate limit only sensitive auth mutation endpoints (login, register, password reset).
-  // /auth/me and /auth/refresh are called on every page load and must NOT be rate limited.
   await app.register(rateLimit, {
     max: 20,
     timeWindow: '1 minute',
     hook: 'onRequest',
     allowList: (req) => {
       const url = req.url;
-      // Only rate-limit these specific auth endpoints
       const limited = [
         '/auth/login',
         '/auth/register',
@@ -122,4 +125,3 @@ if (isMain) {
     process.exit(1);
   });
 }
-

@@ -15,15 +15,33 @@ export interface ReportFilter {
 
 export const ALLOWED_TABLES = new Set(['work_orders', 'service_requests', 'assets']);
 
+// Friendly name aliases → real table names
+const TABLE_ALIASES: Record<string, string> = {
+  wo_backlog:       'work_orders',
+  wo_cost_summary:  'work_orders',
+  overdue_pms:      'work_orders',
+  asset_availability: 'assets',
+  wos:              'work_orders',
+  srs:              'service_requests',
+};
+
 const ALLOWED_FIELDS = new Set([
-  'wo_num',
-  'status',
-  'sr_num',
-  'asset_num',
-  'site_num',
-  'tenant_id',
-  'description',
-  'priority',
+  // shared
+  'tenant_id', 'site_num', 'org_id', 'site_id',
+  // work orders
+  'wo_num', 'status', 'priority', 'description', 'type',
+  'assigned_to_user_id', 'asset_id', 'location_id', 'sr_id', 'pm_id',
+  'target_start_date', 'target_finish_date', 'actual_start_date', 'actual_finish_date',
+  'labor_cost', 'material_cost', 'service_cost', 'tool_cost', 'total_cost',
+  'downtime_hours', 'failure_problem_id', 'failure_cause_id', 'failure_remedy_id',
+  'created_at', 'updated_at',
+  // service requests
+  'sr_num', 'category', 'requester_id', 'channel',
+  'sla_target_hours', 'sla_due_at', 'sla_breached', 'closed_at', 'resolved_at',
+  // assets
+  'asset_num', 'criticality', 'manufacturer', 'model', 'serial_num',
+  'install_date', 'warranty_expiry', 'purchase_cost', 'replacement_cost',
+  'class_id', 'parent_asset_id',
 ]);
 
 export interface SafeQuery {
@@ -56,7 +74,10 @@ export class ReportQueryBuilder {
     tenantId: string,
     options: BuildQueryOptions = {},
   ): SafeQuery {
-    if (!ALLOWED_TABLES.has(baseTable)) {
+    // Resolve alias (e.g. wo_backlog → work_orders)
+    const resolvedTable = TABLE_ALIASES[baseTable] ?? baseTable;
+
+    if (!ALLOWED_TABLES.has(resolvedTable)) {
       throw new Error(`Invalid base table: ${baseTable}`);
     }
 
@@ -67,7 +88,7 @@ export class ReportQueryBuilder {
         : '*';
 
     const params: unknown[] = [tenantId];
-    let sql = `SELECT ${selectFields} FROM ${baseTable} WHERE tenant_id = $1`;
+    let sql = `SELECT ${selectFields} FROM ${resolvedTable} WHERE tenant_id = $1`;
     let paramIndex = 2;
 
     for (const filter of options.filters ?? []) {
@@ -137,7 +158,9 @@ export class ReportQueryBuilder {
     for (const order of options.orderBy ?? []) {
       assertSafeField(order.field);
       const dir = order.direction === 'DESC' ? 'DESC' : 'ASC';
-      sql += sql.includes(' ORDER BY ') ? `, ${order.field} ${dir}` : ` ORDER BY ${order.field} ${dir}`;
+      sql += sql.includes(' ORDER BY ')
+        ? `, ${order.field} ${dir}`
+        : ` ORDER BY ${order.field} ${dir}`;
     }
 
     return { sql, params };

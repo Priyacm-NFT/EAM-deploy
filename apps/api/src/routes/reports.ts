@@ -156,11 +156,15 @@ export async function reportRoutes(app: FastifyInstance) {
       if (!subject) return reply.code(404).send({ error: 'Report subject not found' });
 
       try {
-        // Execute the base query with the tenant context
+        // Execute the base query — replace all $1 / :tenantId / $tenantId with tenant id
         const { sql: drizzleSql } = await import('drizzle-orm');
-        const rows = await db.execute(drizzleSql.raw(
-          subject.baseQuery.replace(/:tenantId/g, `'${tid}'`).replace(/\$tenantId/g, `'${tid}'`) + ' LIMIT 200',
-        ));
+        // Replace parameterised $1 with literal tenant UUID (safe — UUID contains only hex+dashes)
+        const safeQuery = subject.baseQuery
+          .replace(/\$1/g, `'${tid}'`)
+          .replace(/:tenantId/g, `'${tid}'`)
+          .replace(/\$tenantId/g, `'${tid}'`);
+        const limitedQuery = safeQuery.includes('LIMIT') ? safeQuery : safeQuery + ' LIMIT 200';
+        const rows = await db.execute(drizzleSql.raw(limitedQuery));
         return Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });

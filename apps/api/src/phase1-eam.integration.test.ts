@@ -302,10 +302,11 @@ describeDb('Phase 1 — EAM Core MVP', () => {
         .set(auth())
         .send({
           type: 'HOT_WORK',
+          description: 'Welding on pump housing',
           woId,
           assetId,
           locationId,
-          notes: 'Welding on pump housing',
+          notes: 'Fire watch assigned',
         });
       expect(res.status).toBe(201);
       expect(res.body.permitNum).toMatch(/^PTW-/);

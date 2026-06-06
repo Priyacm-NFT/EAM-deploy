@@ -9,28 +9,28 @@ import {
 interface DocumentType {
   id: string;
   name: string;
-  description: string;
+  label: string;
+  description: string | null;
   allowedExtensions: string[];
-  maxFileSizeMb: number;
+  maxSizeBytes: number;
   retentionDays: number | null;
-  visibility: 'public' | 'restricted';
-  virusScanEnabled: boolean;
-  scanAction: 'quarantine' | 'reject' | 'alert';
-  mandatoryForStatuses: string[];
+  visibility: 'PUBLIC' | 'ROLE_RESTRICTED';
   isActive: boolean;
+  isSystem: boolean;
 }
 
 const EMPTY_FORM = {
   name: '',
+  label: '',
   description: '',
   allowedExtensions: 'pdf,jpg,png,docx',
-  maxFileSizeMb: 10,
+  maxSizeMb: 10,
   retentionDays: '',
-  visibility: 'restricted' as 'public' | 'restricted',
-  virusScanEnabled: true,
-  scanAction: 'quarantine' as 'quarantine' | 'reject' | 'alert',
-  mandatoryForStatuses: '',
+  visibility: 'PUBLIC' as 'PUBLIC' | 'ROLE_RESTRICTED',
 };
+
+function mbToBytes(mb: number) { return mb * 1024 * 1024; }
+function bytesToMb(bytes: number) { return Math.round(bytes / 1024 / 1024); }
 
 export function DocumentTypesPage() {
   const [types, setTypes] = useState<DocumentType[]>([]);
@@ -42,7 +42,9 @@ export function DocumentTypesPage() {
   const [msg, setMsg] = useState('');
 
   function load() {
-    api<DocumentType[]>('/admin/attachments/document-types').then(setTypes).catch(() => setTypes([]));
+    api<DocumentType[]>('/admin/attachments/document-types')
+      .then(setTypes)
+      .catch(() => setTypes([]));
   }
 
   useEffect(() => { load(); }, []);
@@ -55,20 +57,23 @@ export function DocumentTypesPage() {
     try {
       const payload = {
         name: form.name,
-        description: form.description,
-        allowedExtensions: form.allowedExtensions.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
-        maxFileSizeMb: Number(form.maxFileSizeMb),
+        label: form.label || form.name,
+        description: form.description || undefined,
+        allowedExtensions: form.allowedExtensions
+          .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+        maxSizeBytes: mbToBytes(Number(form.maxSizeMb)),
         retentionDays: form.retentionDays ? Number(form.retentionDays) : null,
         visibility: form.visibility,
-        virusScanEnabled: form.virusScanEnabled,
-        scanAction: form.scanAction,
-        mandatoryForStatuses: form.mandatoryForStatuses.split(',').map((s) => s.trim()).filter(Boolean),
       };
       if (editId) {
-        await api(`/admin/attachments/document-types/${editId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        await api(`/admin/attachments/document-types/${editId}`, {
+          method: 'PUT', body: JSON.stringify(payload),
+        });
         setMsg('Document type updated.');
       } else {
-        await api('/admin/attachments/document-types', { method: 'POST', body: JSON.stringify(payload) });
+        await api('/admin/attachments/document-types', {
+          method: 'POST', body: JSON.stringify(payload),
+        });
         setMsg('Document type created.');
       }
       setShowCreate(false);
@@ -83,12 +88,15 @@ export function DocumentTypesPage() {
   }
 
   async function toggleActive(dt: DocumentType) {
-    await api(`/admin/attachments/document-types/${dt.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !dt.isActive }) });
+    await api(`/admin/attachments/document-types/${dt.id}`, {
+      method: 'PUT', body: JSON.stringify({ isActive: !dt.isActive }),
+    });
     load();
   }
 
   async function deleteType(dt: DocumentType) {
-    if (!window.confirm(`Delete document type "${dt.name}"? Existing attachments of this type are unaffected.`)) return;
+    if (dt.isSystem) { setError('System document types cannot be deleted.'); return; }
+    if (!window.confirm(`Delete document type "${dt.name}"?`)) return;
     await api(`/admin/attachments/document-types/${dt.id}`, { method: 'DELETE' });
     setMsg(`"${dt.name}" deleted.`);
     load();
@@ -97,79 +105,140 @@ export function DocumentTypesPage() {
   function startEdit(dt: DocumentType) {
     setForm({
       name: dt.name,
-      description: dt.description,
+      label: dt.label,
+      description: dt.description ?? '',
       allowedExtensions: dt.allowedExtensions.join(', '),
-      maxFileSizeMb: dt.maxFileSizeMb,
+      maxSizeMb: bytesToMb(dt.maxSizeBytes),
       retentionDays: dt.retentionDays?.toString() ?? '',
       visibility: dt.visibility,
-      virusScanEnabled: dt.virusScanEnabled,
-      scanAction: dt.scanAction,
-      mandatoryForStatuses: dt.mandatoryForStatuses.join(', '),
     });
     setEditId(dt.id);
     setShowCreate(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+
 
   return (
     <IdentityPageLayout
       title="Document types"
-      subtitle="Define allowed file types, size limits, retention periods, and virus scan policies for each document category"
+      subtitle="Configure allowed file types, size limits, retention periods, and virus scan policies"
     >
       {error && <MessageBanner type="error" text={error} />}
       {msg && <MessageBanner type="success" text={msg} />}
 
       <div className="admin-section">
-        <h2 className="admin-section-title">Document types</h2>
-
-        <div className="flex justify-end">
-          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="admin-section-title">Document types</h2>
+          <button
+            type="button"
+            className="btn-primary !w-auto px-4"
+            onClick={() => {
+              setShowCreate((v) => !v);
+              setEditId(null);
+              setForm(EMPTY_FORM);
+            }}
+          >
             {showCreate && !editId ? 'Cancel' : '+ New document type'}
           </button>
         </div>
 
         {showCreate && (
-          <form onSubmit={submit} className="border border-slate-200 rounded-lg p-4 space-y-4 bg-slate-50">
-            <h3 className="font-semibold text-primary text-sm">{editId ? 'Edit document type' : 'New document type'}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <FormField label="Name" htmlFor="dt-name">
-                <input id="dt-name" className="form-input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Safety Certificate" />
+          <form
+            onSubmit={submit}
+            className="border border-slate-200 rounded-lg p-5 space-y-4 bg-slate-50 mb-6"
+          >
+            <h3 className="font-semibold text-sm text-slate-700">
+              {editId ? 'Edit document type' : 'New document type'}
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField label="Name (internal key)" htmlFor="dt-name">
+                <input
+                  id="dt-name"
+                  className="form-input"
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. safety_certificate"
+                />
               </FormField>
-              <FormField label="Allowed extensions" htmlFor="dt-ext" hint="Comma-separated, e.g. pdf, jpg, png">
-                <input id="dt-ext" className="form-input" value={form.allowedExtensions} onChange={(e) => setForm({ ...form, allowedExtensions: e.target.value })} />
+              <FormField label="Label (display name)" htmlFor="dt-label">
+                <input
+                  id="dt-label"
+                  className="form-input"
+                  value={form.label}
+                  onChange={(e) => setForm({ ...form, label: e.target.value })}
+                  placeholder="e.g. Safety Certificate"
+                />
+              </FormField>
+              <FormField label="Allowed extensions" htmlFor="dt-ext" hint="Comma-separated: pdf, jpg, png">
+                <input
+                  id="dt-ext"
+                  className="form-input"
+                  value={form.allowedExtensions}
+                  onChange={(e) => setForm({ ...form, allowedExtensions: e.target.value })}
+                />
               </FormField>
               <FormField label="Max file size (MB)" htmlFor="dt-size">
-                <input id="dt-size" className="form-input" type="number" min={1} max={500} value={form.maxFileSizeMb} onChange={(e) => setForm({ ...form, maxFileSizeMb: Number(e.target.value) })} />
+                <input
+                  id="dt-size"
+                  className="form-input"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={form.maxSizeMb}
+                  onChange={(e) => setForm({ ...form, maxSizeMb: Number(e.target.value) })}
+                />
               </FormField>
-              <FormField label="Retention period (days)" htmlFor="dt-retention" hint="Leave blank for indefinite">
-                <input id="dt-retention" className="form-input" type="number" min={1} value={form.retentionDays} onChange={(e) => setForm({ ...form, retentionDays: e.target.value })} placeholder="e.g. 365" />
+              <FormField label="Retention (days)" htmlFor="dt-retention" hint="Leave blank for indefinite">
+                <input
+                  id="dt-retention"
+                  className="form-input"
+                  type="number"
+                  min={1}
+                  value={form.retentionDays}
+                  onChange={(e) => setForm({ ...form, retentionDays: e.target.value })}
+                  placeholder="365"
+                />
               </FormField>
               <FormField label="Visibility" htmlFor="dt-vis">
-                <select id="dt-vis" className="form-select" value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value as 'public' | 'restricted' })}>
-                  <option value="restricted">Restricted (role-based)</option>
-                  <option value="public">Public (any authenticated user)</option>
-                </select>
-              </FormField>
-              <FormField label="Virus scan action" htmlFor="dt-scan">
-                <select id="dt-scan" className="form-select" value={form.scanAction} onChange={(e) => setForm({ ...form, scanAction: e.target.value as 'quarantine' | 'reject' | 'alert' })}>
-                  <option value="quarantine">Quarantine (hold for review)</option>
-                  <option value="reject">Reject (delete file, notify uploader)</option>
-                  <option value="alert">Alert only (accept but flag)</option>
+                <select
+                  id="dt-vis"
+                  className="form-select"
+                  value={form.visibility}
+                  onChange={(e) => setForm({ ...form, visibility: e.target.value as 'PUBLIC' | 'ROLE_RESTRICTED' })}
+                >
+                  <option value="PUBLIC">Public (any authenticated user)</option>
+                  <option value="ROLE_RESTRICTED">Role restricted</option>
                 </select>
               </FormField>
             </div>
+
             <FormField label="Description" htmlFor="dt-desc">
-              <input id="dt-desc" className="form-input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief description for users" />
+              <input
+                id="dt-desc"
+                className="form-input"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Brief description for users uploading this document type"
+              />
             </FormField>
-            <FormField label="Mandatory for statuses" htmlFor="dt-mandatory" hint="Comma-separated status codes that require this document type">
-              <input id="dt-mandatory" className="form-input" value={form.mandatoryForStatuses} onChange={(e) => setForm({ ...form, mandatoryForStatuses: e.target.value })} placeholder="e.g. APPR, INPRG" />
-            </FormField>
-            <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
-              <input type="checkbox" checked={form.virusScanEnabled} onChange={(e) => setForm({ ...form, virusScanEnabled: e.target.checked })} className="rounded border-slate-300 text-accent" />
-              Enable virus scanning for this type
-            </label>
-            <div className="flex gap-3">
-              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
-              <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="submit"
+                className="btn-primary !w-auto px-6"
+                disabled={saving}
+              >
+                {saving ? 'Saving…' : editId ? 'Update' : 'Create'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary !w-auto px-4"
+                onClick={() => { setShowCreate(false); setEditId(null); }}
+              >
+                Cancel
+              </button>
             </div>
           </form>
         )}
@@ -179,10 +248,9 @@ export function DocumentTypesPage() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Allowed extensions</th>
+                <th>Extensions</th>
                 <th>Max size</th>
                 <th>Retention</th>
-                <th>Virus scan</th>
                 <th>Visibility</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -190,46 +258,79 @@ export function DocumentTypesPage() {
             </thead>
             <tbody>
               {types.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-10">No document types defined yet.</td></tr>
+                <tr>
+                  <td colSpan={8} className="text-center text-slate-400 py-10">
+                    No document types defined yet.
+                  </td>
+                </tr>
               )}
               {types.map((dt) => (
                 <tr key={dt.id}>
                   <td>
-                    <p className="font-medium text-primary">{dt.name}</p>
-                    <p className="text-xs text-slate-400">{dt.description}</p>
+                    <p className="font-medium text-primary">{dt.label || dt.name}</p>
+                    {dt.description && (
+                      <p className="text-xs text-slate-400">{dt.description}</p>
+                    )}
+                    {dt.isSystem && (
+                      <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">system</span>
+                    )}
                   </td>
                   <td>
                     <div className="flex flex-wrap gap-1">
                       {dt.allowedExtensions.map((ext) => (
-                        <span key={ext} className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">.{ext}</span>
+                        <span
+                          key={ext}
+                          className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono"
+                        >
+                          .{ext}
+                        </span>
                       ))}
                     </div>
                   </td>
-                  <td className="text-sm">{dt.maxFileSizeMb} MB</td>
-                  <td className="text-sm">{dt.retentionDays ? `${dt.retentionDays}d` : 'Indefinite'}</td>
-                  <td>
-                    {dt.virusScanEnabled ? (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-800">
-                        {dt.scanAction}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-400">Disabled</span>
-                    )}
+                  <td className="text-sm">{bytesToMb(dt.maxSizeBytes)} MB</td>
+                  <td className="text-sm">
+                    {dt.retentionDays ? `${dt.retentionDays}d` : 'Indefinite'}
                   </td>
                   <td>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${dt.visibility === 'public' ? 'bg-accent/15 text-accent-dark' : 'bg-slate-100 text-slate-700'}`}>
-                      {dt.visibility}
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      dt.visibility === 'PUBLIC'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {dt.visibility === 'PUBLIC' ? 'Public' : 'Restricted'}
                     </span>
                   </td>
                   <td>
-                    <button type="button" onClick={() => toggleActive(dt)} className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer ${dt.isActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                    <button
+                      type="button"
+                      onClick={() => toggleActive(dt)}
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer ${
+                        dt.isActive
+                          ? 'bg-green-100 text-green-800 border-green-200'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
                       {dt.isActive ? 'Active' : 'Inactive'}
                     </button>
                   </td>
                   <td>
                     <div className="flex gap-2">
-                      <button type="button" className="btn-link text-xs" onClick={() => startEdit(dt)}>Edit</button>
-                      <button type="button" className="btn-danger text-xs" onClick={() => deleteType(dt)}>Delete</button>
+                      <button
+                        type="button"
+                        className="btn-link text-xs"
+                        onClick={() => startEdit(dt)}
+                      >
+                        Edit
+                      </button>
+                      {!dt.isSystem && (
+                        <button
+                          type="button"
+                          className="text-xs text-red-500 hover:text-red-700"
+                          onClick={() => deleteType(dt)}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -241,3 +342,4 @@ export function DocumentTypesPage() {
     </IdentityPageLayout>
   );
 }
+

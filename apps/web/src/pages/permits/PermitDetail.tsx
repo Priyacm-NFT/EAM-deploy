@@ -5,6 +5,7 @@ import { IdentityPageLayout, MessageBanner } from '../../components/identity/Ide
 
 interface Permit {
   id: string; permitNum: string; type: string; status: string;
+  description: string;
   validFrom: string | null; validTo: string | null; notes: string | null;
   checklist: Array<{ id: string; category: string; description: string; isRequired: boolean; checked: boolean; checkedAt: string | null }>;
   approvals: Array<{ id: string; step: number; role: string; status: string; comments: string | null; decidedAt: string | null }>;
@@ -54,6 +55,7 @@ export function PermitDetailPage() {
       <div className="flex items-start gap-4 mb-4">
         <div className="flex-1">
           <p className="text-lg font-medium">{permit.type.replace('_', ' ')}</p>
+          <p className="text-sm text-slate-600 mt-1">{permit.description}</p>
           <div className="flex gap-2 mt-1">
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[permit.status] ?? ''}`}>{permit.status}</span>
             {permit.validFrom && <span className="text-xs text-slate-500">Valid: {new Date(permit.validFrom).toLocaleDateString()} – {permit.validTo ? new Date(permit.validTo).toLocaleDateString() : '∞'}</span>}

@@ -1,3 +1,4 @@
+
 import type { FastifyInstance } from 'fastify';
 import { eq, desc } from 'drizzle-orm';
 import { z } from 'zod';
@@ -520,25 +521,48 @@ export async function adminIntegrationRoutes(app: FastifyInstance) {
       const page = Math.max(1, Number(query.page ?? 1));
       const offset = (page - 1) * limit;
 
-      // Join with jobs to scope to this tenant
-      const jobs = await db
-        .select({ id: integrationJobs.id })
-        .from(integrationJobs)
-        .where(eq(integrationJobs.tenantId, request.user!.tenantId));
+      const tid = request.user!.tenantId;
 
-      if (!jobs.length) return { data: [], total: 0 };
-
-      const jobIds = jobs.map((j: { id: string }) => j.id);
-      const allLogs = await db
-        .select()
+      const rows = await db
+        .select({
+          id: integrationRunLog.id,
+          jobId: integrationRunLog.jobId,
+          jobType: integrationJobs.jobType,
+          connectionName: integrationConnections.name,
+          status: integrationRunLog.status,
+          recordsProcessed: integrationRunLog.recordsProcessed,
+          recordsFailed: integrationRunLog.recordsFailed,
+          errorDetails: integrationRunLog.errorDetails,
+          startedAt: integrationRunLog.startedAt,
+          finishedAt: integrationRunLog.finishedAt,
+        })
         .from(integrationRunLog)
+        .innerJoin(integrationJobs, eq(integrationRunLog.jobId, integrationJobs.id))
+        .innerJoin(integrationConnections, eq(integrationJobs.connectionId, integrationConnections.id))
+        .where(eq(integrationJobs.tenantId, tid))
         .orderBy(desc(integrationRunLog.startedAt))
-        .limit(limit * 3); // over-fetch then filter
+        .limit(limit)
+        .offset(offset);
 
-      const tenantLogs = allLogs.filter((l: { jobId: string }) => jobIds.includes(l.jobId));
-      const paginated = tenantLogs.slice(offset, offset + limit);
+      // Compute duration in ms and map to frontend-expected shape
+      const data = rows.map((r) => ({
+        id: r.id,
+        jobId: r.jobId,
+        jobType: r.jobType,
+        connectionName: r.connectionName,
+        status: r.status,
+        rowsProcessed: r.recordsProcessed,
+        errorMessage: r.errorDetails && (r.errorDetails as unknown[]).length > 0
+          ? JSON.stringify(r.errorDetails)
+          : null,
+        startedAt: r.startedAt,
+        finishedAt: r.finishedAt,
+        durationMs: r.finishedAt
+          ? new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()
+          : null,
+      }));
 
-      return { data: paginated, total: tenantLogs.length, page, limit };
+      return { data, total: data.length, page, limit };
     },
   );
 

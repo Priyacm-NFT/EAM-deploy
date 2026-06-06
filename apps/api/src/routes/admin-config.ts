@@ -600,6 +600,67 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       )
       .orderBy(desc(configVersions.versionNum));
   });
+  app.post('/admin/config/versions/:id/promote', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { targetEnv } = request.body as { targetEnv: string };
+
+    const VALID_ENVS = ['test', 'prod'] as const;
+    if (!VALID_ENVS.includes(targetEnv as (typeof VALID_ENVS)[number])) {
+      return reply.status(400).send({ error: `targetEnv must be one of: ${VALID_ENVS.join(', ')}` });
+    }
+    const [source] = await db
+      .select()
+      .from(configVersions)
+      .where(
+        and(
+          eq(configVersions.id, id),
+          eq(configVersions.tenantId, request.user!.tenantId),
+        ),
+      )
+      .limit(1);
+      if (!source) return reply.status(404).send({ error: 'Config version not found' });
+
+    const existing = await db
+      .select({ versionNum: configVersions.versionNum })
+      .from(configVersions)
+      .where(
+        and(
+          eq(configVersions.tenantId, request.user!.tenantId),
+          eq(configVersions.entityType, source.entityType),
+          eq(configVersions.entityId, source.entityId),
+        ),
+      )
+      .orderBy(desc(configVersions.versionNum))
+      .limit(1);
+      const nextVersionNum = (existing[0]?.versionNum ?? 0) + 1;
+
+    const promotedSnapshot: Record<string, unknown> = {
+      ...source.snapshot,
+      _promotedFrom: source.id,
+      _promotedFromVersion: source.versionNum,
+      _targetEnv: targetEnv,
+      _promotedAt: new Date().toISOString(),
+      _promotedBy: request.user!.id,
+    };
+
+    const [promoted] = await db
+      .insert(configVersions)
+      .values({
+        tenantId: request.user!.tenantId,
+        entityType: source.entityType,
+        entityId: source.entityId,
+        versionNum: nextVersionNum,
+        snapshot: promotedSnapshot,
+        createdBy: request.user!.id,
+      })
+      .returning();
+
+    return reply.status(201).send({
+      promoted,
+      message: `Version ${source.versionNum} promoted to ${targetEnv} as version ${nextVersionNum}`,
+    });
+  });
+
 
   // ─── Schema Migration Log ─────────────────────────────────────────────────────
 
