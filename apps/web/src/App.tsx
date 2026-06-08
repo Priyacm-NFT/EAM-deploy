@@ -152,6 +152,36 @@ export default function App() {
   const canManageIdentity     = hasPermission(user, 'admin:users:manage');
   const canManageConfig       = hasPermission(user, 'admin:config:manage');
   const canManageReporting    = hasPermission(user, 'admin:reporting:manage');
+  const { pathname } = useLocation();
+
+  // Map current route to a page title shown in the topbar
+  const PAGE_TITLES: [string, string, string?][] = [
+    ['/assets', 'Assets', 'Equipment, machinery and infrastructure register'],
+    ['/locations', 'Locations'],
+    ['/service-requests', 'Service Requests', 'Customer and internal service tickets'],
+    ['/work-orders', 'Work Orders', 'Maintenance and corrective work'],
+    ['/job-plans', 'Job Plans', 'Reusable task and resource templates'],
+    ['/pm', 'Preventive Maintenance', 'Scheduled maintenance programs'],
+    ['/permits', 'Permits to Work', 'Safety authorisation for hazardous work'],
+    ['/inventory', 'Inventory', 'Stock, items and storerooms'],
+    ['/people', 'People', 'Crew, contractors and contacts'],
+    ['/reports', 'Reports'],
+    ['/dashboard', 'Dashboard'],
+    ['/admin/identity', 'Identity & Access'],
+    ['/admin/config', 'Configuration'],
+    ['/admin/notifications', 'Notifications'],
+    ['/admin/integrations', 'Integrations'],
+    ['/admin/reporting', 'Reporting'],
+    ['/admin/schema', 'Schema & Workflows'],
+    ['/admin/attachments', 'Attachments'],
+    ['/admin/org', 'Org & Sites'],
+    ['/account', 'My Account'],
+    ['/chat', 'Chat'],
+  ];
+  const matched = PAGE_TITLES.find(([path]) => pathname === path || pathname.startsWith(path + '/'));
+  const topbarTitle = matched?.[1] ?? 'EAM Platform';
+  const topbarSub = matched?.[2];
+
   const canManageWorkflows    = hasPermission(user, 'admin:workflows:manage');
   const canManageIntegrations = hasPermission(user, 'admin:integrations:manage');
   const canManageAttachments  = hasPermission(user, 'admin:attachments:manage');
@@ -312,6 +342,10 @@ export default function App() {
 
       <div className="app-main">
         <header className="app-topbar">
+          <div className="flex flex-col justify-center">
+            <span className="text-white font-bold text-base leading-tight">{topbarTitle}</span>
+            {topbarSub && <span className="text-white/50 text-xs mt-0.5">{topbarSub}</span>}
+          </div>
           <div className="app-topbar-actions" style={{display:'flex',alignItems:'center',gap:'8px'}}>
             {user && <NotificationBell />}
             <AuthNav />
@@ -399,5 +433,6 @@ export default function App() {
     </div>
   );
 }
+
 
 

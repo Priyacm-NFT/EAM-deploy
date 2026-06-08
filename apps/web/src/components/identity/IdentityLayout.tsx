@@ -17,16 +17,12 @@ export function IdentityPageLayout({
   children,
 }: IdentityPageLayoutProps) {
   return (
-    <div className="admin-page">
-      <div>
-        {backTo && (
-          <Link to={backTo} className="btn-link inline-block mb-2">
-            ← {backLabel}
-          </Link>
-        )}
-        <h1 className="page-title">{title}</h1>
-        {subtitle && <p className="page-subtitle">{subtitle}</p>}
-      </div>
+    <div className="w-full space-y-5">
+      {backTo && (
+        <Link to={backTo} className="inline-flex items-center gap-1.5 text-white/60 hover:text-white text-xs font-medium transition-colors">
+          ← {backLabel}
+        </Link>
+      )}
       {children}
     </div>
   );
@@ -60,3 +56,5 @@ export function MessageBanner({ type, text }: { type: 'error' | 'success'; text:
       : 'text-green-800 bg-green-50 border-green-200';
   return <p className={`text-sm border rounded px-3 py-2 ${styles}`}>{text}</p>;
 }
+
+

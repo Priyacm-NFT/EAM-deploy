@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
 interface Permit {
@@ -26,7 +27,7 @@ export function PermitDetailPage() {
 
   const load = () => {
     if (!id) return;
-    api<Permit>(`/permits/${id}`).then(setPermit).catch((e) => setError(String(e)));
+    api<Permit>(`/permits/${id}`).then((x) => { setPermit(x); setCustomData((x.customData as Record<string, unknown>) ?? {}); }).catch((e) => setError(String(e)));
   };
   useEffect(load, [id]);
 
@@ -132,6 +133,14 @@ export function PermitDetailPage() {
           <p className="text-sm whitespace-pre-wrap">{permit.notes}</p>
         </div>
       )}
+      {/* Custom fields from config engine */}
+      <DynamicFormRenderer
+        entityName="Permit"
+        record={(permit as unknown as Record<string, unknown>) ?? {}}
+        values={customData}
+        onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+        readOnly
+      />
     </IdentityPageLayout>
   );
 }

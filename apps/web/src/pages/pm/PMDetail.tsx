@@ -1,142 +1,202 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
-import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { IdentityPageLayout, FormField, FormActions, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
-interface Permit {
-  id: string; permitNum: string; type: string; status: string;
-  description: string;
-  validFrom: string | null; validTo: string | null; notes: string | null;
-  checklist: Array<{ id: string; category: string; description: string; isRequired: boolean; checked: boolean; checkedAt: string | null }>;
-  approvals: Array<{ id: string; step: number; role: string; status: string; comments: string | null; decidedAt: string | null }>;
+interface PMDetail {
+  id: string; pmNum: string; description: string; status: string;
+  frequencyType: string; interval: number | null; intervalUnit: string | null;
+  nextDueDate: string | null; leadDays: number; priority: string;
+  isActive: boolean; assetId: string | null; jobPlanId: string | null;
+  locationId: string | null; siteId: string | null;
 }
+interface Asset { id: string; assetNum: string; description: string }
+interface JobPlan { id: string; jpNum: string; description: string }
 
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'bg-slate-100 text-slate-600', PENDING_APPROVAL: 'bg-yellow-100 text-yellow-700',
-  ACTIVE: 'bg-green-100 text-green-800', EXPIRED: 'bg-orange-100 text-orange-700',
-  CLOSED: 'bg-gray-100 text-gray-500', REJECTED: 'bg-red-100 text-red-700',
-};
+const FREQUENCY_TYPES = ['CALENDAR', 'METER', 'CALENDAR_AND_METER', 'SEASONAL'] as const;
+const INTERVAL_UNITS = ['DAY', 'WEEK', 'MONTH', 'YEAR', 'HOUR'] as const;
 
-export function PermitDetailPage() {
+export function PMDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [permit, setPermit] = useState<Permit | null>(null);
+  const navigate = useNavigate();
+  const [pm, setPm] = useState<PMDetail | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [jobPlans, setJobPlans] = useState<JobPlan[]>([]);
   const [error, setError] = useState('');
-  const [actionBusy, setActionBusy] = useState(false);
-  const [approvalComments, setApprovalComments] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
+  const [generating, setGenerating] = useState(false);
+  const [form, setForm] = useState({
+    description: '', frequencyType: 'CALENDAR', interval: '1',
+    intervalUnit: 'MONTH', leadDays: '7', priority: 'MEDIUM',
+    assetId: '', jobPlanId: '', status: 'ACTIVE',
+  });
 
-  const load = () => {
+  useEffect(() => {
     if (!id) return;
-    api<Permit>(`/permits/${id}`).then((x) => { setPermit(x); setCustomData((x.customData as Record<string, unknown>) ?? {}); }).catch((e) => setError(String(e)));
-  };
-  useEffect(load, [id]);
+    api<PMDetail>(`/pm-masters/${id}`).then((p) => {
+      setPm(p);
+      setForm({
+        description: p.description,
+        frequencyType: p.frequencyType,
+        interval: String(p.interval ?? 1),
+        intervalUnit: p.intervalUnit ?? 'MONTH',
+        leadDays: String(p.leadDays ?? 7),
+        priority: p.priority,
+        assetId: p.assetId ?? '',
+        jobPlanId: p.jobPlanId ?? '',
+        status: p.status,
+      });
+    }).catch((e) => setError(String(e)));
 
-  const action = async (endpoint: string, body: object = {}) => {
-    setActionBusy(true);
+    api<{ data: Asset[] } | Asset[]>('/assets?pageSize=200')
+      .then((r) => setAssets(Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? []))
+      .catch(() => {});
+    api<JobPlan[]>('/job-plans').then(setJobPlans).catch(() => {});
+  }, [id]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true); setError(''); setMsg('');
     try {
-      await api(`/permits/${id}/${endpoint}`, { method: 'POST', body: JSON.stringify(body) });
-      load();
-    } catch (e) { setError(String(e)); }
-    finally { setActionBusy(false); }
+      await api(`/pm-masters/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          description: form.description,
+          frequencyType: form.frequencyType,
+          interval: parseInt(form.interval) || 1,
+          intervalUnit: form.intervalUnit,
+          leadDays: parseInt(form.leadDays) || 7,
+          priority: form.priority,
+          assetId: form.assetId || null,
+          jobPlanId: form.jobPlanId || null,
+          status: form.status,
+        }),
+      });
+      setMsg('PM master updated successfully.');
+    } catch (e) {
+      setError(String(e));
+    } finally { setSaving(false); }
   };
 
-  const toggleChecklist = async (itemId: string, checked: boolean) => {
+  const generateWO = async () => {
+    setGenerating(true); setError('');
     try {
-      await api(`/permits/${id}/checklist/${itemId}`, { method: 'PUT', body: JSON.stringify({ checked }) });
-      load();
-    } catch (e) { setError(String(e)); }
+      const wo = await api<{ woNum: string; id: string }>(`/pm-masters/${id}/generate-now`, { method: 'POST' });
+      navigate(`/work-orders/${wo.id}`);
+    } catch (e) {
+      setError(String(e));
+      setGenerating(false);
+    }
   };
 
-  if (!permit) return <div className="admin-page"><p className="text-slate-400">Loading…</p></div>;
+  if (!pm) return <IdentityPageLayout title="Loading…" backTo="/pm" backLabel="Back to PM masters"><div /></IdentityPageLayout>;
+
+  const isOverdue = pm.nextDueDate && new Date(pm.nextDueDate) < new Date();
 
   return (
-    <IdentityPageLayout title={permit.permitNum} backTo="/permits" backLabel="Back to permits">
+    <IdentityPageLayout title={`PM Master — ${pm.pmNum}`} backTo="/pm" backLabel="Back to PM masters">
       {error && <MessageBanner type="error" text={error} />}
+      {msg && <MessageBanner type="success" text={msg} />}
 
-      <div className="flex items-start gap-4 mb-4">
-        <div className="flex-1">
-          <p className="text-lg font-medium">{permit.type.replace('_', ' ')}</p>
-          <p className="text-sm text-slate-600 mt-1">{permit.description}</p>
-          <div className="flex gap-2 mt-1">
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[permit.status] ?? ''}`}>{permit.status}</span>
-            {permit.validFrom && <span className="text-xs text-slate-500">Valid: {new Date(permit.validFrom).toLocaleDateString()} – {permit.validTo ? new Date(permit.validTo).toLocaleDateString() : '∞'}</span>}
+      {/* Status bar */}
+      <div className="admin-section flex flex-wrap gap-4 items-center mb-0">
+        <span className={`text-xs font-medium px-2 py-1 rounded-full ${pm.isActive ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
+          {pm.status}
+        </span>
+        {pm.nextDueDate && (
+          <span className={`text-sm ${isOverdue ? 'text-red-600 font-semibold' : 'text-slate-600'}`}>
+            Next due: {new Date(pm.nextDueDate).toLocaleDateString()} {isOverdue && '— OVERDUE'}
+          </span>
+        )}
+        <button
+          type="button"
+          className="btn-primary !w-auto px-4 ml-auto"
+          onClick={generateWO}
+          disabled={generating}
+        >
+          {generating ? 'Generating…' : 'Generate WO now'}
+        </button>
+      </div>
+
+      {/* Edit form */}
+      <form onSubmit={save}>
+        <div className="admin-section grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl">
+          <div className="col-span-2">
+            <FormField label="Description *" htmlFor="pmDesc">
+              <input id="pmDesc" className="form-input" required value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </FormField>
           </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {permit.status === 'DRAFT' && (
-            <button type="button" className="btn-primary !w-auto px-4 text-sm" onClick={() => action('submit')} disabled={actionBusy}>Submit for approval</button>
-          )}
-          {permit.status === 'PENDING_APPROVAL' && (
-            <>
-              <button type="button" className="btn-primary !w-auto px-4 text-sm bg-green-600" onClick={() => action('approve', { comments: approvalComments })} disabled={actionBusy}>Approve</button>
-              <button type="button" className="btn-primary !w-auto px-4 text-sm bg-red-600" onClick={() => action('reject', { comments: approvalComments })} disabled={actionBusy}>Reject</button>
-            </>
-          )}
-          {permit.status === 'ACTIVE' && (
-            <button type="button" className="btn-primary !w-auto px-4 text-sm bg-gray-600" onClick={() => action('close')} disabled={actionBusy}>Close permit</button>
-          )}
-        </div>
-      </div>
 
-      {['PENDING_APPROVAL'].includes(permit.status) && (
-        <div className="admin-section">
-          <label className="block">
-            <span className="form-label">Approval comments</span>
-            <textarea className="form-input" rows={2} value={approvalComments} onChange={(e) => setApprovalComments(e.target.value)} />
-          </label>
-        </div>
-      )}
+          <FormField label="Status" htmlFor="pmStatus">
+            <select id="pmStatus" className="form-input" value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              {['ACTIVE', 'INACTIVE', 'DRAFT'].map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </FormField>
 
-      {/* Checklist */}
-      <div className="admin-section">
-        <h2 className="admin-section-title mb-3">Safety Checklist</h2>
-        <div className="space-y-2">
-          {permit.checklist.map((item) => (
-            <label key={item.id} className={`flex items-start gap-3 p-3 rounded border ${item.checked ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-white'}`}>
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={item.checked}
-                disabled={['ACTIVE', 'CLOSED', 'REJECTED'].includes(permit.status)}
-                onChange={(e) => toggleChecklist(item.id, e.target.checked)}
-                aria-label={item.description}
-              />
-              <div className="flex-1">
-                <p className="text-sm">{item.description}</p>
-                <p className="text-xs text-slate-400">{item.category}{item.isRequired ? ' · Required' : ''}</p>
-              </div>
-              {item.checkedAt && <span className="text-xs text-slate-400">{new Date(item.checkedAt).toLocaleDateString()}</span>}
-            </label>
-          ))}
-        </div>
-      </div>
+          <FormField label="Priority" htmlFor="pmPriority">
+            <select id="pmPriority" className="form-input" value={form.priority}
+              onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+              {['LOW', 'MEDIUM', 'HIGH', 'EMERGENCY'].map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </FormField>
 
-      {/* Approval steps */}
-      <div className="admin-section">
-        <h2 className="admin-section-title mb-3">Approval steps</h2>
-        <div className="space-y-2">
-          {permit.approvals.map((a) => (
-            <div key={a.id} className={`flex items-center gap-4 p-3 rounded border text-sm ${a.status === 'APPROVED' ? 'border-green-200 bg-green-50' : a.status === 'REJECTED' ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'}`}>
-              <span className="font-mono text-xs w-12">Step {a.step}</span>
-              <span className="flex-1">{a.role}</span>
-              <span className={`px-2 py-0.5 rounded-full text-xs ${a.status === 'APPROVED' ? 'bg-green-100 text-green-700' : a.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{a.status}</span>
-              {a.decidedAt && <span className="text-xs text-slate-400">{new Date(a.decidedAt).toLocaleDateString()}</span>}
-              {a.comments && <span className="text-xs text-slate-500 italic">{a.comments}</span>}
-            </div>
-          ))}
-        </div>
-      </div>
+          <FormField label="Frequency type" htmlFor="freqType">
+            <select id="freqType" className="form-input" value={form.frequencyType}
+              onChange={(e) => setForm({ ...form, frequencyType: e.target.value })}>
+              {FREQUENCY_TYPES.map((t) => <option key={t}>{t.replace(/_/g, ' ')}</option>)}
+            </select>
+          </FormField>
 
-      {permit.notes && (
-        <div className="admin-section">
-          <span className="form-label">Notes</span>
-          <p className="text-sm whitespace-pre-wrap">{permit.notes}</p>
+          <FormField label="Interval" htmlFor="interval">
+            <input id="interval" type="number" min="1" className="form-input"
+              value={form.interval} onChange={(e) => setForm({ ...form, interval: e.target.value })} />
+          </FormField>
+
+          <FormField label="Interval unit" htmlFor="intervalUnit">
+            <select id="intervalUnit" className="form-input" value={form.intervalUnit}
+              onChange={(e) => setForm({ ...form, intervalUnit: e.target.value })}>
+              {INTERVAL_UNITS.map((u) => <option key={u}>{u}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Lead time (days)" htmlFor="leadDays">
+            <input id="leadDays" type="number" min="0" className="form-input"
+              value={form.leadDays} onChange={(e) => setForm({ ...form, leadDays: e.target.value })} />
+          </FormField>
+
+          <FormField label="Asset" htmlFor="pmAsset">
+            <select id="pmAsset" className="form-input" value={form.assetId}
+              onChange={(e) => setForm({ ...form, assetId: e.target.value })}>
+              <option value="">— None —</option>
+              {assets.map((a) => <option key={a.id} value={a.id}>{a.assetNum} – {a.description}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Job plan (required to Generate WO)" htmlFor="pmJP">
+            <select id="pmJP" className="form-input" value={form.jobPlanId}
+              onChange={(e) => setForm({ ...form, jobPlanId: e.target.value })}>
+              <option value="">— None —</option>
+              {jobPlans.map((j) => <option key={j.id} value={j.id}>{j.jpNum} – {j.description}</option>)}
+            </select>
+          </FormField>
         </div>
-      )}
+
+        <FormActions>
+          <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+          <button type="button" className="btn-link" onClick={() => navigate('/pm')}>Cancel</button>
+        </FormActions>
+      </form>
       {/* Custom fields from config engine */}
       <DynamicFormRenderer
-        entityName="Permit"
-        record={(permit as unknown as Record<string, unknown>) ?? {}}
+        entityName="PMaster"
+        record={(pm as unknown as Record<string, unknown>) ?? {}}
         values={customData}
         onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
         readOnly
@@ -144,3 +204,5 @@ export function PermitDetailPage() {
     </IdentityPageLayout>
   );
 }
+
+
