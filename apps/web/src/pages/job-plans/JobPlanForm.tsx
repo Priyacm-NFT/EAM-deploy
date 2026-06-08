@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
 export function JobPlanFormPage() {
@@ -16,6 +17,7 @@ export function JobPlanFormPage() {
     estimatedDurationHours: '',
   });
   const [saving, setSaving] = useState(false);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [error, setError] = useState('');
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -76,4 +78,6 @@ export function JobPlanFormPage() {
     </IdentityPageLayout>
   );
 }
+
+
 

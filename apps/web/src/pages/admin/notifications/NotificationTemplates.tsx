@@ -13,7 +13,7 @@ interface NotificationTemplate {
   htmlTemplate: string;
   textTemplate: string | null;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 const MERGE_FIELDS = ['{{wo_num}}', '{{assignee.name}}', '{{asset.description}}', '{{requester.name}}', '{{status}}', '{{site}}', '{{due_date}}'];
@@ -204,7 +204,7 @@ export function NotificationTemplatesPage() {
                 <tr key={t.id}>
                   <td className="font-medium text-primary">{t.name}</td>
                   <td className="text-sm text-slate-600 max-w-xs truncate">{t.subjectTemplate}</td>
-                  <td className="text-xs text-slate-500">{new Date(t.updatedAt).toLocaleDateString()}</td>
+                  <td className="text-xs text-slate-500">{t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : '—'}</td>
                   <td>
                     <div className="flex gap-3">
                       <button type="button" className="btn-link text-xs" onClick={() => startEdit(t)}>Edit</button>

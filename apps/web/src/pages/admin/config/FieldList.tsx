@@ -25,6 +25,21 @@ interface FieldRow {
   validationRules?: Record<string, unknown>;
 }
 
+interface FieldRule {
+  id: string;
+  fieldKey: string;
+  ruleType: string;
+  conditionExpression: string | null;
+  statusCondition: string | null;
+}
+
+const RULE_TYPES = [
+  { value: 'REQUIRED',  label: 'Required'  },
+  { value: 'READONLY',  label: 'Read-only' },
+  { value: 'HIDDEN',    label: 'Hidden'    },
+  { value: 'VISIBLE',   label: 'Visible'   },
+];
+
 const FIELD_TYPES: { value: string; label: string }[] = [
   { value: 'TEXT', label: 'Text' },
   { value: 'NUMBER', label: 'Number' },
@@ -51,6 +66,7 @@ const emptyForm = {
   minLength: '',
   maxLength: '',
   regex: '',
+  lookupEntity: '',
 };
 
 function formatValidation(rules?: Record<string, unknown>): string {
@@ -69,6 +85,11 @@ export function ConfigFieldListPage() {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [picklists, setPicklists] = useState<{ id: string; name: string; label: string }[]>([]);
+  const [rulesField, setRulesField] = useState<FieldRow | null>(null);
+  const [rules, setRules] = useState<FieldRule[]>([]);
+  const [ruleForm, setRuleForm] = useState({ ruleType: 'REQUIRED', conditionExpression: '', statusCondition: '' });
+  const [savingRule, setSavingRule] = useState(false);
 
   function load() {
     if (!entityId) return;
@@ -78,6 +99,9 @@ export function ConfigFieldListPage() {
     api<FieldRow[]>(`/admin/config/entities/${entityId}/fields`)
       .then(setFields)
       .catch((e) => setError(String(e)));
+    api<{ id: string; name: string; label: string }[]>('/admin/config/picklists')
+      .then(setPicklists)
+      .catch(() => setPicklists([]));
   }
 
   useEffect(() => {
@@ -120,6 +144,7 @@ export function ConfigFieldListPage() {
           fieldType: form.fieldType,
           isRequiredGlobal: form.isRequiredGlobal,
           validationRules,
+          lookupEntity: form.lookupEntity || null,
         }),
       });
       setForm(emptyForm);
@@ -141,6 +166,50 @@ export function ConfigFieldListPage() {
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Delete failed');
+    }
+  }
+
+  async function openRules(field: FieldRow) {
+    setRulesField(field);
+    setRuleForm({ ruleType: 'REQUIRED', conditionExpression: '', statusCondition: '' });
+    try {
+      const all = await api<FieldRule[]>(`/admin/config/entities/${entityId}/rules`);
+      setRules(all.filter((r) => r.fieldKey === field.fieldKey));
+    } catch {
+      setRules([]);
+    }
+  }
+
+  async function saveRule() {
+    if (!entityId || !rulesField) return;
+    setSavingRule(true);
+    try {
+      await api(`/admin/config/entities/${entityId}/rules`, {
+        method: 'POST',
+        body: JSON.stringify({
+          fieldKey: rulesField.fieldKey,
+          ruleType: ruleForm.ruleType,
+          conditionExpression: ruleForm.conditionExpression.trim() || null,
+          statusCondition: ruleForm.statusCondition.trim() || null,
+        }),
+      });
+      setRuleForm({ ruleType: 'REQUIRED', conditionExpression: '', statusCondition: '' });
+      const all = await api<FieldRule[]>(`/admin/config/entities/${entityId}/rules`);
+      setRules(all.filter((r) => r.fieldKey === rulesField.fieldKey));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save rule');
+    } finally {
+      setSavingRule(false);
+    }
+  }
+
+  async function deleteRule(ruleId: string) {
+    if (!entityId) return;
+    try {
+      await api(`/admin/config/entities/${entityId}/rules/${ruleId}`, { method: 'DELETE' });
+      setRules((prev) => prev.filter((r) => r.id !== ruleId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete rule');
     }
   }
 
@@ -224,6 +293,28 @@ export function ConfigFieldListPage() {
             </label>
           </div>
         </div>
+
+        {/* Picklist selector — shown only for PICKLIST and MULTI_SELECT types */}
+        {(form.fieldType === 'PICKLIST' || form.fieldType === 'MULTI_SELECT') && (
+          <div className="border border-amber-200 rounded-lg p-4 bg-amber-50/60">
+            <FormField label="Linked picklist *" htmlFor="field-picklist">
+              <select
+                id="field-picklist"
+                className="form-select"
+                value={form.lookupEntity}
+                onChange={(e) => setForm({ ...form, lookupEntity: e.target.value })}
+              >
+                <option value="">— Select a picklist —</option>
+                {picklists.map((pl) => (
+                  <option key={pl.id} value={pl.name}>{pl.label} ({pl.name})</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Don't see your picklist? Create it first under <strong>Configuration → Picklists</strong>.
+              </p>
+            </FormField>
+          </div>
+        )}
 
         <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/80 space-y-4">
           <p className="text-sm font-medium text-slate-800">Validation rules (optional)</p>
@@ -363,13 +454,22 @@ export function ConfigFieldListPage() {
                   </td>
                   <td>
                     {!f.isSystem ? (
-                      <button
-                        type="button"
-                        className="btn-danger"
-                        onClick={() => removeField(f.id, f.label)}
-                      >
-                        Delete
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="btn-link text-xs"
+                          onClick={() => openRules(f)}
+                        >
+                          Rules
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-danger"
+                          onClick={() => removeField(f.id, f.label)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-400">Built-in</span>
                     )}
@@ -380,6 +480,96 @@ export function ConfigFieldListPage() {
           </table>
         </div>
       </div>
+
+      {/* Rules panel — slides in when a field's Rules button is clicked */}
+      {rulesField && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Field rules — <code className="text-sm bg-slate-100 px-1.5 py-0.5 rounded">{rulesField.fieldKey}</code>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">Rules control when this field is required, read-only, or hidden.</p>
+              </div>
+              <button type="button" className="text-slate-400 hover:text-slate-600 text-xl font-bold" onClick={() => setRulesField(null)}>✕</button>
+            </div>
+
+            <div className="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Existing rules */}
+              {rules.length === 0
+                ? <p className="text-sm text-slate-400 italic">No rules yet for this field.</p>
+                : (
+                  <div className="space-y-2">
+                    {rules.map((r) => (
+                      <div key={r.id} className="flex items-start justify-between bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                        <div>
+                          <span className="font-medium text-slate-800">{RULE_TYPES.find((t) => t.value === r.ruleType)?.label ?? r.ruleType}</span>
+                          {r.conditionExpression && (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              When: <code className="bg-slate-100 px-1 rounded">{r.conditionExpression}</code>
+                            </p>
+                          )}
+                          {r.statusCondition && (
+                            <p className="text-xs text-slate-500">
+                              Status: <code className="bg-slate-100 px-1 rounded">{r.statusCondition}</code>
+                            </p>
+                          )}
+                        </div>
+                        <button type="button" className="btn-danger text-xs shrink-0 ml-3" onClick={() => deleteRule(r.id)}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              {/* Add new rule */}
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-700">Add rule</p>
+                <div>
+                  <label className="form-label">Rule type</label>
+                  <select
+                    className="form-select"
+                    value={ruleForm.ruleType}
+                    onChange={(e) => setRuleForm({ ...ruleForm, ruleType: e.target.value })}
+                  >
+                    {RULE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Condition expression <span className="text-slate-400 font-normal">(optional)</span></label>
+                  <input
+                    className="form-input font-mono text-xs"
+                    value={ruleForm.conditionExpression}
+                    onChange={(e) => setRuleForm({ ...ruleForm, conditionExpression: e.target.value })}
+                    placeholder="e.g. priority == 'URGENT'"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">Leave blank to apply always. Use == and != operators.</p>
+                </div>
+                <div>
+                  <label className="form-label">Apply only when status is <span className="text-slate-400 font-normal">(optional)</span></label>
+                  <input
+                    className="form-input font-mono text-xs"
+                    value={ruleForm.statusCondition}
+                    onChange={(e) => setRuleForm({ ...ruleForm, statusCondition: e.target.value })}
+                    placeholder="e.g. INPRG"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn-primary !w-auto px-5"
+                  onClick={saveRule}
+                  disabled={savingRule}
+                >
+                  {savingRule ? 'Saving…' : 'Add rule'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </IdentityPageLayout>
   );
 }
+
+
+                

@@ -29,6 +29,8 @@ import { setupSocketIO } from './socket.js';
 import { wireApiNotificationBridge } from './lib/notification-bridge.js';
 import { NotificationDispatcher } from '@eam/notification-service';
 import { globalEventBus } from '@eam/shared';
+import { smtpConfigurations } from '@eam/db';
+import { eq } from 'drizzle-orm';
 
 export { setupSocketIO };
 
@@ -46,7 +48,46 @@ export async function buildApp() {
   }
 
   // Attach notification dispatcher to event bus so triggers fire on events
-  const dispatcher = new NotificationDispatcher(db);
+  // enqueueEmail: look up the active SMTP config for the tenant and send via nodemailer
+  const enqueueEmail = async (job: { to: string; subject: string; html: string }) => {
+    try {
+      const [smtp] = await db
+        .select()
+        .from(smtpConfigurations)
+        .where(eq(smtpConfigurations.isActive, true))
+        .limit(1);
+
+      if (!smtp) {
+        console.warn('[notification] No active SMTP configuration found — email not sent');
+        return;
+      }
+
+      const nodemailer = await import('nodemailer');
+      const transport = nodemailer.createTransport({
+        host: smtp.host,
+        port: smtp.port,
+        secure: smtp.secure ?? false,
+        auth: smtp.username && smtp.password
+          ? { user: smtp.username, pass: smtp.password }
+          : undefined,
+      });
+
+      await transport.sendMail({
+        from: smtp.fromName
+          ? `"${smtp.fromName}" <${smtp.fromEmail}>`
+          : smtp.fromEmail,
+        to: job.to,
+        subject: job.subject,
+        html: job.html,
+      });
+
+      console.info(`[notification] Email sent to ${job.to} — subject: "${job.subject}"`);
+    } catch (err) {
+      console.error('[notification] Failed to send email:', err instanceof Error ? err.message : err);
+    }
+  };
+
+  const dispatcher = new NotificationDispatcher(db, enqueueEmail);
   dispatcher.attach(globalEventBus);
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });

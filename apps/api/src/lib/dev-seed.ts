@@ -104,7 +104,8 @@ export async function ensureDevAdminUser(): Promise<void> {
     console.log('[dev-seed] Created All Users role');
   }
 
-  await syncRolePermissions(allUsersRole!.id);
+  await db.delete(rolePermissions).where(eq(rolePermissions.roleId, allUsersRole!.id));
+  console.log('[dev-seed] Cleared All Users role permissions — users get access only via specific group roles');
 
   // ── "All Users" group — every registered user is auto-added here ──────
   let [allUsersGroup] = await db

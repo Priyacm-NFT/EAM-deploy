@@ -70,6 +70,7 @@ import { OrgStructurePage } from './pages/admin/org/OrgStructure.js';
 import { PicklistManagerPage } from './pages/admin/config/PicklistManager.js';
 import { StatusModelPage } from './pages/admin/config/StatusModel.js';
 import { ConfigVersionsPage } from './pages/admin/config/ConfigVersions.js';
+import { TableDesignerPage } from './pages/admin/config/TableDesigner.js';
 
 function SidebarLink({ to, label }: { to: string; label: string }) {
   const { pathname } = useLocation();
@@ -339,6 +340,7 @@ export default function App() {
             <Route path="/admin/config" element={<ConfigEntityListPage />} />
             <Route path="/admin/config/entities/:entityId/fields" element={<ConfigFieldListPage />} />
             <Route path="/admin/config/entities/:entityId/forms" element={<FormDesignerPage />} />
+            <Route path="/admin/config/entities/:entityId/table" element={<TableDesignerPage />} />
             <Route path="/admin/schema/migrations" element={<SchemaMigrationLogPage />} />
             <Route path="/admin/workflows" element={<WorkflowListPage />} />
             <Route path="/admin/workflows/:id" element={<WorkflowDesignerPage />} />
@@ -397,4 +399,5 @@ export default function App() {
     </div>
   );
 }
+
 

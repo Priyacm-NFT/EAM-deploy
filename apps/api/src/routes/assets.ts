@@ -15,14 +15,42 @@ import {
   failureCodes,
   workOrders,
   audit,
+  entityDefinitions,
+  fieldDefinitions,
 } from '@eam/db';
 import { requirePermission } from '../plugins/auth.js';
+import { FieldRulesService } from '@eam/config-engine';
 
 const readGuard = { preHandler: requirePermission('assets:read') };
 const writeGuard = { preHandler: requirePermission('assets:write') };
 const adminGuard = { preHandler: requirePermission('admin:config:manage') };
 
 export async function assetRoutes(app: FastifyInstance) {
+
+  // ─── Custom field validation helper ──────────────────────────────────────────
+  async function validateCustomFields(
+    tid: string,
+    entityName: string,
+    data: Record<string, unknown>,
+    userRoles: string[],
+    currentStatus?: string,
+  ): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
+    const [entity] = await db
+      .select()
+      .from(entityDefinitions)
+      .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
+      .limit(1);
+    if (!entity) return { valid: true, errors: [] };
+
+    const fields = await db
+      .select()
+      .from(fieldDefinitions)
+      .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
+
+    const svc = new FieldRulesService(db);
+    const rules = await svc.loadRules(tid, entity.id, currentStatus);
+    return svc.validateWrite(fields, rules, data, userRoles);
+  }
   // ─── Locations ────────────────────────────────────────────────────────────────
 
   app.get('/locations', readGuard, async (request) => {
@@ -300,6 +328,12 @@ export async function assetRoutes(app: FastifyInstance) {
       customData?: Record<string, unknown>;
     };
     const tid = request.user!.tenantId;
+
+    const customData = body.customData ?? {};
+    const validation = await validateCustomFields(tid, 'Asset', { ...body, ...customData }, request.user!.roles ?? []);
+    if (!validation.valid) {
+      return reply.status(422).send({ error: 'Validation failed', errors: validation.errors });
+    }
 
     const [row] = await db
       .insert(assets)

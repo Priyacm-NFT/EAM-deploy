@@ -7,6 +7,11 @@ const ALLOWED_TABLES = new Set([
   'work_orders',
   'service_requests',
   'locations',
+  'job_plans',
+  'pm_masters',
+  'permits',
+  'items',
+  'storerooms',
 ]);
 
 export type PgColumnType = 'TEXT' | 'INTEGER' | 'NUMERIC' | 'BOOLEAN' | 'DATE' | 'TIMESTAMPTZ' | 'JSONB';

@@ -23,10 +23,13 @@ import {
   statusTransitions,
   permits,
   audit,
+  entityDefinitions,
+  fieldDefinitions,
 } from '@eam/db';
 import { requirePermission } from '../plugins/auth.js';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
 import { globalEventBus } from '@eam/shared';
+import { FieldRulesService } from '@eam/config-engine';
 
 const readGuard = { preHandler: requirePermission('work_orders:read') };
 const writeGuard = { preHandler: requirePermission('work_orders:write') };
@@ -98,6 +101,31 @@ export async function workOrderRoutes(app: FastifyInstance) {
     return { data: rows, page: Number(page ?? 1), pageSize: limit };
   });
 
+  // ─── Custom field validation helper ──────────────────────────────────────────
+  async function validateCustomFields(
+    tid: string,
+    entityName: string,
+    data: Record<string, unknown>,
+    userRoleIds: string[],
+    currentStatus?: string,
+  ): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
+    const [entity] = await db
+      .select()
+      .from(entityDefinitions)
+      .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
+      .limit(1);
+    if (!entity) return { valid: true, errors: [] };
+
+    const fields = await db
+      .select()
+      .from(fieldDefinitions)
+      .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
+
+    const svc = new FieldRulesService(db);
+    const rules = await svc.loadRules(tid, entity.id, currentStatus);
+    return svc.validateWrite(fields, rules, data, userRoleIds);
+  }
+
   // ─── Create ───────────────────────────────────────────────────────────────────
 
   app.post('/work-orders', writeGuard, async (request, reply) => {
@@ -117,6 +145,16 @@ export async function workOrderRoutes(app: FastifyInstance) {
       customData?: Record<string, unknown>;
     };
     const tid = request.user!.tenantId;
+
+    // Validate custom fields against field rules
+    const customData = body.customData ?? {};
+    const validation = await validateCustomFields(
+      tid, 'WorkOrder', { ...body, ...customData },
+      request.user!.roles ?? [],
+    );
+    if (!validation.valid) {
+      return reply.status(422).send({ error: 'Validation failed', errors: validation.errors });
+    }
 
     const count = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.tenantId, tid));
     const woNum = `WO-${String(count.length + 1).padStart(6, '0')}`;
@@ -182,10 +220,20 @@ export async function workOrderRoutes(app: FastifyInstance) {
         serviceCost: workOrders.serviceCost,
         toolCost: workOrders.toolCost,
         totalCost: workOrders.totalCost,
+        customData: workOrders.customData,
         createdAt: workOrders.createdAt,
         updatedAt: workOrders.updatedAt,
+        // Joined display fields
+        assetNum: assets.assetNum,
+        locationName: locations.name,
+        siteName: sites.name,
+        jobPlanDescription: jobPlans.description,
       })
       .from(workOrders)
+      .leftJoin(assets, eq(workOrders.assetId, assets.id))
+      .leftJoin(locations, eq(workOrders.locationId, locations.id))
+      .leftJoin(sites, eq(workOrders.siteId, sites.id))
+      .leftJoin(jobPlans, eq(workOrders.jobPlanId, jobPlans.id))
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid)))
       .limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
@@ -214,6 +262,19 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof workOrders.$inferInsert>;
     const tid = request.user!.tenantId;
+
+    // Validate custom fields
+    const customData = (body.customData as Record<string, unknown>) ?? {};
+    const [existing] = await db.select({ status: workOrders.status }).from(workOrders)
+      .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).limit(1);
+    const validation = await validateCustomFields(
+      tid, 'WorkOrder', { ...body, ...customData },
+      request.user!.roles ?? [],
+      existing?.status,
+    );
+    if (!validation.valid) {
+      return reply.status(422).send({ error: 'Validation failed', errors: validation.errors });
+    }
 
     const [row] = await db.update(workOrders)
       .set({ ...body, updatedAt: new Date() })
@@ -697,3 +758,4 @@ async function applyJobPlanToWo(jobPlanId: string, woId: string, tenantId: strin
     })));
   }
 }
+

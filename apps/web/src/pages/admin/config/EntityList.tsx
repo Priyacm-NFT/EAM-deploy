@@ -80,6 +80,9 @@ export function ConfigEntityListPage() {
                   <Link to={`/admin/config/entities/${e.id}/forms`} className="btn-link">
                     Form designer
                   </Link>
+                  <Link to={`/admin/config/entities/${e.id}/table`} className="btn-link">
+                    Table designer
+                  </Link>
                 </div>
               </li>
             ))}

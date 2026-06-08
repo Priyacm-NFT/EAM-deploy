@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 
 type Tab = 'overview' | 'meters' | 'workorders' | 'kpis' | 'history';
 
@@ -12,6 +13,7 @@ interface Asset {
   classDescription: string | null; installDate: string | null;
   warrantyExpiry: string | null; purchaseCost: string | null;
   replacementCost: string | null; notes: string | null;
+  customData: Record<string, unknown> | null;
 }
 
 interface Meter { id: string; meterName: string; meterType: string; uom: string; currentReading: string | null }
@@ -38,6 +40,7 @@ export function AssetDetailPage() {
   const [error, setError] = useState('');
   const [loadFailed, setLoadFailed] = useState(false);
   const [qrData, setQrData] = useState('');
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
 
   // Meter reading dialog
   const [readingMeter, setReadingMeter] = useState<Meter | null>(null);
@@ -48,7 +51,7 @@ export function AssetDetailPage() {
   useEffect(() => {
     if (!id) return;
     api<Asset>(`/assets/${id}`)
-      .then(setAsset)
+      .then((a) => { setAsset(a); setCustomData((a.customData as Record<string, unknown>) ?? {}); })
       .catch((e) => { setError(String(e)); setLoadFailed(true); });
     api<Meter[]>(`/assets/${id}/meters`).then(setMeters).catch(() => {});
     api<WorkOrder[]>(`/work-orders?assetId=${id}`).then(setWorkOrders).catch(() => {});
@@ -159,6 +162,15 @@ export function AssetDetailPage() {
           <div><span className="form-label">Replacement cost</span><p>{asset.replacementCost ? `$${parseFloat(asset.replacementCost).toLocaleString()}` : '—'}</p></div>
           {asset.notes && <div className="col-span-2"><span className="form-label">Notes</span><p className="whitespace-pre-wrap">{asset.notes}</p></div>}
         </div>
+      )}
+      {tab === 'overview' && (
+        <DynamicFormRenderer
+          entityName="Asset"
+          record={asset as unknown as Record<string, unknown>}
+          values={customData}
+          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+          readOnly
+        />
       )}
 
       {/* Meters tab */}

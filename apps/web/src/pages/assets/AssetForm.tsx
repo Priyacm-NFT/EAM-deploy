@@ -7,6 +7,7 @@ import {
   FormActions,
   MessageBanner,
 } from '../../components/identity/IdentityLayout.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 
 interface Location { id: string; name: string; code: string }
 interface AssetClass { id: string; classCode: string; description: string }
@@ -27,6 +28,7 @@ export function AssetFormPage() {
   const [classes, setClasses] = useState<AssetClass[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
 
   const [form, setForm] = useState({
     assetNum: '', description: '', status: 'OPERATING', criticality: 'MEDIUM',
@@ -74,6 +76,7 @@ export function AssetFormPage() {
         purchaseCost: form.purchaseCost || undefined,
         replacementCost: form.replacementCost || undefined,
         notes: form.notes || undefined,
+        customData,
       };
       if (isNew) {
         const created = await api<{ id: string }>('/assets', { method: 'POST', body: JSON.stringify(payload) });
@@ -155,6 +158,12 @@ export function AssetFormPage() {
       </div>
 
       <FormActions>
+        <DynamicFormRenderer
+          entityName="Asset"
+          record={form as unknown as Record<string, unknown>}
+          values={customData}
+          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+        />
         <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>

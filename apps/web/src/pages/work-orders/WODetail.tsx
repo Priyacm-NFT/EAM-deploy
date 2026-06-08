@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 
 type Tab = 'overview' | 'tasks' | 'labour' | 'materials' | 'tools' | 'safety' | 'costs' | 'permits';
 
@@ -15,6 +16,7 @@ interface WO {
   materialCost: string | null; serviceCost: string | null; toolCost: string | null;
   pmNum: string | null; srNum: string | null; closureNotes: string | null;
   jobPlanDescription: string | null;
+  customData: Record<string, unknown> | null;
 }
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -44,7 +46,7 @@ export function WODetailPage() {
   const [materials, setMaterials] = useState<Record<string, unknown>[]>([]);
   const [tools, setTools] = useState<Record<string, unknown>[]>([]);
   const [safety, setSafety] = useState<Record<string, unknown>[]>([]);
-  const [costs, setCosts] = useState<{ laborCost: string; materialCost: string; serviceCost: string; toolCost: string; total: string } | null>(null);
+  const [costs, setCosts] = useState<{ laborCost: string; materialCost: string; serviceCost: string; toolCost: string; totalCost: string } | null>(null);
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [transitioning, setTransitioning] = useState(false);
@@ -52,6 +54,7 @@ export function WODetailPage() {
   const [showClose, setShowClose] = useState(false);
   const [closeForm, setCloseForm] = useState({ downtimeHours: '', closureNotes: '' });
   const [closing, setClosing] = useState(false);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
 
   const load = async () => {
     if (!id) return;
@@ -59,6 +62,7 @@ export function WODetailPage() {
     try {
       const wo = await api<WO>(`/work-orders/${id}`);
       setWo(wo);
+      setCustomData((wo.customData as Record<string, unknown>) ?? {});
     } catch (e) {
       setLoadError(String(e));
       return;
@@ -77,7 +81,7 @@ export function WODetailPage() {
   useEffect(() => { load(); }, [id]);
   useEffect(() => {
     if (tab === 'costs' && id) {
-      api<typeof costs>(`/work-orders/${id}/costs`).then(setCosts).catch(() => {});
+      api<{ summary: typeof costs }>(`/work-orders/${id}/costs`).then((r) => setCosts(r.summary)).catch(() => {});
     }
   }, [tab, id]);
 
@@ -235,6 +239,15 @@ export function WODetailPage() {
           {wo.closureNotes && <div className="col-span-2"><span className="form-label">Closure notes</span><p className="whitespace-pre-wrap">{wo.closureNotes}</p></div>}
         </div>
       )}
+      {tab === 'overview' && (
+        <DynamicFormRenderer
+          entityName="WorkOrder"
+          record={wo as unknown as Record<string, unknown>}
+          values={customData}
+          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+          readOnly
+        />
+      )}
 
       {/* Tasks */}
       {tab === 'tasks' && (
@@ -363,13 +376,13 @@ export function WODetailPage() {
             { label: 'Material cost', value: costs.materialCost },
             { label: 'Service cost', value: costs.serviceCost },
             { label: 'Tool cost', value: costs.toolCost },
-            { label: 'Total cost', value: costs.total },
+            { label: 'Total cost', value: costs.totalCost },
           ].map((c) => (
             <div key={c.label} className="bg-slate-50 rounded p-4">
               <p className="text-xs text-slate-500 mb-1">{c.label}</p>
               <p className="text-xl font-bold text-slate-800">${parseFloat(c.value ?? '0').toLocaleString()}</p>
             </div>
-          )) : <p className="text-slate-400 text-sm">Loading costs…</p>}
+          )) : <p className="text-slate-400 text-sm">No cost data yet.</p>}
         </div>
       )}
 

@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import {
   IdentityPageLayout, FormField, FormActions, MessageBanner,
 } from '../../components/identity/IdentityLayout.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 
 interface Asset { id: string; assetNum: string; description: string }
 interface Location { id: string; code: string; name: string }
@@ -17,6 +18,7 @@ export function SRFormPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [form, setForm] = useState({
     description: '', priority: 'MEDIUM', channel: 'WEB',
     assetId: '', locationId: '', category: '',
@@ -60,6 +62,7 @@ export function SRFormPage() {
         assetId: form.assetId || undefined,
         locationId: form.locationId || undefined,
         category: form.category || undefined,
+        customData,
       };
       if (isNew) {
         const created = await api<{ id: string }>('/service-requests', {
@@ -132,6 +135,12 @@ export function SRFormPage() {
       </div>
 
       <FormActions>
+        <DynamicFormRenderer
+          entityName="ServiceRequest"
+          record={form as unknown as Record<string, unknown>}
+          values={customData}
+          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+        />
         <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : isNew ? 'Create Service Request' : 'Save Changes'}
         </button>

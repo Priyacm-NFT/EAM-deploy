@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
 type Tab = 'tasks' | 'labour' | 'materials' | 'tools' | 'safety';
@@ -28,6 +29,7 @@ export function JobPlanDetailPage() {
   const [newLabour, setNewLabour] = useState({ craft: '', estimatedHours: '' });
   const [newMaterial, setNewMaterial] = useState({ description: '', qty: '1' });
   const [saving, setSaving] = useState(false);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
 
   const load = async () => {
     if (!id) return;
@@ -204,6 +206,14 @@ export function JobPlanDetailPage() {
           )}
         </div>
       )}
+      {/* Custom fields from config engine */}
+      <DynamicFormRenderer
+        entityName="JobPlan"
+        record={(jp as unknown as Record<string, unknown>) ?? {}}
+        values={customData}
+        onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+        readOnly
+      />
     </IdentityPageLayout>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 
 interface SR {
   id: string; srNum: string; subject: string; description: string | null;
@@ -12,6 +13,7 @@ interface SR {
   locationName: string | null; convertedToWoId: string | null;
   convertedToWoNum: string | null; reporterName: string | null;
   reporterEmail: string | null; closureNotes: string | null;
+  customData: Record<string, unknown> | null;
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -23,6 +25,7 @@ export function SRDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [sr, setSr] = useState<SR | null>(null);
+  const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [error, setError] = useState('');
   const [transitioning, setTransitioning] = useState(false);
   const [converting, setConverting] = useState(false);
@@ -31,7 +34,7 @@ export function SRDetailPage() {
 
   const load = () => {
     if (!id) return;
-    api<SR>(`/service-requests/${id}`).then(setSr).catch((e) => setError(String(e)));
+    api<SR>(`/service-requests/${id}`).then((s) => { setSr(s); setCustomData(s.customData ?? {}); }).catch((e) => setError(String(e)));
   };
 
   useEffect(load, [id]);
@@ -142,6 +145,13 @@ export function SRDetailPage() {
           <div className="col-span-2"><span className="form-label">Closure notes</span><p className="whitespace-pre-wrap">{sr.closureNotes}</p></div>
         )}
       </div>
+      <DynamicFormRenderer
+        entityName="ServiceRequest"
+        record={sr as unknown as Record<string, unknown>}
+        values={customData}
+        onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+        readOnly
+      />
     </IdentityPageLayout>
   );
 }
