@@ -10,12 +10,41 @@ import {
   jobPlanSafety,
   audit,
 } from '@eam/db';
+import { entityDefinitions, fieldDefinitions } from '@eam/db';
+import { FieldRulesService } from '@eam/config-engine';
 import { requirePermission } from '../plugins/auth.js';
 
 const readGuard = { preHandler: requirePermission('work_orders:read') };
 const writeGuard = { preHandler: requirePermission('work_orders:write') };
 
 export async function jobPlanRoutes(app: FastifyInstance) {
+
+// ── Custom field validation helper ──────────────────────────────────────────
+async function validateCustomFields(
+  tid: string,
+  entityName: string,
+  data: Record<string, unknown>,
+  userRoles: string[],
+  currentStatus?: string,
+): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
+  const [entity] = await db
+    .select()
+    .from(entityDefinitions)
+    .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
+    .limit(1);
+  if (!entity) return { valid: true, errors: [] };
+
+  const fields = await db
+    .select()
+    .from(fieldDefinitions)
+    .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
+
+  const svc = new FieldRulesService(db);
+  const rules = await svc.loadRules(tid, entity.id, currentStatus);
+  return svc.validateWrite(fields, rules, data, userRoles);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
   // ─── Job Plans ────────────────────────────────────────────────────────────────
 
   app.get('/job-plans', readGuard, async (request) => {
@@ -33,6 +62,12 @@ export async function jobPlanRoutes(app: FastifyInstance) {
       estimatedDurationHours?: string;
     };
     const tid = request.user!.tenantId;
+
+    // ── Custom field validation ──────────────────────────────────────────────
+    const customData = (body as Record<string, unknown>).customData as Record<string, unknown> ?? {};
+    const validation = await validateCustomFields(tid, 'JobPlan', { ...body as Record<string, unknown>, ...customData }, request.user!.roles ?? []);
+    if (!validation.valid) return reply.code(422).send({ error: 'Validation failed', errors: validation.errors });
+    // ────────────────────────────────────────────────────────────────────────
 
     const count = await db.select({ id: jobPlans.id }).from(jobPlans).where(eq(jobPlans.tenantId, tid));
     const jpNum = body.jpNum ?? `JP-${String(count.length + 1).padStart(5, '0')}`;

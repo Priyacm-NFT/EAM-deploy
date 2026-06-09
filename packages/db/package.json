@@ -18,6 +18,7 @@
     "test": "vitest run",
     "generate": "tsc -p tsconfig.json && drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
+    "db:push": "tsc -p tsconfig.json && drizzle-kit push",
     "seed": "tsx src/seed-cli.ts"
   },
   "dependencies": {

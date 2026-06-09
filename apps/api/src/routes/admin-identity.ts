@@ -225,6 +225,21 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
     return reply.send({ revoked: count });
   });
 
+  // Alias: force-logout is the same as revoking all sessions
+  app.post('/admin/users/:id/force-logout', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const count = await revokeAllSessions(db, id);
+    await audit(db, {
+      tenantId: request.user!.tenantId,
+      userId: request.user!.id,
+      action: 'FORCE_LOGOUT',
+      resource: 'users',
+      resourceId: id,
+      metadata: { count },
+    });
+    return reply.send({ ok: true, revoked: count, message: `All sessions terminated for this user` });
+  });
+
   app.post('/admin/users/:id/roles', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { roleId: string };

@@ -25,6 +25,7 @@ export function BIConnectionsPage() {
   const [name, setName] = useState('');
   const [configJson, setConfigJson] = useState('');
   const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
@@ -61,14 +62,16 @@ export function BIConnectionsPage() {
   };
 
   const test = async (id: string) => {
-    setTesting(id);
-    setMsg('');
+    setTesting(id); setMsg('');
     try {
-      await api(`/admin/reporting/bi-connections/${id}/test`, { method: 'POST' });
-      setMsg('Connection test completed.');
+      const result = await api<{ success: boolean; message: string }>(`/admin/reporting/bi-connections/${id}/test`, { method: 'POST' });
+      setTestResults((prev) => ({ ...prev, [id]: { ok: result.success, message: result.message } }));
+      setMsg(result.success ? 'Connection test passed.' : 'Connection test failed — see result in table.');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Test failed');
+      const msg = e instanceof Error ? e.message : 'Test failed';
+      setTestResults((prev) => ({ ...prev, [id]: { ok: false, message: msg } }));
+      setError(msg);
     } finally {
       setTesting(null);
     }
@@ -164,17 +167,20 @@ export function BIConnectionsPage() {
                   <td className="font-medium">{c.name}</td>
                   <td>{c.adapterType}</td>
                   <td>
-                    <span
-                      className={
-                        c.lastTestStatus === 'OK'
-                          ? 'text-green-700'
-                          : c.lastTestStatus === 'FAILED'
-                            ? 'text-red-700'
-                            : 'text-slate-500'
-                      }
-                    >
-                      {c.lastTestStatus ?? 'Not tested'}
-                    </span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className={
+                        c.lastTestStatus === 'OK' ? 'text-green-700 text-sm font-medium' :
+                        c.lastTestStatus === 'FAILED' ? 'text-red-700 text-sm font-medium' :
+                        'text-slate-500 text-sm'
+                      }>
+                        {c.lastTestStatus ?? 'Not tested'}
+                      </span>
+                      {testResults[c.id] && (
+                        <span className={`text-xs ${testResults[c.id]!.ok ? 'text-green-600' : 'text-red-500'}`}>
+                          {testResults[c.id]!.ok ? '✓ ' : '✗ '}{testResults[c.id]!.message}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <button

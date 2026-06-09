@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import type { Database } from '@eam/db';
-import { userPresence } from '@eam/db';
+import { userPresence, users } from '@eam/db';
 
 export type PresenceStatus = 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE';
 
@@ -37,11 +37,16 @@ export async function listOnlineUsers(db: Database, tenantId: string) {
   return db
     .select({
       userId: userPresence.userId,
+      displayName: users.displayName,
       status: userPresence.status,
       lastSeenAt: userPresence.lastSeenAt,
     })
     .from(userPresence)
+    .leftJoin(users, eq(userPresence.userId, users.id))
     .where(
-      and(eq(userPresence.tenantId, tenantId), eq(userPresence.status, 'ONLINE')),
+      and(
+        eq(userPresence.tenantId, tenantId),
+        ne(userPresence.status, 'OFFLINE'),  // show ONLINE, AWAY, DND
+      ),
     );
 }

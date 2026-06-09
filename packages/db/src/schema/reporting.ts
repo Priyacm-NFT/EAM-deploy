@@ -74,3 +74,24 @@ export const reportBiConnections = pgTable('report_bi_connections', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ── Per-report access control ─────────────────────────────────────────────────
+export const reportPermissions = pgTable('report_permissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reportId: uuid('report_id')
+    .notNull()
+    .references(() => reportDefinitions.id, { onDelete: 'cascade' }),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  // Grant to a user OR a role (at least one must be set)
+  userId: uuid('user_id'),
+  roleId: uuid('role_id'),
+  canView: boolean('can_view').notNull().default(true),
+  canRun: boolean('can_run').notNull().default(true),
+  canEdit: boolean('can_edit').notNull().default(false),
+  canSchedule: boolean('can_schedule').notNull().default(false),
+  canShare: boolean('can_share').notNull().default(false),
+  grantedBy: uuid('granted_by'),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
+});

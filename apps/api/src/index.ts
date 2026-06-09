@@ -26,11 +26,12 @@ import { permitRoutes } from './routes/permits.js';
 import { inventoryRoutes } from './routes/inventory.js';
 import { labourRoutes } from './routes/labour.js';
 import { setupSocketIO } from './socket.js';
-import { wireApiNotificationBridge } from './lib/notification-bridge.js';
+import { wireApiNotificationBridge, getNotificationRedis } from './lib/notification-bridge.js';
 import { NotificationDispatcher } from '@eam/notification-service';
 import { globalEventBus } from '@eam/shared';
 import { smtpConfigurations } from '@eam/db';
 import { eq } from 'drizzle-orm';
+import { WorkflowEngine } from '@eam/workflow-engine';
 
 export { setupSocketIO };
 
@@ -87,8 +88,34 @@ export async function buildApp() {
     }
   };
 
-  const dispatcher = new NotificationDispatcher(db, enqueueEmail);
+  const dispatcher = new NotificationDispatcher(db, enqueueEmail, {
+    redis: getNotificationRedis(),
+  });
   dispatcher.attach(globalEventBus);
+
+  // ── SLA escalation cron — runs every 5 minutes ───────────────────────────
+  const wfEngine = new WorkflowEngine(db);
+  const SLA_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const escalated = await wfEngine.escalateOverdueTasks();
+      if (escalated > 0) console.info(`[sla-cron] Escalated ${escalated} overdue task(s)`);
+    } catch (err) {
+      console.error('[sla-cron] Error during SLA escalation:', err instanceof Error ? err.message : err);
+    }
+  }, SLA_CHECK_INTERVAL_MS);
+
+  // ── Integration job cron — checks for due scheduled jobs every minute ────
+  const JOB_CRON_INTERVAL_MS = 60 * 1000;
+  setInterval(async () => {
+    try {
+      const { processDueIntegrationJobs } = await import('@eam/integration-framework');
+      const count = await processDueIntegrationJobs(db);
+      if (count > 0) console.info(`[job-cron] Ran ${count} due integration job(s)`);
+    } catch (err) {
+      console.error('[job-cron] Error:', err instanceof Error ? err.message : err);
+    }
+  }, JOB_CRON_INTERVAL_MS);
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 

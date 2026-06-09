@@ -1,5 +1,5 @@
 import { pgTable, uuid, text, timestamp, boolean, jsonb, integer, pgEnum } from 'drizzle-orm/pg-core';
-import { tenants } from './identity.js';
+import { tenants, users } from './identity.js';
 
 export const adapterTypeEnum = pgEnum('adapter_type', [
   'REST',
@@ -62,5 +62,37 @@ export const webhookSubscriptions = pgTable('webhook_subscriptions', {
   secret: text('secret').notNull(),
   events: text('events').array().notNull(),
   isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const webhookDeliveryLog = pgTable('webhook_delivery_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  subscriptionId: uuid('subscription_id')
+    .notNull()
+    .references(() => webhookSubscriptions.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>(),
+  attempt: integer('attempt').notNull().default(1),
+  status: text('status').notNull(), // DELIVERED | FAILED | RETRYING
+  httpStatus: integer('http_status'),
+  error: text('error'),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── API Keys — per-consumer tokens for the API gateway ───────────────────────
+export const apiKeys = pgTable('api_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  createdBy: uuid('created_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),              // human label e.g. "SAP connector"
+  keyHash: text('key_hash').notNull(),       // SHA-256 hash — never store raw
+  keyPrefix: text('key_prefix').notNull(),   // first 8 chars shown in UI e.g. "eam_k1ab"
+  scopes: text('scopes').array().notNull().default([]),  // e.g. ["read:assets","write:work_orders"]
+  isActive: boolean('is_active').notNull().default(true),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

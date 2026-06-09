@@ -78,19 +78,24 @@ export function DynamicFormRenderer({ entityName, record, values, onChange, read
       if (!ent) { setLoading(false); return; }
       setEntity(ent);
 
-      const [fieldList, ruleList, formLayouts] = await Promise.all([
+      const [fieldList, ruleList, formLayouts, me] = await Promise.all([
         api<FieldDef[]>(`/admin/config/entities/${ent.id}/fields`),
         api<FieldRule[]>(`/admin/config/entities/${ent.id}/rules`),
-        api<Array<{ id: string; definition: FormLayoutDefinition; isActive: boolean }>>(
+        api<Array<{ id: string; definition: FormLayoutDefinition; isActive: boolean; roleId: string | null }>>(
           `/admin/config/entities/${ent.id}/forms`
         ),
+        api<{ roles: string[] }>('/auth/me').catch(() => ({ roles: [] })),
       ]);
 
       const activeFields = fieldList.filter((f) => f.isActive);
       setFields(activeFields);
       setRules(ruleList);
 
-      const activeLayout = formLayouts.find((f) => f.isActive) ?? formLayouts[0];
+      // Pick role-specific layout first, fall back to default (no role)
+      const userRoles = me.roles ?? [];
+      const roleLayout = formLayouts.find((f) => f.isActive && f.roleId && userRoles.includes(f.roleId));
+      const defaultLayout = formLayouts.find((f) => f.isActive && !f.roleId) ?? formLayouts[0];
+      const activeLayout = roleLayout ?? defaultLayout;
       setLayout(activeLayout?.definition ?? null);
 
       // Load picklist values for PICKLIST fields
@@ -338,5 +343,3 @@ export function DynamicFormRenderer({ entityName, record, values, onChange, read
     </div>
   );
 }
-
-

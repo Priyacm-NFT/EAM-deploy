@@ -31,6 +31,7 @@ export const documentTypes = pgTable('document_types', {
   requiredRoles: text('required_roles').array().default([]),
   virusScanEnabled: boolean('virus_scan_enabled').notNull().default(true),
   virusScanAction: virusActionEnum('virus_scan_action').notNull().default('QUARANTINE'),
+  mandatoryForStatus: text('mandatory_for_status').array().default([]),
   isActive: boolean('is_active').notNull().default(true),
   isSystem: boolean('is_system').notNull().default(false),
 });

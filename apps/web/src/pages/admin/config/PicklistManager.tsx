@@ -21,6 +21,8 @@ interface PicklistValue {
   displayOrder: number;
   isActive: boolean;
   parentValue: string | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
 }
 
 export function PicklistManagerPage() {
@@ -30,7 +32,7 @@ export function PicklistManagerPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showValueForm, setShowValueForm] = useState(false);
   const [plForm, setPlForm] = useState({ name: '', label: '' });
-  const [valForm, setValForm] = useState({ value: '', label: '', displayOrder: 0, parentValue: '' });
+  const [valForm, setValForm] = useState({ value: '', label: '', displayOrder: 0, parentValue: '', effectiveFrom: '', effectiveTo: '' });
   const [editValId, setEditValId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -88,7 +90,7 @@ export function PicklistManagerPage() {
     setSaving(true);
     setError('');
     try {
-      const payload = { ...valForm, parentValue: valForm.parentValue || undefined };
+      const payload = { ...valForm, parentValue: valForm.parentValue || undefined, effectiveFrom: valForm.effectiveFrom || undefined, effectiveTo: valForm.effectiveTo || undefined };
       if (editValId) {
         await api(`/admin/config/picklists/${selected.id}/values/${editValId}`, {
           method: 'PUT',
@@ -104,7 +106,7 @@ export function PicklistManagerPage() {
       }
       setShowValueForm(false);
       setEditValId(null);
-      setValForm({ value: '', label: '', displayOrder: 0, parentValue: '' });
+      setValForm({ value: '', label: '', displayOrder: 0, parentValue: '', effectiveFrom: '', effectiveTo: '' });
       loadValues(selected.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
@@ -126,7 +128,7 @@ export function PicklistManagerPage() {
   }
 
   function startEditValue(v: PicklistValue) {
-    setValForm({ value: v.value, label: v.label, displayOrder: v.displayOrder, parentValue: v.parentValue ?? '' });
+    setValForm({ value: v.value, label: v.label, displayOrder: v.displayOrder, parentValue: v.parentValue ?? '', effectiveFrom: v.effectiveFrom ?? '', effectiveTo: v.effectiveTo ?? '' });
     setEditValId(v.id);
     setShowValueForm(true);
   }
@@ -199,15 +201,25 @@ export function PicklistManagerPage() {
             </div>
           ) : (
             <>
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center flex-wrap gap-2">
                 <h2 className="admin-section-title">Values — {selected.label}</h2>
-                <button
-                  type="button"
-                  className="btn-primary !w-auto px-3 text-xs"
-                  onClick={() => { setShowValueForm((v) => !v); setEditValId(null); setValForm({ value: '', label: '', displayOrder: 0, parentValue: '' }); }}
-                >
-                  {showValueForm && !editValId ? 'Cancel' : '+ Add value'}
-                </button>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-outline text-xs" onClick={() => {
+                    const csv = ['value,label,displayOrder,parentValue,effectiveFrom,effectiveTo,isActive',
+                      ...values.map((v) => [v.value, v.label, v.displayOrder, v.parentValue ?? '', v.effectiveFrom ?? '', v.effectiveTo ?? '', v.isActive].join(','))
+                    ].join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                    a.download = `${selected.name}-values.csv`; a.click();
+                  }}>↓ CSV</button>
+                  <button
+                    type="button"
+                    className="btn-primary !w-auto px-3 text-xs"
+                    onClick={() => { setShowValueForm((v) => !v); setEditValId(null); setValForm({ value: '', label: '', displayOrder: 0, parentValue: '', effectiveFrom: '', effectiveTo: '' }); }}
+                  >
+                    {showValueForm && !editValId ? 'Cancel' : '+ Add value'}
+                  </button>
+                </div>
               </div>
 
               {showValueForm && (
@@ -225,6 +237,16 @@ export function PicklistManagerPage() {
                     <FormField label="Parent value (dependent picklists)" htmlFor="val-parent">
                       <input id="val-parent" className="form-input text-sm font-mono" value={valForm.parentValue} onChange={(e) => setValForm({ ...valForm, parentValue: e.target.value })} placeholder="Optional" />
                     </FormField>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="form-label text-xs">Effective from</label>
+                        <input type="date" className="form-input text-sm" value={valForm.effectiveFrom} onChange={(e) => setValForm({ ...valForm, effectiveFrom: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="form-label text-xs">Effective to</label>
+                        <input type="date" className="form-input text-sm" value={valForm.effectiveTo} onChange={(e) => setValForm({ ...valForm, effectiveTo: e.target.value })} />
+                      </div>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button type="submit" className="btn-primary !w-auto px-4 text-xs" disabled={saving}>{saving ? 'Saving…' : editValId ? 'Update' : 'Add'}</button>
@@ -241,13 +263,15 @@ export function PicklistManagerPage() {
                       <th>Value</th>
                       <th>Label</th>
                       <th>Parent</th>
+                      <th>Effective from</th>
+                      <th>Effective to</th>
                       <th>Active</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {values.length === 0 && (
-                      <tr><td colSpan={6} className="text-center text-slate-400 py-8">No values. Add one above.</td></tr>
+                      <tr><td colSpan={8} className="text-center text-slate-400 py-8">No values. Add one above.</td></tr>
                     )}
                     {values.map((v) => (
                       <tr key={v.id}>
@@ -255,6 +279,8 @@ export function PicklistManagerPage() {
                         <td><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">{v.value}</code></td>
                         <td className="text-sm">{v.label}</td>
                         <td className="text-xs text-slate-500">{v.parentValue ?? '—'}</td>
+                        <td className="text-xs text-slate-500">{v.effectiveFrom ? new Date(v.effectiveFrom).toLocaleDateString() : '—'}</td>
+                        <td className="text-xs text-slate-500">{v.effectiveTo ? new Date(v.effectiveTo).toLocaleDateString() : '—'}</td>
                         <td>
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${v.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                             {v.isActive ? 'Active' : 'Inactive'}

@@ -12,6 +12,8 @@ import {
   statusTransitions,
   audit,
 } from '@eam/db';
+import { entityDefinitions, fieldDefinitions } from '@eam/db';
+import { FieldRulesService } from '@eam/config-engine';
 import { requirePermission } from '../plugins/auth.js';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
 
@@ -27,6 +29,33 @@ const SLA_HOURS: Record<string, number> = {
 };
 
 export async function serviceRequestRoutes(app: FastifyInstance) {
+
+// ── Custom field validation helper ──────────────────────────────────────────
+async function validateCustomFields(
+  tid: string,
+  entityName: string,
+  data: Record<string, unknown>,
+  userRoles: string[],
+  currentStatus?: string,
+): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
+  const [entity] = await db
+    .select()
+    .from(entityDefinitions)
+    .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
+    .limit(1);
+  if (!entity) return { valid: true, errors: [] };
+
+  const fields = await db
+    .select()
+    .from(fieldDefinitions)
+    .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
+
+  const svc = new FieldRulesService(db);
+  const rules = await svc.loadRules(tid, entity.id, currentStatus);
+  return svc.validateWrite(fields, rules, data, userRoles);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
   // ─── List ─────────────────────────────────────────────────────────────────────
 
   app.get('/service-requests', readGuard, async (request) => {
@@ -110,6 +139,12 @@ export async function serviceRequestRoutes(app: FastifyInstance) {
     const tid = request.user!.tenantId;
 
     // Auto-number
+    // ── Custom field validation ──────────────────────────────────────────────
+    const customData = body.customData ?? {};
+    const validation = await validateCustomFields(tid, 'ServiceRequest', { ...body, ...customData }, request.user!.roles ?? []);
+    if (!validation.valid) return reply.code(422).send({ error: 'Validation failed', errors: validation.errors });
+    // ────────────────────────────────────────────────────────────────────────
+
     const count = await db.select({ id: serviceRequests.id }).from(serviceRequests)
       .where(eq(serviceRequests.tenantId, tid));
     const srNum = `SR-${String(count.length + 1).padStart(6, '0')}`;
@@ -236,6 +271,24 @@ export async function serviceRequestRoutes(app: FastifyInstance) {
       resourceId: id,
       metadata: { fromStatus: sr.status, toStatus: body.toStatus, comment: body.comment ?? null },
     });
+
+    // ── Auto-start matching workflow on SR status transition ───────────────
+    const { WorkflowEngine } = await import('@eam/workflow-engine');
+    const engine = new WorkflowEngine(db);
+    void engine.startWorkflow(
+      'ServiceRequest',
+      id,
+      `SR_${sr.status}_TO_${body.toStatus}`,
+      tid,
+      {
+        srId: id,
+        srNum: sr.srNum,
+        fromStatus: sr.status,
+        toStatus: body.toStatus,
+        requesterId: sr.requesterId ?? request.user!.id,
+        priority: sr.priority,
+      },
+    );
 
     return updated;
   });

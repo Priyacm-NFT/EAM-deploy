@@ -5,7 +5,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./icap.js": { "types": "./dist/icap.d.ts", "import": "./dist/icap.js" }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",

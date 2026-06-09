@@ -349,4 +349,21 @@ export async function adminWorkflowRoutes(app: FastifyInstance) {
 
     return history;
   });
+
+  // ── Advance a workflow task ────────────────────────────────────────────────
+  app.post('/admin/workflows/tasks/:taskId/advance', guard, async (request, reply) => {
+    const { taskId } = request.params as { taskId: string };
+    const body = request.body as { action: 'APPROVE' | 'REJECT' | 'COMPLETE'; comment?: string };
+    if (!['APPROVE', 'REJECT', 'COMPLETE'].includes(body.action)) {
+      return reply.code(400).send({ error: 'action must be APPROVE, REJECT, or COMPLETE' });
+    }
+    try {
+      const { WorkflowEngine } = await import('@eam/workflow-engine');
+      const engine = new WorkflowEngine(db);
+      await engine.advanceTask(taskId, request.user!.id, body.action, body.comment);
+      return { ok: true };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'Advance failed' });
+    }
+  });
 }

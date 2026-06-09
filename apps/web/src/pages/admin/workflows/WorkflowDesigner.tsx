@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../../../api/client.js';
 import { MessageBanner } from '../../../components/identity/IdentityLayout.js';
 
-type NodeType = 'START' | 'END' | 'TASK' | 'APPROVAL' | 'DECISION' | 'NOTIFICATION' | 'INTEGRATION';
+type NodeType = 'START' | 'END' | 'TASK' | 'APPROVAL' | 'DECISION' | 'NOTIFICATION' | 'INTEGRATION' | 'PARALLEL_SPLIT' | 'SYNCHRONISE';
 
 interface WFNode {
   id: string;
@@ -43,6 +43,8 @@ const NODE_COLORS: Record<NodeType, string> = {
   APPROVAL: 'bg-orange-500 text-white border-orange-600',
   DECISION: 'bg-purple-500 text-white border-purple-600',
   NOTIFICATION: 'bg-teal-500 text-white border-teal-600',
+  PARALLEL_SPLIT: 'bg-cyan-600 text-white border-cyan-700',
+  SYNCHRONISE: 'bg-teal-600 text-white border-teal-700',
   INTEGRATION: 'bg-pink-500 text-white border-pink-600',
 };
 
@@ -52,6 +54,8 @@ const NODE_PALETTE: { type: NodeType; label: string; desc: string }[] = [
   { type: 'APPROVAL', label: 'Approval', desc: 'Approve / reject' },
   { type: 'DECISION', label: 'Decision', desc: 'SQL condition branch' },
   { type: 'NOTIFICATION', label: 'Notify', desc: 'Email / in-app alert' },
+  { type: 'PARALLEL_SPLIT', label: 'Parallel Split', desc: 'Fork into concurrent branches' },
+  { type: 'SYNCHRONISE', label: 'Synchronise', desc: 'Wait for all branches' },
   { type: 'INTEGRATION', label: 'Integration', desc: 'External REST call' },
   { type: 'END', label: 'End', desc: 'Terminal node' },
 ];

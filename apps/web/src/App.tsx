@@ -24,6 +24,8 @@ import { ReportDesignerPage } from './pages/admin/reporting/ReportDesigner.js';
 import { ReportLibraryPage } from './pages/admin/reporting/ReportLibrary.js';
 import { ScheduledReportsPage } from './pages/admin/reporting/ScheduledReports.js';
 import { BIConnectionsPage } from './pages/admin/reporting/BIConnections.js';
+import { BIRlsViewsPage } from './pages/admin/reporting/BIRlsViews.js';
+import { DashboardTemplatePage } from './pages/admin/dashboard/DashboardTemplate.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { SchemaMigrationLogPage } from './pages/admin/schema/SchemaMigrationLog.js';
@@ -33,14 +35,17 @@ import { ConnectionListPage } from './pages/admin/integrations/ConnectionList.js
 import { IntegrationJobsPage } from './pages/admin/integrations/IntegrationJobs.js';
 import { WebhookConfigPage } from './pages/admin/integrations/WebhookConfig.js';
 import { IntegrationHistoryPage } from './pages/admin/integrations/IntegrationHistory.js';
+import { ApiKeyManagerPage } from './pages/admin/integrations/ApiKeyManager.js';
 import { DocumentTypesPage } from './pages/admin/attachments/DocumentTypes.js';
 import { AttachmentLibraryPage } from './pages/admin/attachments/AttachmentLibrary.js';
 import { RetentionPoliciesPage } from './pages/admin/attachments/RetentionPolicies.js';
+import { ScanConfigPage } from './pages/admin/attachments/ScanConfig.js';
 import { NotificationTemplatesPage } from './pages/admin/notifications/NotificationTemplates.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { NotificationTriggersPage } from './pages/admin/notifications/NotificationTriggers.js';
 import { SmtpConfigPage } from './pages/admin/notifications/SmtpConfig.js';
 import { DeliveryLogPage } from './pages/admin/notifications/DeliveryLog.js';
+import { BounceListPage } from './pages/admin/notifications/BounceList.js';
 import { LocationTreePage } from './pages/assets/LocationTree.js';
 import { AssetListPage } from './pages/assets/AssetList.js';
 import { AssetFormPage } from './pages/assets/AssetForm.js';
@@ -166,10 +171,12 @@ export default function App() {
     ['/inventory', 'Inventory', 'Stock, items and storerooms'],
     ['/people', 'People', 'Crew, contractors and contacts'],
     ['/reports', 'Reports'],
+    ['/admin/dashboard-templates', 'Dashboard Templates', 'Set default layouts per role'],
     ['/dashboard', 'Dashboard'],
     ['/admin/identity', 'Identity & Access'],
     ['/admin/config', 'Configuration'],
     ['/admin/notifications', 'Notifications'],
+    ['/admin/integrations/api-keys', 'API Keys', 'Manage per-consumer API tokens'],
     ['/admin/integrations', 'Integrations'],
     ['/admin/reporting', 'Reporting'],
     ['/admin/schema', 'Schema & Workflows'],
@@ -283,6 +290,7 @@ export default function App() {
                 <SidebarLink to="/admin/config" label="Entities & Fields" />
                 <SidebarLink to="/admin/config/picklists" label="Picklists" />
                 <SidebarLink to="/admin/config/status-model" label="Status Model" />
+                <SidebarLink to="/admin/dashboard-templates" label="Dashboard Templates" />
                 <SidebarLink to="/admin/config/versions" label="Config Versions" />
                 <SidebarLink to="/admin/org" label="Org & Sites" />
               </CollapsibleSection>
@@ -300,6 +308,7 @@ export default function App() {
                 <SidebarLink to="/admin/integrations/connections" label="Connections" />
                 <SidebarLink to="/admin/integrations/jobs" label="Scheduled Jobs" />
                 <SidebarLink to="/admin/integrations/webhooks" label="Webhooks" />
+                <SidebarLink to="/admin/integrations/api-keys" label="API Keys" />
                 <SidebarLink to="/admin/integrations/history" label="Run History" />
               </CollapsibleSection>
             )}
@@ -308,6 +317,7 @@ export default function App() {
               <CollapsibleSection label="Attachments" paths={['/admin/attachments']}>
                 <SidebarLink to="/admin/attachments/document-types" label="Document Types" />
                 <SidebarLink to="/admin/attachments/library" label="File Library" />
+                <SidebarLink to="/admin/attachments/scan-config" label="Scan Config" />
                 <SidebarLink to="/admin/attachments/retention" label="Retention" />
               </CollapsibleSection>
             )}
@@ -318,6 +328,7 @@ export default function App() {
                 <SidebarLink to="/admin/reporting/designer" label="Report Designer" />
                 <SidebarLink to="/admin/reporting/schedules" label="Schedules" />
                 <SidebarLink to="/admin/reporting/bi" label="BI Connections" />
+                <SidebarLink to="/admin/reporting/bi-rls" label="BI RLS Views" />
               </CollapsibleSection>
             )}
 
@@ -334,6 +345,7 @@ export default function App() {
                 <SidebarLink to="/admin/notifications/triggers" label="Triggers" />
                 <SidebarLink to="/admin/notifications/smtp" label="SMTP Config" />
                 <SidebarLink to="/admin/notifications/delivery-log" label="Delivery Log" />
+                <SidebarLink to="/admin/notifications/bounce-list" label="Bounce List" />
               </CollapsibleSection>
             )}
           </>
@@ -363,6 +375,7 @@ export default function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/admin/dashboard-templates" element={<DashboardTemplatePage />} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/admin/identity/users" element={<AdminIdentityPage />} />
             <Route path="/admin/identity/users/:id" element={<UserFormPage />} />
@@ -383,13 +396,16 @@ export default function App() {
             <Route path="/admin/integrations/jobs" element={<IntegrationJobsPage />} />
             <Route path="/admin/integrations/webhooks" element={<WebhookConfigPage />} />
             <Route path="/admin/integrations/history" element={<IntegrationHistoryPage />} />
+            <Route path="/admin/integrations/api-keys" element={<ApiKeyManagerPage />} />
             <Route path="/admin/attachments/document-types" element={<DocumentTypesPage />} />
             <Route path="/admin/attachments/library" element={<AttachmentLibraryPage />} />
+            <Route path="/admin/attachments/scan-config" element={<ScanConfigPage />} />
             <Route path="/admin/attachments/retention" element={<RetentionPoliciesPage />} />
             <Route path="/admin/reporting/designer" element={<ReportDesignerPage />} />
             <Route path="/admin/reporting/library" element={<ReportLibraryPage />} />
             <Route path="/admin/reporting/schedules" element={<ScheduledReportsPage />} />
             <Route path="/admin/reporting/bi" element={<BIConnectionsPage />} />
+            <Route path="/admin/reporting/bi-rls" element={<BIRlsViewsPage />} />
             <Route path="/admin/org" element={<OrgStructurePage />} />
             <Route path="/admin/config/picklists" element={<PicklistManagerPage />} />
             <Route path="/admin/config/status-model" element={<StatusModelPage />} />
@@ -398,6 +414,7 @@ export default function App() {
             <Route path="/admin/notifications/triggers" element={<NotificationTriggersPage />} />
             <Route path="/admin/notifications/smtp" element={<SmtpConfigPage />} />
             <Route path="/admin/notifications/delivery-log" element={<DeliveryLogPage />} />
+            <Route path="/admin/notifications/bounce-list" element={<BounceListPage />} />
             <Route path="/locations" element={<LocationTreePage />} />
             <Route path="/assets" element={<AssetListPage />} />
             <Route path="/assets/new" element={<AssetFormPage />} />
@@ -433,6 +450,4 @@ export default function App() {
     </div>
   );
 }
-
-
 

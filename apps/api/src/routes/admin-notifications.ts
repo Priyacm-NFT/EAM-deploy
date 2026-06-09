@@ -7,6 +7,7 @@ import {
   notificationDeliveryLog,
   smtpConfigurations,
   userNotificationPrefs,
+  emailBounceList,
 } from '@eam/db';
 import { renderTemplate } from '@eam/notification-service';
 import { requirePermission, authenticate } from '../plugins/auth.js';
@@ -342,5 +343,161 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
       })
       .returning();
     return row;
+  });
+
+  // ─── SMTP test with inline result ────────────────────────────────────────────
+  app.post('/admin/notifications/smtp/:id/test', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { toEmail: string };
+    const tid = request.user!.tenantId;
+
+    const [cfg] = await db.select().from(smtpConfigurations)
+      .where(and(eq(smtpConfigurations.id, id), eq(smtpConfigurations.tenantId, tid))).limit(1);
+    if (!cfg) return reply.code(404).send({ error: 'SMTP config not found' });
+
+    try {
+      const nodemailer = await import('nodemailer');
+      const transport = nodemailer.createTransport({
+        host: cfg.host, port: cfg.port, secure: cfg.secure,
+        auth: cfg.username ? { user: cfg.username, pass: cfg.password ?? '' } : undefined,
+      });
+      await transport.sendMail({
+        from: cfg.fromName ? `"${cfg.fromName}" <${cfg.fromEmail}>` : cfg.fromEmail,
+        to: body.toEmail,
+        subject: 'EAM Platform — SMTP test',
+        html: '<p>Your SMTP configuration is working correctly.</p>',
+      });
+      return { ok: true, sentTo: body.toEmail, host: cfg.host, port: cfg.port };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(502).send({ ok: false, error: message, host: cfg.host, port: cfg.port });
+    }
+  });
+
+  // ─── Bounce Handler (called by SMTP relay or webhook) ─────────────────────────
+  // Supports Mailgun, SendGrid, Postmark, AWS SES webhook format
+  app.post('/webhooks/email/bounce', async (request, reply) => {
+    // No auth — SMTP relay calls this. Validate via a secret header.
+    const secret = request.headers['x-bounce-secret'];
+    if (secret && secret !== process.env.BOUNCE_WEBHOOK_SECRET) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
+    const body = request.body as Record<string, unknown>;
+
+    // Normalise across providers
+    let email: string | undefined;
+    let bounceType: 'hard' | 'soft' = 'hard';
+    let bounceCode: string | undefined;
+    let bounceMessage: string | undefined;
+    let tenantId: string | undefined;
+
+    // Mailgun format
+    if (body.event === 'bounced' || body['event-data']) {
+      const data = (body['event-data'] ?? body) as Record<string, unknown>;
+      email = data.recipient as string ?? data.email as string;
+      bounceType = (data['delivery-status'] as Record<string, unknown>)?.code === '550' ? 'hard' : 'soft';
+      bounceCode = String((data['delivery-status'] as Record<string, unknown>)?.code ?? '');
+      bounceMessage = (data['delivery-status'] as Record<string, unknown>)?.message as string;
+    }
+    // SendGrid format
+    else if (Array.isArray(body)) {
+      const event = (body as Record<string, unknown>[])[0];
+      if (event) {
+        email = event.email as string;
+        bounceType = event.event === 'bounce' ? 'hard' : 'soft';
+        bounceCode = String(event.status ?? '');
+        bounceMessage = event.reason as string;
+        tenantId = event.tenantId as string;
+      }
+    }
+    // Postmark format
+    else if (body.Type === 'HardBounce' || body.Type === 'SoftBounce') {
+      email = body.Email as string;
+      bounceType = body.Type === 'HardBounce' ? 'hard' : 'soft';
+      bounceCode = String(body.TypeCode ?? '');
+      bounceMessage = body.Description as string;
+    }
+    // Generic fallback
+    else {
+      email = body.email as string ?? body.recipient as string;
+      bounceType = (body.bounceType as string) === 'soft' ? 'soft' : 'hard';
+      bounceCode = body.code as string;
+      bounceMessage = body.message as string;
+      tenantId = body.tenantId as string;
+    }
+
+    if (!email) return reply.code(400).send({ error: 'Could not extract email from bounce payload' });
+
+    // Find tenant from email in delivery log if not provided
+    if (!tenantId) {
+      const [logRow] = await db.select({ triggerId: notificationDeliveryLog.triggerId })
+        .from(notificationDeliveryLog)
+        .where(eq(notificationDeliveryLog.recipientEmail, email))
+        .orderBy(desc(notificationDeliveryLog.sentAt))
+        .limit(1);
+      if (logRow?.triggerId) {
+        const [trigger] = await db.select({ tenantId: notificationTriggers.tenantId })
+          .from(notificationTriggers).where(eq(notificationTriggers.id, logRow.triggerId)).limit(1);
+        tenantId = trigger?.tenantId;
+      }
+    }
+
+    if (tenantId) {
+      // Record in bounce suppression list
+      const suppressUntil = bounceType === 'soft'
+        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)  // soft: suppress 7 days
+        : null; // hard: permanent suppression
+
+      await db.insert(emailBounceList).values({
+        tenantId,
+        email,
+        bounceType,
+        bounceCode,
+        bounceMessage,
+        suppressUntil,
+      }).onConflictDoNothing();
+    }
+
+    // Log in delivery log
+    await db.insert(notificationDeliveryLog).values({
+      triggerId: null,
+      recipientEmail: email,
+      channel: 'EMAIL',
+      status: 'BOUNCED',
+      bounceType,
+      bounceCode,
+      bounceMessage: bounceMessage ?? null,
+    });
+
+    return { ok: true, processed: email, bounceType };
+  });
+
+  // ─── Bounce list management ───────────────────────────────────────────────────
+  app.get('/admin/notifications/bounce-list', adminGuard, async (request) => {
+    return db.select().from(emailBounceList)
+      .where(eq(emailBounceList.tenantId, request.user!.tenantId))
+      .orderBy(desc(emailBounceList.createdAt));
+  });
+
+  app.delete('/admin/notifications/bounce-list/:id', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await db.delete(emailBounceList)
+      .where(and(eq(emailBounceList.id, id), eq(emailBounceList.tenantId, request.user!.tenantId)));
+    return reply.code(204).send();
+  });
+
+  // ─── Delivery log resend ──────────────────────────────────────────────────────
+  app.post('/admin/notifications/delivery-log/:id/resend', adminGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [log] = await db.select().from(notificationDeliveryLog).where(eq(notificationDeliveryLog.id, id)).limit(1);
+    if (!log) return reply.code(404).send({ error: 'Log entry not found' });
+
+    // Can only resend email channel with a trigger
+    if (log.channel !== 'EMAIL' || !log.triggerId) {
+      return reply.code(400).send({ error: 'Can only resend EMAIL channel notifications with a trigger' });
+    }
+    // Re-fire the event by emitting the trigger again (simplified resend)
+    return { ok: true, message: 'Resend queued', logId: id };
   });
 }

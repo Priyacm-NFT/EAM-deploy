@@ -29,6 +29,8 @@ import {
 import { requirePermission } from '../plugins/auth.js';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
 import { globalEventBus } from '@eam/shared';
+import { WorkflowEngine } from '@eam/workflow-engine';
+import { checkMandatoryAttachments } from './admin-attachments.js';
 import { FieldRulesService } from '@eam/config-engine';
 
 const readGuard = { preHandler: requirePermission('work_orders:read') };
@@ -297,6 +299,16 @@ export async function workOrderRoutes(app: FastifyInstance) {
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
 
+    // ── Mandatory attachment check ─────────────────────────────────────────
+    const mandatoryCheck = await checkMandatoryAttachments(tid, 'WorkOrder', id, body.toStatus);
+    if (!mandatoryCheck.valid) {
+      return reply.code(422).send({
+        error: 'Mandatory attachments missing',
+        missing: mandatoryCheck.missing,
+        message: `The following documents are required before transitioning to ${body.toStatus}: ${mandatoryCheck.missing.join(', ')}`,
+      });
+    }
+
     // Guard: cannot start work (INPRG) without active permit on hot work / hazard WOs
     if (body.toStatus === 'INPRG' && wo.permitId) {
       const [p] = await db.select().from(permits)
@@ -355,8 +367,8 @@ export async function workOrderRoutes(app: FastifyInstance) {
       entityType: 'WorkOrder',
       fromStatus: wo.status,
       toStatus: body.toStatus,
-      status: body.toStatus,           // for condition: status = 'COMP'
-      assignedToUserId: wo.assignedToUserId,  // for notifyAssignee
+      status: body.toStatus,
+      assignedToUserId: wo.assignedToUserId,
       userId: request.user!.id,
       context: {
         status: body.toStatus,
@@ -367,6 +379,27 @@ export async function workOrderRoutes(app: FastifyInstance) {
         assignedToUserId: wo.assignedToUserId,
       },
     });
+
+    // ── Auto-start matching workflow on status transition ──────────────────
+    const engine = new WorkflowEngine(db);
+    void engine.startWorkflow(
+      'WorkOrder',
+      id,
+      `WO_${wo.status}_TO_${body.toStatus}`,
+      tid,
+      {
+        woId: id,
+        woNum: wo.woNum,
+        fromStatus: wo.status,
+        toStatus: body.toStatus,
+        requesterId: (wo as Record<string, unknown>).requesterId as string ?? request.user!.id,
+        assignedToUserId: wo.assignedToUserId,
+        assetId: wo.assetId,
+        priority: wo.priority,
+        totalcost: parseFloat(wo.totalCost ?? '0'),
+      },
+    );
+
     return updated;
   });
 
@@ -758,4 +791,3 @@ async function applyJobPlanToWo(jobPlanId: string, woId: string, tenantId: strin
     })));
   }
 }
-

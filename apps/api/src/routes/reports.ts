@@ -6,6 +6,7 @@ import {
   reportDefinitions,
   reportSchedules,
   reportRunLog,
+  reportPermissions,
 } from '@eam/db';
 import {
   previewReport,
@@ -177,9 +178,18 @@ export async function reportRoutes(app: FastifyInstance) {
     { ...authGuard, schema: { tags: ['Reports'], summary: 'Run report and return download URL' } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = (request.body ?? {}) as { format?: string };
+      const body = (request.body ?? {}) as { format?: string; skipIfEmpty?: boolean };
       const format = body.format ?? 'PDF';
+      const skipIfEmpty = body.skipIfEmpty ?? false;
       try {
+        // Zero-row skip: preview first, return 204 if empty and skipIfEmpty=true
+        if (skipIfEmpty) {
+          const preview = await previewReport(db, id, request.user!.tenantId);
+          const { shouldSkipEmpty } = await import('@eam/reporting-engine');
+          if (shouldSkipEmpty(true, preview.rows?.length ?? 0)) {
+            return reply.status(204).send();
+          }
+        }
         const result = await runReport(db, {
           reportId: id,
           tenantId: request.user!.tenantId,
@@ -248,6 +258,90 @@ export async function reportRoutes(app: FastifyInstance) {
         .limit(100);
       if (!reportId) return logs;
       return logs.filter((l) => l.reportId === reportId);
+    },
+  );
+
+  // ─── Report Permissions ────────────────────────────────────────────────────
+
+  app.get(
+    '/reports/definitions/:id/permissions',
+    { ...manageGuard },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const [report] = await db.select().from(reportDefinitions)
+        .where(and(eq(reportDefinitions.id, id), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+        .limit(1);
+      if (!report) return reply.code(404).send({ error: 'Not found' });
+      return db.select().from(reportPermissions)
+        .where(and(eq(reportPermissions.reportId, id), eq(reportPermissions.tenantId, request.user!.tenantId)));
+    },
+  );
+
+  app.post(
+    '/reports/definitions/:id/permissions',
+    { ...manageGuard },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        userId?: string;
+        roleId?: string;
+        canView?: boolean;
+        canRun?: boolean;
+        canEdit?: boolean;
+        canSchedule?: boolean;
+        canShare?: boolean;
+      };
+      if (!body.userId && !body.roleId) {
+        return reply.code(400).send({ error: 'userId or roleId is required' });
+      }
+      const [row] = await db.insert(reportPermissions).values({
+        reportId: id,
+        tenantId: request.user!.tenantId,
+        userId: body.userId,
+        roleId: body.roleId,
+        canView: body.canView ?? true,
+        canRun: body.canRun ?? true,
+        canEdit: body.canEdit ?? false,
+        canSchedule: body.canSchedule ?? false,
+        canShare: body.canShare ?? false,
+        grantedBy: request.user!.id,
+      }).returning();
+      return reply.code(201).send(row);
+    },
+  );
+
+  app.delete(
+    '/reports/definitions/:id/permissions/:permId',
+    { ...manageGuard },
+    async (request, reply) => {
+      const { permId } = request.params as { id: string; permId: string };
+      await db.delete(reportPermissions)
+        .where(and(
+          eq(reportPermissions.id, permId),
+          eq(reportPermissions.tenantId, request.user!.tenantId),
+        ));
+      return reply.code(204).send();
+    },
+  );
+
+  // ─── BI Row-Level Security Views ───────────────────────────────────────────
+  // Provisions tenant-scoped views on the reporting DB schema for BI tools
+
+  app.post(
+    '/admin/reporting/bi-rls-views/provision',
+    { preHandler: [authenticate, requirePermission('admin:reporting:manage')] },
+    async (request) => {
+      const { provisionBiRlsViews } = await import('@eam/reporting-engine');
+      return provisionBiRlsViews(request.user!.tenantId);
+    },
+  );
+
+  app.get(
+    '/admin/reporting/bi-rls-views/info',
+    { preHandler: [authenticate, requirePermission('admin:reporting:manage')] },
+    async (request) => {
+      const { getBiConnectionInfo } = await import('@eam/reporting-engine');
+      return getBiConnectionInfo(request.user!.tenantId);
     },
   );
 }

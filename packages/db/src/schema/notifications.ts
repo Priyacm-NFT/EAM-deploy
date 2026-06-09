@@ -67,7 +67,24 @@ export const notificationDeliveryLog = pgTable('notification_delivery_log', {
   channel: text('channel').notNull(),
   status: text('status').notNull(),
   error: text('error'),
+  bounceType: text('bounce_type'),      // 'hard' | 'soft' | null
+  bounceCode: text('bounce_code'),      // SMTP bounce code e.g. "550"
+  bounceMessage: text('bounce_message'), // human-readable bounce reason
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Email bounce suppression list ─────────────────────────────────────────────
+export const emailBounceList = pgTable('email_bounce_list', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  bounceType: text('bounce_type').notNull(), // 'hard' | 'soft'
+  bounceCode: text('bounce_code'),
+  bounceMessage: text('bounce_message'),
+  suppressUntil: timestamp('suppress_until', { withTimezone: true }), // null = permanent for hard
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const smtpConfigurations = pgTable('smtp_configurations', {

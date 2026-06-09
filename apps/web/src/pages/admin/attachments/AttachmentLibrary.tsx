@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../../../api/client.js';
 import {
   IdentityPageLayout,
@@ -44,6 +44,13 @@ export function AttachmentLibraryPage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [quarantining, setQuarantining] = useState<string | null>(null);
+  const [versionsAttId, setVersionsAttId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<Array<{
+    id: string; versionNum: number; filename: string;
+    sizeBytes: number; uploadedBy: string; uploadedAt: string;
+    scanStatus: string; mimeType: string;
+  }>>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 20;
 
@@ -81,6 +88,15 @@ export function AttachmentLibraryPage() {
     } finally {
       setQuarantining(null);
     }
+  }
+
+  async function openVersions(a: Attachment) {
+    if (versionsAttId === a.id) { setVersionsAttId(null); return; }
+    setVersionsAttId(a.id); setLoadingVersions(true);
+    try {
+      const rows = await api<typeof versions>(`/admin/attachments/${a.id}/versions`);
+      setVersions(rows);
+    } catch { setVersions([]); } finally { setLoadingVersions(false); }
   }
 
   async function deleteAttachment(a: Attachment) {
@@ -177,7 +193,8 @@ export function AttachmentLibraryPage() {
                 <tr><td colSpan={10} className="text-center text-slate-400 py-10">No attachments found.</td></tr>
               )}
               {paginated.map((a) => (
-                <tr key={a.id}>
+                <React.Fragment key={a.id}>
+                <tr>
                   <td>
                     <p className="font-medium text-primary text-sm">{a.fileName}</p>
                     {a.tags.length > 0 && (
@@ -206,6 +223,9 @@ export function AttachmentLibraryPage() {
                       {a.downloadUrl && (
                         <a href={a.downloadUrl} className="btn-link text-xs" target="_blank" rel="noreferrer">Download</a>
                       )}
+                      <button type="button" className="btn-link text-xs" onClick={() => openVersions(a)}>
+                        {versionsAttId === a.id ? 'Hide versions' : 'Versions'}
+                      </button>
                       <button type="button" className="btn-link text-xs text-yellow-700" disabled={quarantining === a.id} onClick={() => quarantine(a)}>
                         {quarantining === a.id ? '…' : 'Quarantine'}
                       </button>
@@ -213,6 +233,44 @@ export function AttachmentLibraryPage() {
                     </div>
                   </td>
                 </tr>
+                {versionsAttId === a.id && (
+                  <tr key={`${a.id}-versions`}>
+                    <td colSpan={10} className="bg-slate-50 p-0">
+                      <div className="p-4">
+                        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">
+                          Version history — {a.fileName}
+                        </p>
+                        {loadingVersions
+                          ? <p className="text-xs text-slate-400">Loading…</p>
+                          : versions.length === 0
+                            ? <p className="text-xs text-slate-400 italic">Only one version exists.</p>
+                            : (
+                              <table className="admin-table text-xs">
+                                <thead>
+                                  <tr>
+                                    <th>Version</th><th>Filename</th><th>Size</th>
+                                    <th>Scan</th><th>Uploaded by</th><th>Uploaded at</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {versions.map((v) => (
+                                    <tr key={v.id}>
+                                      <td><span className="font-mono bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded text-[10px]">v{v.versionNum}</span></td>
+                                      <td className="font-medium text-slate-700">{v.filename}</td>
+                                      <td>{formatBytes(v.sizeBytes)}</td>
+                                      <td><span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${SCAN_STYLE[v.scanStatus] ?? ''}`}>{v.scanStatus}</span></td>
+                                      <td className="text-slate-500">{v.uploadedBy}</td>
+                                      <td className="text-slate-500">{new Date(v.uploadedAt).toLocaleString()}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

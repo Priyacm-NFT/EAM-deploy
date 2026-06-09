@@ -32,6 +32,13 @@ interface FormLayoutRow {
   name: string;
   definition: FormLayoutDefinition;
   isActive: boolean;
+  roleId: string | null;
+}
+
+interface Role {
+  id: string;
+  name: string;
+  label: string;
 }
 
 type PreviewMode = 'desktop' | 'tablet' | 'phone';
@@ -58,9 +65,11 @@ export function FormDesignerPage() {
   const [entity, setEntity] = useState<Entity | null>(null);
   const [fields, setFields] = useState<FieldRow[]>([]);
   const [forms, setForms] = useState<FormLayoutRow[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [activeFormId, setActiveFormId] = useState<string | null>(null);
   const [layout, setLayout] = useState<FormLayoutDefinition>(emptyFormLayout());
   const [formName, setFormName] = useState('Default layout');
+  const [formRoleId, setFormRoleId] = useState<string>('');
   const [preview, setPreview] = useState<PreviewMode>('desktop');
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
@@ -85,20 +94,23 @@ export function FormDesignerPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [entities, fieldRows, formRows] = await Promise.all([
+        const [entities, fieldRows, formRows, roleList] = await Promise.all([
           api<Entity[]>('/admin/config/entities'),
           api<FieldRow[]>(`/admin/config/entities/${entityId}/fields`),
           api<FormLayoutRow[]>(`/admin/config/entities/${entityId}/forms`),
+          api<Role[]>('/admin/roles').catch(() => [] as Role[]),
         ]);
         if (cancelled) return;
         setEntity(entities.find((e) => e.id === entityId) ?? null);
         setFields(fieldRows);
         setForms(formRows);
+        setRoles(roleList);
         if (formRows.length > 0) {
           const form = formRows[0]!;
           setActiveFormId(form.id);
           setLayout(form.definition?.sections ? form.definition : emptyFormLayout());
           setFormName(form.name);
+          setFormRoleId(form.roleId ?? '');
         }
       } catch (e) {
         setError(String(e));
@@ -119,6 +131,7 @@ export function FormDesignerPage() {
     setActiveFormId(form.id);
     setLayout(form.definition?.sections ? form.definition : emptyFormLayout());
     setFormName(form.name);
+    setFormRoleId(form.roleId ?? '');
     setSelectedSectionId(null);
   }
 
@@ -208,12 +221,12 @@ export function FormDesignerPage() {
       if (activeFormId) {
         await api(`/admin/config/entities/${entityId}/forms/${activeFormId}`, {
           method: 'PUT',
-          body: JSON.stringify({ name: formName, definition: layout }),
+          body: JSON.stringify({ name: formName, definition: layout, roleId: formRoleId || null }),
         });
       } else {
         const created = await api<FormLayoutRow>(`/admin/config/entities/${entityId}/forms`, {
           method: 'POST',
-          body: JSON.stringify({ name: formName, definition: layout }),
+          body: JSON.stringify({ name: formName, definition: layout, roleId: formRoleId || null }),
         });
         setActiveFormId(created.id);
         setForms((prev) => [...prev, created]);
@@ -255,6 +268,19 @@ export function FormDesignerPage() {
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
             />
+          </FormField>
+          <FormField label="Role variant (optional)" htmlFor="layout-role">
+            <select
+              id="layout-role"
+              className="form-select min-w-[14rem]"
+              value={formRoleId}
+              onChange={(e) => setFormRoleId(e.target.value)}
+            >
+              <option value="">All roles (default)</option>
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>{r.label || r.name}</option>
+              ))}
+            </select>
           </FormField>
           <FormField label="Saved layout" htmlFor="layout-select">
             <select

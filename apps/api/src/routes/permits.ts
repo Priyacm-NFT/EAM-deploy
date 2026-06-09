@@ -8,6 +8,8 @@ import {
   audit,
 } from '@eam/db';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
+import { entityDefinitions, fieldDefinitions } from '@eam/db';
+import { FieldRulesService } from '@eam/config-engine';
 import { requirePermission } from '../plugins/auth.js';
 
 const readGuard = { preHandler: requirePermission('permits:read') };
@@ -15,6 +17,33 @@ const writeGuard = { preHandler: requirePermission('permits:write') };
 const approveGuard = { preHandler: requirePermission('permits:approve') };
 
 export async function permitRoutes(app: FastifyInstance) {
+
+// ── Custom field validation helper ──────────────────────────────────────────
+async function validateCustomFields(
+  tid: string,
+  entityName: string,
+  data: Record<string, unknown>,
+  userRoles: string[],
+  currentStatus?: string,
+): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
+  const [entity] = await db
+    .select()
+    .from(entityDefinitions)
+    .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
+    .limit(1);
+  if (!entity) return { valid: true, errors: [] };
+
+  const fields = await db
+    .select()
+    .from(fieldDefinitions)
+    .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
+
+  const svc = new FieldRulesService(db);
+  const rules = await svc.loadRules(tid, entity.id, currentStatus);
+  return svc.validateWrite(fields, rules, data, userRoles);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
   // ─── List ─────────────────────────────────────────────────────────────────────
 
   app.get('/permits', readGuard, async (request) => {
@@ -67,9 +96,15 @@ export async function permitRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const tid = request.user!.tenantId;
 
-    // Defensive: treat body as unknown to safely extract fields
+    // Treat body as unknown to safely extract fields
     const rawBody = request.body as Record<string, unknown>;
     request.log.info({ rawBody }, 'POST /permits received body');
+
+    // ── Custom field validation ──────────────────────────────────────────────
+    const customDataRaw = typeof rawBody['customData'] === 'object' && rawBody['customData'] ? rawBody['customData'] as Record<string, unknown> : {};
+    const validation = await validateCustomFields(tid, 'Permit', { ...rawBody, ...customDataRaw }, request.user!.roles ?? []);
+    if (!validation.valid) return reply.code(422).send({ error: 'Validation failed', errors: validation.errors });
+    // ────────────────────────────────────────────────────────────────────────
 
     const descriptionRaw = rawBody['description'];
     const descriptionStr = typeof descriptionRaw === 'string' ? descriptionRaw.trim() : '';
@@ -373,3 +408,4 @@ function getApprovalSteps(type: string): Array<{ role: string }> {
   }
   return [{ role: 'supervisor' }];
 }
+

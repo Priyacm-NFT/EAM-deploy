@@ -19,7 +19,8 @@ export function SmtpConfigPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [testEmail, setTestEmail] = useState('');
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const [testing, setTesting] = useState<string | false>(false);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; error?: string; sentTo?: string }>>({});
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
@@ -56,17 +57,28 @@ export function SmtpConfigPage() {
     } finally { setSaving(false); }
   }
 
+  async function sendTestForServer(serverId: string, e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!testEmail) { setError('Enter a test email address.'); return; }
+    setTesting(serverId); setError(''); setMsg('');
+    try {
+      const res = await api<{ ok: boolean; sentTo?: string; error?: string }>(
+        `/admin/notifications/smtp/${serverId}/test`,
+        { method: 'POST', body: JSON.stringify({ toEmail: testEmail }) }
+      );
+      setTestResults((prev) => ({ ...prev, [serverId]: res }));
+      if (res.ok) setMsg(`Test email sent to ${testEmail}`);
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : 'Test failed';
+      setTestResults((prev) => ({ ...prev, [serverId]: { ok: false, error: errMsg } }));
+      setError(errMsg);
+    } finally { setTesting(false); }
+  }
+
   async function sendTest(e: React.FormEvent) {
     e.preventDefault();
-    if (!testEmail) { setError('Enter a test email address.'); return; }
-    setTesting(true); setError(''); setMsg('');
-    try {
-      await api('/admin/notifications/smtp/test', { method: 'POST', body: JSON.stringify({ toEmail: testEmail }) });
-      setMsg(`Test email sent to ${testEmail}. Check MailHog at localhost:8025`);
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Test failed — check SMTP settings');
-    } finally { setTesting(false); }
+    const active = configs.find((c) => c.isActive);
+    if (active) await sendTestForServer(active.id);
   }
 
   async function toggleActive(c: SmtpConfig) {
@@ -97,11 +109,25 @@ export function SmtpConfigPage() {
                   <p className="text-xs text-slate-500">From: {c.fromName} &lt;{c.fromEmail}&gt;</p>
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => toggleActive(c)} className="btn-secondary !w-auto px-3 text-xs">
+                  <button type="button" onClick={() => toggleActive(c)} className="btn-outline !w-auto px-3 text-xs">
                     {c.isActive ? 'Deactivate' : 'Activate'}
                   </button>
-                  <button type="button" onClick={() => startEdit(c)} className="btn-secondary !w-auto px-3 text-xs">Edit</button>
+                  <button type="button" onClick={() => startEdit(c)} className="btn-outline !w-auto px-3 text-xs">Edit</button>
+                  {testEmail && (
+                    <button type="button" disabled={testing === c.id}
+                      onClick={() => sendTestForServer(c.id)}
+                      className="btn-outline !w-auto px-3 text-xs">
+                      {testing === c.id ? 'Testing…' : 'Test'}
+                    </button>
+                  )}
                 </div>
+                {testResults[c.id] && (
+                  <div className={`mt-2 text-xs font-medium rounded px-2 py-1 inline-block ${testResults[c.id]!.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                    {testResults[c.id]!.ok
+                      ? `✓ Test email sent to ${testResults[c.id]!.sentTo}`
+                      : `✗ ${testResults[c.id]!.error}`}
+                  </div>
+                )}
               </div>
             ))}
           </div>

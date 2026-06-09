@@ -76,4 +76,23 @@ export async function dashboardRoutes(app: FastifyInstance) {
     }
     return reply.send({ ok: true });
   });
+
+  // Admin: get all layouts for this tenant (for DashboardTemplate admin page)
+  app.get('/dashboard/layouts/all', { preHandler: authenticate }, async (request) => {
+    return db.select().from(dashboardLayouts)
+      .where(eq(dashboardLayouts.tenantId, request.user!.tenantId));
+  });
+
+  // Admin: delete a role default (reset to system default)
+  app.delete('/dashboard/layout/role/:roleId', { preHandler: authenticate }, async (request, reply) => {
+    const { roleId } = request.params as { roleId: string };
+    const tenantId = request.user!.tenantId;
+    await db.delete(dashboardLayouts)
+      .where(and(
+        eq(dashboardLayouts.tenantId, tenantId),
+        eq(dashboardLayouts.roleId, roleId),
+        eq(dashboardLayouts.isDefault, true),
+      ));
+    return reply.send({ ok: true });
+  });
 }

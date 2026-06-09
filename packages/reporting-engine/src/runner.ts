@@ -10,6 +10,7 @@ import {
   uploadReportOutput,
 } from './storage.js';
 import type { ReportDefinitionBody, ReportRunResult } from './types.js';
+import { getBiConnectionInfo, tenantViewDdl } from './bi-connection.js';
 
 export interface RunReportOptions {
   reportId: string;
@@ -44,6 +45,67 @@ export async function executeReportQuery(
   }
 }
 
+export async function executeRawSql(
+  rawSql: string,
+  tenantId: string,
+  limit?: number,
+): Promise<Record<string, unknown>[]> {
+  // Safety: only allow SELECT statements, block anything else
+  const stripped = rawSql.trim().toUpperCase();
+  if (!stripped.startsWith('SELECT')) {
+    throw new Error('Raw SQL must be a SELECT statement');
+  }
+  // Block DML/DDL
+  if (/\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE)\b/.test(stripped)) {
+    throw new Error('DML/DDL not allowed in report SQL');
+  }
+
+  // Substitute :tenantId parameter
+  const safeSql = rawSql.replace(/:tenantId/g, `'${tenantId}'`);
+  const limitedSql = limit && !stripped.includes('LIMIT')
+    ? `${safeSql} LIMIT ${limit}`
+    : safeSql;
+
+  const sqlClient = postgres(readReplicaUrl(), { max: 1 });
+  try {
+    const rows = await sqlClient.unsafe(limitedSql);
+    return rows as Record<string, unknown>[];
+  } finally {
+    await sqlClient.end({ timeout: 5 });
+  }
+}
+
+export async function provisionBiRlsViews(tenantId: string) {
+  const info = getBiConnectionInfo(tenantId);
+  const pgClient = postgres(readReplicaUrl(), { max: 1 });
+  const results: Array<{ subject: string; viewName: string; ok: boolean; error?: string }> = [];
+
+  try {
+    for (const { name: viewName, subject } of info.views) {
+      try {
+        await pgClient.unsafe(tenantViewDdl(tenantId, subject));
+        results.push({ subject, viewName, ok: true });
+      } catch (err) {
+        results.push({
+          subject,
+          viewName,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  } finally {
+    await pgClient.end({ timeout: 5 });
+  }
+
+  return {
+    provisioned: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+    connectionInfo: info,
+  };
+}
+
 export async function runReport(
   db: Database,
   options: RunReportOptions,
@@ -58,89 +120,64 @@ export async function runReport(
     throw new Error('Report not found');
   }
 
-  const [subject] = await db
-    .select()
-    .from(reportSubjects)
-    .where(eq(reportSubjects.id, report.subjectId))
-    .limit(1);
-
-  if (!subject) throw new Error('Report subject not found');
-
-  const definition = report.definition as ReportDefinitionBody;
-  const builder = new ReportQueryBuilder();
-  const safeQuery = builder.buildQuery(subject.name, options.tenantId, {
-    fields: definition.fields,
-    filters: definition.filters,
-    groupBy: definition.groupBy,
-    orderBy: definition.orderBy,
-  });
+  const definition = report.definition as ReportDefinitionBody & { rawSql?: string; sqlMode?: boolean };
 
   const [runLog] = await db
     .insert(reportRunLog)
-    .values({
-      reportId: options.reportId,
-      scheduleId: options.scheduleId ?? null,
-      status: 'RUNNING',
-    })
+    .values({ reportId: options.reportId, scheduleId: options.scheduleId ?? null, status: 'RUNNING' })
     .returning();
 
   const runLogId = runLog!.id;
 
   try {
-    const rows = await executeReportQuery(
-      safeQuery.sql,
-      safeQuery.params,
-      options.limit,
-    );
+    let rows: Record<string, unknown>[];
+
+    // ── SQL mode: execute raw SQL directly ────────────────────────────────
+    if (definition.sqlMode && definition.rawSql?.trim()) {
+      rows = await executeRawSql(definition.rawSql, options.tenantId, options.limit);
+    } else {
+      // ── Builder mode ─────────────────────────────────────────────────────
+      const [subject] = await db
+        .select()
+        .from(reportSubjects)
+        .where(eq(reportSubjects.id, report.subjectId))
+        .limit(1);
+      if (!subject) throw new Error('Report subject not found');
+
+      const builder = new ReportQueryBuilder();
+      const safeQuery = builder.buildQuery(subject.name, options.tenantId, {
+        fields: definition.fields,
+        filters: definition.filters,
+        groupBy: definition.groupBy,
+        orderBy: definition.orderBy,
+      });
+      rows = await executeReportQuery(safeQuery.sql, safeQuery.params, options.limit);
+    }
+
     const rowCount = rows.length;
 
     if (options.skipIfEmpty && rowCount === 0) {
-      await db
-        .update(reportRunLog)
-        .set({
-          status: 'SKIPPED',
-          rowCount: 0,
-          finishedAt: new Date(),
-        })
+      await db.update(reportRunLog)
+        .set({ status: 'SKIPPED', rowCount: 0, finishedAt: new Date() })
         .where(eq(reportRunLog.id, runLogId));
       return { runLogId, status: 'SKIPPED', rowCount: 0 };
     }
 
     const exportFormat = outputFormatToExport(options.format);
     const formatted = await formatReportOutput(rows, exportFormat, report.name);
-    const outputKey = buildReportOutputKey(
-      options.tenantId,
-      options.reportId,
-      runLogId,
-      formatted.extension,
-    );
-    await uploadReportOutput(
-      outputKey,
-      formatted.body,
-      formatted.contentType,
-    );
+    const outputKey = buildReportOutputKey(options.tenantId, options.reportId, runLogId, formatted.extension);
+    await uploadReportOutput(outputKey, formatted.body, formatted.contentType);
     const downloadUrl = await presignReportDownload(outputKey);
 
-    await db
-      .update(reportRunLog)
-      .set({
-        status: 'COMPLETED',
-        rowCount,
-        outputKey,
-        finishedAt: new Date(),
-      })
+    await db.update(reportRunLog)
+      .set({ status: 'COMPLETED', rowCount, outputKey, finishedAt: new Date() })
       .where(eq(reportRunLog.id, runLogId));
 
     return { runLogId, status: 'COMPLETED', rowCount, outputKey, downloadUrl };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await db
-      .update(reportRunLog)
-      .set({
-        status: 'FAILED',
-        error: message,
-        finishedAt: new Date(),
-      })
+    await db.update(reportRunLog)
+      .set({ status: 'FAILED', error: message, finishedAt: new Date() })
       .where(eq(reportRunLog.id, runLogId));
     return { runLogId, status: 'FAILED', rowCount: 0, error: message };
   }
@@ -162,6 +199,14 @@ export async function previewReport(
     throw new Error('Report not found');
   }
 
+  const definition = report.definition as ReportDefinitionBody & { rawSql?: string; sqlMode?: boolean };
+
+  // SQL mode preview
+  if (definition.sqlMode && definition.rawSql?.trim()) {
+    const rows = await executeRawSql(definition.rawSql, tenantId, previewLimit);
+    return { query: { sql: definition.rawSql, params: [] }, rows };
+  }
+
   const [subject] = await db
     .select()
     .from(reportSubjects)
@@ -170,7 +215,6 @@ export async function previewReport(
 
   if (!subject) throw new Error('Report subject not found');
 
-  const definition = report.definition as ReportDefinitionBody;
   const builder = new ReportQueryBuilder();
   const query = builder.buildQuery(subject.name, tenantId, {
     fields: definition.fields,

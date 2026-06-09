@@ -1,6 +1,6 @@
 
 import type { FastifyInstance } from 'fastify';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   db,
@@ -8,6 +8,8 @@ import {
   integrationJobs,
   integrationRunLog,
   webhookSubscriptions,
+  webhookDeliveryLog,
+  apiKeys,
 } from '@eam/db';
 import {
   getAdapter,
@@ -713,4 +715,192 @@ export async function adminIntegrationRoutes(app: FastifyInstance) {
       }
     },
   );
+
+  // ─── Webhook Delivery Log ─────────────────────────────────────────────────────
+  app.get(
+    '/admin/integrations/webhooks/:id/delivery-log',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Delivery log for a webhook subscription' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const q = request.query as { limit?: string };
+      const limit = Math.min(200, Number(q.limit ?? 50));
+
+      const [wh] = await db
+        .select()
+        .from(webhookSubscriptions)
+        .where(eq(webhookSubscriptions.id, id))
+        .limit(1);
+      if (!wh || wh.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+
+      return db
+        .select()
+        .from(webhookDeliveryLog)
+        .where(eq(webhookDeliveryLog.subscriptionId, id))
+        .orderBy(desc(webhookDeliveryLog.deliveredAt))
+        .limit(limit);
+    },
+  );
+
+  // ─── Retry a failed webhook delivery ─────────────────────────────────────────
+  app.post(
+    '/admin/integrations/webhooks/delivery-log/:logId/retry',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Retry a failed webhook delivery' },
+    },
+    async (request, reply) => {
+      const { logId } = request.params as { logId: string };
+
+      const [log] = await db
+        .select()
+        .from(webhookDeliveryLog)
+        .where(eq(webhookDeliveryLog.id, logId))
+        .limit(1);
+      if (!log) return reply.code(404).send({ error: 'Log entry not found' });
+
+      const [wh] = await db
+        .select()
+        .from(webhookSubscriptions)
+        .where(eq(webhookSubscriptions.id, log.subscriptionId))
+        .limit(1);
+      if (!wh || wh.tenantId !== request.user!.tenantId) {
+        return reply.code(404).send({ error: 'Subscription not found' });
+      }
+
+      const body = JSON.stringify({
+        event: log.eventType,
+        data: log.payload,
+        timestamp: new Date().toISOString(),
+        retried: true,
+      });
+      const signature = (await import('node:crypto'))
+        .createHmac('sha256', wh.secret).update(body).digest('hex');
+
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 10000);
+      let ok = false;
+      let httpStatus: number | undefined;
+      let error: string | undefined;
+
+      try {
+        const res = await fetch(wh.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-EAM-Signature': signature,
+            'X-EAM-Event': log.eventType,
+          },
+          body,
+          signal: ctrl.signal,
+        });
+        ok = res.ok;
+        httpStatus = res.status;
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const [newLog] = await db
+        .insert(webhookDeliveryLog)
+        .values({
+          subscriptionId: wh.id,
+          eventType: log.eventType,
+          payload: log.payload ?? {},
+          attempt: log.attempt + 1,
+          status: ok ? 'DELIVERED' : 'FAILED',
+          httpStatus,
+          error,
+        })
+        .returning();
+
+      return { ok, httpStatus, error, logId: newLog!.id };
+    },
+  );
+
+  // ─── API Key Management ────────────────────────────────────────────────────────
+
+  app.get('/admin/integrations/api-keys', { ...guard }, async (request) => {
+    const rows = await db
+      .select({
+        id: apiKeys.id,
+        name: apiKeys.name,
+        keyPrefix: apiKeys.keyPrefix,
+        scopes: apiKeys.scopes,
+        isActive: apiKeys.isActive,
+        lastUsedAt: apiKeys.lastUsedAt,
+        expiresAt: apiKeys.expiresAt,
+        createdAt: apiKeys.createdAt,
+      })
+      .from(apiKeys)
+      .where(eq(apiKeys.tenantId, request.user!.tenantId))
+      .orderBy(desc(apiKeys.createdAt));
+    return rows;
+  });
+
+  app.post('/admin/integrations/api-keys', { ...guard }, async (request, reply) => {
+    const body = request.body as {
+      name: string;
+      scopes?: string[];
+      expiresAt?: string;
+    };
+    if (!body.name?.trim()) return reply.code(400).send({ error: 'Name is required' });
+
+    // Generate a secure random key
+    const { randomBytes, createHash } = await import('node:crypto');
+    const rawKey = `eam_${randomBytes(32).toString('base64url')}`;
+    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+    const keyPrefix = rawKey.slice(0, 10); // "eam_" + 6 chars
+
+    const [row] = await db.insert(apiKeys).values({
+      tenantId: request.user!.tenantId,
+      createdBy: request.user!.id,
+      name: body.name.trim(),
+      keyHash,
+      keyPrefix,
+      scopes: body.scopes ?? [],
+      isActive: true,
+      expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+    }).returning();
+
+    // Return the raw key ONCE — never stored again
+    return reply.code(201).send({
+      id: row!.id,
+      name: row!.name,
+      keyPrefix: row!.keyPrefix,
+      scopes: row!.scopes,
+      rawKey, // show only on creation
+      createdAt: row!.createdAt,
+    });
+  });
+
+  app.patch('/admin/integrations/api-keys/:id', { ...guard }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { isActive?: boolean; name?: string; scopes?: string[] };
+
+    const updates: Partial<typeof apiKeys.$inferInsert> = {};
+    if (body.isActive != null) updates.isActive = body.isActive;
+    if (body.name != null) updates.name = body.name;
+    if (body.scopes != null) updates.scopes = body.scopes;
+
+    const [row] = await db.update(apiKeys).set(updates)
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.tenantId, request.user!.tenantId)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'API key not found' });
+    return row;
+  });
+
+  app.delete('/admin/integrations/api-keys/:id', { ...guard }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [row] = await db.select().from(apiKeys)
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.tenantId, request.user!.tenantId))).limit(1);
+    if (!row) return reply.code(404).send({ error: 'API key not found' });
+    await db.delete(apiKeys).where(eq(apiKeys.id, id));
+    return reply.code(204).send();
+  });
 }

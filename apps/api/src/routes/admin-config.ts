@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, asc, desc } from 'drizzle-orm';
+import { eq, and, asc, desc, inArray } from 'drizzle-orm';
 import {
   db,
   entityDefinitions,
@@ -576,6 +576,107 @@ export async function adminConfigRoutes(app: FastifyInstance) {
   });
 
   // ─── Config Versions ──────────────────────────────────────────────────────────
+
+  // ─── Config Export ────────────────────────────────────────────────────────────
+  app.get('/admin/config/export', guard, async (request, reply) => {
+    const tid = request.user!.tenantId;
+    const [entities, fields, rules, forms, views, picklists] = await Promise.all([
+      db.select().from(entityDefinitions).where(eq(entityDefinitions.tenantId, tid)),
+      db.select().from(fieldDefinitions).where(eq(fieldDefinitions.tenantId, tid)),
+      db.select().from(fieldRules).where(eq(fieldRules.tenantId, tid)),
+      db.select().from(formLayouts).where(eq(formLayouts.tenantId, tid)),
+      db.select().from(tableViews).where(eq(tableViews.tenantId, tid)),
+      db.select().from(picklistDefinitions).where(eq(picklistDefinitions.tenantId, tid)),
+    ]);
+    const picklistValueRows = await db.select().from(picklistValues)
+      .where(inArray(picklistValues.picklistId, picklists.map((p) => p.id)));
+
+    const exportPackage = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      exportedBy: request.user!.id,
+      tenantId: tid,
+      entities,
+      fields,
+      rules,
+      forms,
+      views,
+      picklists,
+      picklistValues: picklistValueRows,
+    };
+
+    reply.header('Content-Disposition', `attachment; filename="eam-config-${Date.now()}.json"`);
+    reply.header('Content-Type', 'application/json');
+    return reply.send(JSON.stringify(exportPackage, null, 2));
+  });
+
+  // ─── Config Import ────────────────────────────────────────────────────────────
+  app.post('/admin/config/import', guard, async (request, reply) => {
+    const tid = request.user!.tenantId;
+    const body = request.body as {
+      data: Record<string, unknown>;
+      mode: 'merge' | 'replace';
+    };
+
+    const pkg = body.data as {
+      entities?: Array<Record<string, unknown>>;
+      fields?: Array<Record<string, unknown>>;
+      rules?: Array<Record<string, unknown>>;
+      forms?: Array<Record<string, unknown>>;
+      views?: Array<Record<string, unknown>>;
+      picklists?: Array<Record<string, unknown>>;
+      picklistValues?: Array<Record<string, unknown>>;
+    };
+
+    const results = { imported: 0, skipped: 0, conflicts: [] as string[] };
+
+    // Import picklists
+    if (pkg.picklists?.length) {
+      for (const pl of pkg.picklists) {
+        const existing = await db.select().from(picklistDefinitions)
+          .where(and(eq(picklistDefinitions.tenantId, tid), eq(picklistDefinitions.name, pl.name as string)))
+          .limit(1);
+        if (existing.length > 0 && body.mode === 'merge') {
+          results.conflicts.push(`Picklist ${pl.name} already exists — skipped`);
+          results.skipped++;
+          continue;
+        }
+        await db.insert(picklistDefinitions).values({ ...pl as typeof picklistDefinitions.$inferInsert, tenantId: tid, id: crypto.randomUUID() }).onConflictDoNothing();
+        results.imported++;
+      }
+    }
+
+    // Import field definitions (skip system fields)
+    if (pkg.fields?.length) {
+      for (const f of pkg.fields) {
+        if (f.isSystem) continue;
+        const entity = await db.select().from(entityDefinitions)
+          .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, f.entityName as string)))
+          .limit(1);
+        if (!entity[0]) { results.skipped++; continue; }
+        const existing = await db.select().from(fieldDefinitions)
+          .where(and(eq(fieldDefinitions.entityId, entity[0].id), eq(fieldDefinitions.fieldKey, f.fieldKey as string)))
+          .limit(1);
+        if (existing.length > 0 && body.mode === 'merge') {
+          results.conflicts.push(`Field ${f.fieldKey} on ${f.entityName} already exists — skipped`);
+          results.skipped++;
+          continue;
+        }
+        await db.insert(fieldDefinitions).values({ ...f as typeof fieldDefinitions.$inferInsert, tenantId: tid, entityId: entity[0].id, id: crypto.randomUUID() }).onConflictDoNothing();
+        results.imported++;
+      }
+    }
+
+    // Import form layouts
+    if (pkg.forms?.length) {
+      for (const form of pkg.forms) {
+        await db.insert(formLayouts).values({ ...form as typeof formLayouts.$inferInsert, tenantId: tid, id: crypto.randomUUID() }).onConflictDoNothing();
+        results.imported++;
+      }
+    }
+
+    return reply.send({ ok: true, ...results });
+  });
 
   app.get('/admin/config/versions', guard, async (request) => {
     return db
