@@ -13,6 +13,8 @@ export interface SftpConfig {
   privateKey?: string;
   remotePath: string;
   direction?: 'outbound' | 'inbound';
+  fileFormat?: 'csv' | 'fixed' | 'json';
+  fixedWidthColumns?: { name: string; width: number }[];
   dryRun?: boolean;
 }
 
@@ -64,7 +66,41 @@ export class SftpAdapter implements IntegrationAdapter {
         const data = await client.get(c.remotePath);
         await client.end();
         const text = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
-        return { success: true, data: JSON.parse(text) };
+
+        // CSV parsing
+        if (c.fileFormat === 'csv' || c.remotePath.endsWith('.csv')) {
+          const lines = text.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+          const headers = lines[0]?.split(',').map((h) => h.trim().replace(/^"|"$/g, '')) ?? [];
+          const rows = lines.slice(1).map((line) => {
+            const values = line.split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
+            const row: Record<string, string> = {};
+            headers.forEach((h, i) => { row[h] = values[i] ?? ''; });
+            return row;
+          });
+          return { success: true, data: { format: 'csv', rows, rowCount: rows.length } };
+        }
+
+        // Fixed-width parsing
+        if (c.fileFormat === 'fixed' && c.fixedWidthColumns) {
+          const lines = text.split('\n').filter(Boolean);
+          const rows = lines.map((line) => {
+            const row: Record<string, string> = {};
+            let pos = 0;
+            for (const col of c.fixedWidthColumns!) {
+              row[col.name] = line.substring(pos, pos + col.width).trim();
+              pos += col.width;
+            }
+            return row;
+          });
+          return { success: true, data: { format: 'fixed', rows, rowCount: rows.length } };
+        }
+
+        // JSON fallback
+        try {
+          return { success: true, data: JSON.parse(text) };
+        } catch {
+          return { success: true, data: { raw: text } };
+        }
       }
 
       await writeFile(tmpPath, JSON.stringify(payload, null, 2));

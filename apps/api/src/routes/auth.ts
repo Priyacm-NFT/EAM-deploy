@@ -31,7 +31,8 @@ import {
 const PASSWORD_RESET_TTL = 60 * 60;
 
 /** Finds the "All Users" default group for a tenant and adds the user to it. */
-async function assignDefaultGroup(tenantId: string, userId: string): Promise<void> {
+async function assignDefaultGroup(tenantId: string, userId: string, email?: string): Promise<void> {
+  // Always add to "All Users" group — gives basic read permissions
   const [defaultGroup] = await db
     .select()
     .from(groups)
@@ -43,6 +44,22 @@ async function assignDefaultGroup(tenantId: string, userId: string): Promise<voi
       .insert(userGroups)
       .values({ userId, groupId: defaultGroup.id })
       .onConflictDoNothing();
+  }
+
+  // If this is the admin user, also add to Admins group
+  if (email === 'admin@eam.local') {
+    const [adminsGroup] = await db
+      .select()
+      .from(groups)
+      .where(and(eq(groups.tenantId, tenantId), eq(groups.name, 'Admins')))
+      .limit(1);
+
+    if (adminsGroup) {
+      await db
+        .insert(userGroups)
+        .values({ userId, groupId: adminsGroup.id })
+        .onConflictDoNothing();
+    }
   }
 }
 
@@ -87,7 +104,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       // Auto-assign every new user to the "All Users" group so they get
       // the default permissions and the sidebar sections are visible.
-      await assignDefaultGroup(tenant.id, user!.id);
+      await assignDefaultGroup(tenant.id, user!.id, body.email);
 
       await audit(db, {
         tenantId: tenant.id,

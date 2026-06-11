@@ -4,12 +4,16 @@ import {
   tenants,
   permissions,
   roles,
+  rolePermissions,
+  groups,
+  groupRoles,
+  userGroups,
   users,
 } from './schema/identity.js';
 import { entityDefinitions } from './schema/config.js';
-import { reportSubjects } from './schema/reporting.js';
+import { reportSubjects, reportDefinitions } from './schema/reporting.js';
 import { documentTypes } from './schema/attachments.js';
-import { notificationTemplates, notificationTriggers } from './schema/notifications.js';
+import { notificationTemplates, notificationTriggers, smtpConfigurations } from './schema/notifications.js';
 import {
   organisations,
   sites,
@@ -55,6 +59,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
   if (existing.length > 0) {
     await removeLegacyDemoRoles(db);
     await ensureMissingPermissions(db, existing[0]!.id);
+    await ensureAdminSetup(db, existing[0]!.id);
     await seedPhase1Data(db, existing[0]!.id);
     const admin = await db.select().from(users).where(eq(users.email, 'admin@eam.local')).limit(1);
     return { tenantId: existing[0]!.id, adminUserId: admin[0]?.id ?? '' };
@@ -185,7 +190,116 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
       allowedExtensions: ['dwg', 'dxf', 'pdf'],
       isSystem: true,
     },
+    // P0-7: used by chat file attachments
+    {
+      tenantId: tenant!.id,
+      name: 'Chat Attachment',
+      label: 'Chat Attachment',
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'docx', 'xlsx', 'txt', 'csv'],
+      isSystem: true,
+    },
   ]);
+
+  // ── P0-6: Seed one starter report definition per BI platform ─────────────
+  // These give admins an out-of-the-box report they can open in each BI tool
+  // without building from scratch.  They use the system report subjects
+  // seeded above (work_orders, assets, service_requests).
+  const [woSubject] = await db.select().from(reportSubjects).where(
+    eq(reportSubjects.name, 'work_orders'),
+  ).limit(1);
+  const [assetSubject] = await db.select().from(reportSubjects).where(
+    eq(reportSubjects.name, 'assets'),
+  ).limit(1);
+
+  if (woSubject) {
+    await db.insert(reportDefinitions).values([
+      {
+        tenantId: tenant!.id,
+        name: 'Open Work Orders — Starter (Power BI)',
+        subjectId: woSubject.id,
+        definition: {
+          fields: ['wo_num', 'status', 'priority', 'description', 'target_finish_date', 'site_num'],
+          filters: [{ field: 'status', operator: 'NOT_EQUALS', value: 'CLOSE' }],
+          groupBy: [],
+          orderBy: [{ field: 'target_finish_date', direction: 'ASC' }],
+          chartType: 'bar',
+          biNote: 'Import into Power BI via Direct Query or push dataset.',
+        },
+        isPublic: true,
+        createdBy: null,
+        version: 1,
+      },
+      {
+        tenantId: tenant!.id,
+        name: 'Open Work Orders — Starter (Qlik)',
+        subjectId: woSubject.id,
+        definition: {
+          fields: ['wo_num', 'status', 'priority', 'site_num', 'assigned_to_user_id'],
+          filters: [{ field: 'status', operator: 'NOT_EQUALS', value: 'CLOSE' }],
+          groupBy: ['status'],
+          orderBy: [{ field: 'status', direction: 'ASC' }],
+          chartType: 'bar',
+          biNote: 'Export as QVD CSV via POST /admin/reporting/bi/qlik/export/:subjectId.',
+        },
+        isPublic: true,
+        createdBy: null,
+        version: 1,
+      },
+      {
+        tenantId: tenant!.id,
+        name: 'Work Order Backlog — Starter (Tableau)',
+        subjectId: woSubject.id,
+        definition: {
+          fields: ['wo_num', 'status', 'priority', 'description', 'site_num'],
+          filters: [{ field: 'status', operator: 'IN', value: ['WAPPR', 'APPR', 'INPRG'] }],
+          groupBy: [],
+          orderBy: [{ field: 'priority', direction: 'DESC' }],
+          chartType: 'table',
+          biNote: 'Use Tableau WDC endpoint at GET /reporting/tableau-wdc/wos.',
+        },
+        isPublic: true,
+        createdBy: null,
+        version: 1,
+      },
+      {
+        tenantId: tenant!.id,
+        name: 'WO Cost Summary — Starter (Cognos)',
+        subjectId: woSubject.id,
+        definition: {
+          fields: ['wo_num', 'status', 'labor_cost', 'material_cost', 'total_cost'],
+          filters: [],
+          groupBy: ['status'],
+          orderBy: [{ field: 'total_cost', direction: 'DESC' }],
+          chartType: 'table',
+          biNote: 'Import JDBC config from GET /admin/reporting/bi/cognos/connection-info.',
+        },
+        isPublic: true,
+        createdBy: null,
+        version: 1,
+      },
+    ]).onConflictDoNothing();
+  }
+
+  if (assetSubject) {
+    await db.insert(reportDefinitions).values([
+      {
+        tenantId: tenant!.id,
+        name: 'Asset Register — Starter (BIRT)',
+        subjectId: assetSubject.id,
+        definition: {
+          fields: ['asset_num', 'criticality', 'manufacturer', 'model', 'install_date', 'site_num'],
+          filters: [],
+          groupBy: [],
+          orderBy: [{ field: 'asset_num', direction: 'ASC' }],
+          chartType: 'table',
+          biNote: 'Upload rptdesign XML via POST /admin/reporting/birt/upload then run via GET /admin/reporting/birt/:designId/run.',
+        },
+        isPublic: true,
+        createdBy: null,
+        version: 1,
+      },
+    ]).onConflictDoNothing();
+  }
 
   const [woTemplate] = await db
     .insert(notificationTemplates)
@@ -263,6 +377,15 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
     },
     {
       tenantId: tenant!.id,
+      eventType: 'WO_STATUS_CHANGED',
+      entityType: 'WorkOrder',
+      templateId: woTemplate!.id,
+      conditionExpression: "status == 'COMP'",
+      distributionConfig: { rules: [{ type: 'FIELD', value: 'assignedToUserId' }] },
+      isActive: true,
+    },
+    {
+      tenantId: tenant!.id,
       eventType: 'WF_TASK_ASSIGNED',
       templateId: woTemplate!.id,
       distributionConfig: { rules: [{ type: 'FIELD', value: 'assigneeUserId' }] },
@@ -303,6 +426,7 @@ export async function seedDatabase(db: Database): Promise<{ tenantId: string; ad
   ]);
 
   await seedPhase1Data(db, tenant!.id);
+  await ensureAdminSetup(db, tenant!.id);
 
   return { tenantId: tenant!.id, adminUserId: '' };
 }
@@ -555,3 +679,153 @@ export async function removeLegacyDemoRoles(db: Database): Promise<void> {
     await db.delete(roles).where(and(eq(roles.tenantId, tenant.id), eq(roles.name, name)));
   }
 }
+
+/**
+ * Ensures:
+ * 1. A "System Admin" role exists with ALL permissions
+ * 2. A "All Users" group exists (new users auto-joined on register)
+ * 3. An "All Users" role exists with basic read permissions
+ * 4. admin@eam.local gets the System Admin role via the Admins group
+ */
+async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
+  // ── 1. Get all permission IDs ────────────────────────────────────────────
+  const allPerms = await db.select().from(permissions);
+  if (allPerms.length === 0) return;
+
+  // ── 2. Create System Admin role ──────────────────────────────────────────
+  let [adminRole] = await db.select().from(roles)
+    .where(and(eq(roles.tenantId, tenantId), eq(roles.name, 'system_admin'))).limit(1);
+
+  if (!adminRole) {
+    const [inserted] = await db.insert(roles).values({
+      tenantId,
+      name: 'system_admin',
+      description: 'Full access to all EAM modules and administration',
+      isSystem: true,
+    }).returning();
+    adminRole = inserted!;
+  }
+
+  // Assign ALL permissions to System Admin role
+  for (const perm of allPerms) {
+    await db.insert(rolePermissions)
+      .values({ roleId: adminRole.id, permissionId: perm.id })
+      .onConflictDoNothing();
+  }
+
+  // ── 3. Create All Users group (basic group every new user joins) ──────────
+  let [allUsersGroup] = await db.select().from(groups)
+    .where(and(eq(groups.tenantId, tenantId), eq(groups.name, 'All Users'))).limit(1);
+
+  if (!allUsersGroup) {
+    const [inserted] = await db.insert(groups).values({
+      tenantId,
+      name: 'All Users',
+      description: 'Every registered user is automatically a member of this group',
+    }).returning();
+    allUsersGroup = inserted!;
+  }
+
+  // ── 4. Create basic "EAM User" role with read-only access ────────────────
+  let [basicRole] = await db.select().from(roles)
+    .where(and(eq(roles.tenantId, tenantId), eq(roles.name, 'eam_user'))).limit(1);
+
+  if (!basicRole) {
+    const [inserted] = await db.insert(roles).values({
+      tenantId,
+      name: 'eam_user',
+      description: 'Basic read access — can view work orders, assets, and service requests',
+      isSystem: true,
+    }).returning();
+    basicRole = inserted!;
+  }
+
+  // Give basic role read permissions for core entities
+  const basicPermNames = [
+    'assets:read', 'work_orders:read', 'service_requests:read',
+    'pm:read', 'permits:read', 'inventory:read', 'labour:read', 'reports:read',
+  ];
+  const basicPerms = allPerms.filter((p) =>
+    basicPermNames.includes(`${p.resource}:${p.action}`)
+  );
+  for (const perm of basicPerms) {
+    await db.insert(rolePermissions)
+      .values({ roleId: basicRole.id, permissionId: perm.id })
+      .onConflictDoNothing();
+  }
+
+  // Assign basic role to All Users group (so every new user gets read access)
+  await db.insert(groupRoles)
+    .values({ groupId: allUsersGroup.id, roleId: basicRole.id })
+    .onConflictDoNothing();
+
+  // ── 5. Create Admins group ────────────────────────────────────────────────
+  let [adminsGroup] = await db.select().from(groups)
+    .where(and(eq(groups.tenantId, tenantId), eq(groups.name, 'Admins'))).limit(1);
+
+  if (!adminsGroup) {
+    const [inserted] = await db.insert(groups).values({
+      tenantId,
+      name: 'Admins',
+      description: 'System administrators with full access',
+    }).returning();
+    adminsGroup = inserted!;
+  }
+
+  // Assign System Admin role to Admins group
+  await db.insert(groupRoles)
+    .values({ groupId: adminsGroup.id, roleId: adminRole.id })
+    .onConflictDoNothing();
+
+  // ── 6. Add admin@eam.local to Admins group ────────────────────────────────
+  const [adminUser] = await db.select().from(users)
+    .where(eq(users.email, 'admin@eam.local')).limit(1);
+
+  if (adminUser) {
+    await db.insert(userGroups)
+      .values({ userId: adminUser.id, groupId: adminsGroup.id })
+      .onConflictDoNothing();
+    // Also add to All Users group
+    await db.insert(userGroups)
+      .values({ userId: adminUser.id, groupId: allUsersGroup.id })
+      .onConflictDoNothing();
+  }
+
+  // ── 7. Dev MailHog SMTP (localhost:1025) when none configured ─────────────
+  const [existingSmtp] = await db
+    .select({ id: smtpConfigurations.id })
+    .from(smtpConfigurations)
+    .where(eq(smtpConfigurations.tenantId, tenantId))
+    .limit(1);
+
+  const tenantSmtp = await db
+    .select({ id: smtpConfigurations.id, isActive: smtpConfigurations.isActive })
+    .from(smtpConfigurations)
+    .where(eq(smtpConfigurations.tenantId, tenantId));
+
+  if (tenantSmtp.length === 0) {
+    await db.insert(smtpConfigurations).values({
+      tenantId,
+      host: 'localhost',
+      port: 1025,
+      secure: false,
+      fromEmail: 'noreply@eam.local',
+      fromName: 'EAM Platform',
+      isActive: true,
+    });
+  } else {
+    const active = tenantSmtp.filter((row) => row.isActive);
+    if (active.length !== 1) {
+      await db
+        .update(smtpConfigurations)
+        .set({ isActive: false })
+        .where(eq(smtpConfigurations.tenantId, tenantId));
+      const keepId = active[0]?.id ?? tenantSmtp[tenantSmtp.length - 1]!.id;
+      await db
+        .update(smtpConfigurations)
+        .set({ isActive: true })
+        .where(eq(smtpConfigurations.id, keepId));
+    }
+  }
+}
+

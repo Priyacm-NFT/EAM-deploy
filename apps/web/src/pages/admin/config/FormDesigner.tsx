@@ -51,12 +51,13 @@ const PREVIEW_COLS: Record<PreviewMode, 1 | 2 | 3> = {
 
 const DRAG_MIME = 'application/x-eam-field-key';
 
-function newSection(): FormLayoutSection {
+function newSection(tabName = ''): FormLayoutSection {
   return {
     id: crypto.randomUUID(),
     title: 'New section',
     columns: 2,
     fields: [],
+    tabName,
   };
 }
 
@@ -70,11 +71,20 @@ export function FormDesignerPage() {
   const [layout, setLayout] = useState<FormLayoutDefinition>(emptyFormLayout());
   const [formName, setFormName] = useState('Default layout');
   const [formRoleId, setFormRoleId] = useState<string>('');
+  const [activeTabName, setActiveTabName] = useState('');
   const [preview, setPreview] = useState<PreviewMode>('desktop');
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+
+  // Tab management — derive tabs from section tabName fields
+  const tabNames = Array.from(new Set(layout.sections.map((s) => s.tabName ?? '').filter(Boolean)));
+  const hasTabs = tabNames.length > 0;
+  const activeTab = activeTabName || tabNames[0] || '';
+  const visibleSections = hasTabs
+    ? layout.sections.filter((s) => (s.tabName ?? '') === activeTab)
+    : layout.sections;
   const [error, setError] = useState('');
 
   const usedKeys = useMemo(() => {
@@ -361,6 +371,47 @@ export function FormDesignerPage() {
         {/* Canvas */}
         <div className="xl:col-span-6 admin-section min-h-[28rem]">
           <h2 className="admin-section-title">Form canvas</h2>
+
+          {/* ── Tab bar ── */}
+          {hasTabs && (
+            <div className="flex gap-1 flex-wrap mb-3 border-b border-slate-200 pb-2">
+              {tabNames.map((tab) => (
+                <button key={tab} type="button"
+                  className={`px-3 py-1 rounded-t text-sm font-medium transition-colors ${activeTab === tab ? 'bg-accent text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  onClick={() => setActiveTabName(tab)}>
+                  {tab}
+                </button>
+              ))}
+              <button type="button"
+                className="px-3 py-1 rounded-t text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                onClick={() => {
+                  const name = window.prompt('New tab name:');
+                  if (!name?.trim()) return;
+                  const s = newSection(name.trim());
+                  setLayout((l) => ({ ...l, sections: [...l.sections, s] }));
+                  setActiveTabName(name.trim());
+                }}>
+                + Tab
+              </button>
+            </div>
+          )}
+          {!hasTabs && layout.sections.length > 0 && (
+            <button type="button"
+              className="text-xs text-accent hover:underline mb-3"
+              onClick={() => {
+                const name = window.prompt('Enter first tab name (leave blank to skip tabs):');
+                if (!name?.trim()) return;
+                // Assign all existing sections to this tab
+                setLayout((l) => ({
+                  ...l,
+                  sections: l.sections.map((s) => ({ ...s, tabName: name.trim() })),
+                }));
+                setActiveTabName(name.trim());
+              }}>
+              + Convert to tabbed layout
+            </button>
+          )}
+
           {layout.sections.length === 0 ? (
             <div className="border-2 border-dashed border-slate-300 rounded-lg p-10 text-center bg-slate-50">
               <p className="text-slate-700 font-medium mb-2">No sections yet</p>
@@ -371,7 +422,7 @@ export function FormDesignerPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {layout.sections.map((section) => {
+              {visibleSections.map((section) => {
                 const isSelected = selectedSectionId === section.id;
                 const isDragOver = dragOverSectionId === section.id;
                 return (
@@ -395,6 +446,29 @@ export function FormDesignerPage() {
                       />
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500">{section.columns} column(s)</span>
+                        {hasTabs && (
+                          <input
+                            className="form-input !w-auto text-xs py-0.5 px-2 max-w-[8rem]"
+                            value={section.tabName ?? ''}
+                            placeholder="Tab name"
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              updateSection(section.id, { tabName: e.target.value });
+                              if (e.target.value) setActiveTabName(e.target.value);
+                            }}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          title={section.collapsible ? 'Make non-collapsible' : 'Make collapsible'}
+                          className={`text-xs px-2 py-0.5 rounded border transition-colors ${section.collapsible ? 'bg-accent/10 text-accent border-accent/30' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updateSection(section.id, { collapsible: !section.collapsible });
+                          }}
+                        >
+                          {section.collapsible ? '▼ Collapsible' : 'Collapsible?'}
+                        </button>
                         <button
                           type="button"
                           className="btn-danger"
@@ -532,3 +606,4 @@ export function FormDesignerPage() {
     </IdentityPageLayout>
   );
 }
+

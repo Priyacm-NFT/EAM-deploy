@@ -1,4 +1,5 @@
 export const SYSTEM_EVENT_TYPES = [
+  'WO_CREATED',
   'WO_ASSIGNED',
   'WO_STATUS_CHANGED',
   'SR_CREATED',

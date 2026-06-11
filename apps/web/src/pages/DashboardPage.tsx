@@ -259,6 +259,9 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tabs, setTabs] = useState<DashTab[]>([{ id: 'default', name: 'Overview', widgetOrder: [] }]);
+  const [newTabPromptOpen, setNewTabPromptOpen] = useState(false);
+  const [newTabName, setNewTabName] = useState('');
+  const [addWidgetOpen, setAddWidgetOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('default');
   const [layoutLoaded, setLayoutLoaded] = useState(false);
   const [editingTabName, setEditingTabName] = useState<string | null>(null);
@@ -312,8 +315,12 @@ export function DashboardPage() {
 
   const allWidgets = data?.widgets ?? [];
   const hidden = currentTab.hiddenWidgets ?? [];
-  const widgetOrder = (currentTab.widgetOrder.length > 0 ? currentTab.widgetOrder : allWidgets.map((w) => w.id))
-    .filter((id) => !hidden.includes(id));
+  // Only use fallback for the default/first tab on first load — new user tabs start empty
+  const isDefaultTab = currentTab.id === 'default' || currentTab.id === tabs[0]?.id;
+  const widgetOrder = (currentTab.widgetOrder.length > 0
+    ? currentTab.widgetOrder
+    : isDefaultTab ? allWidgets.map((w) => w.id) : []
+  ).filter((id) => !hidden.includes(id));
   const orderedWidgets = widgetOrder.map((id) => allWidgets.find((w) => w.id === id)).filter(Boolean) as DashboardWidget[];
 
   // ── Move widget ───────────────────────────────────────────────────────────
@@ -368,9 +375,30 @@ export function DashboardPage() {
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
   function addTab() {
+    setNewTabName('');
+    setNewTabPromptOpen(true);
+  }
+
+  function confirmAddTab() {
+    const name = newTabName.trim() || 'New tab';
     const id = `tab_${Date.now()}`;
-    const updated = [...tabs, { id, name: 'New tab', widgetOrder: [], hiddenWidgets: [] }];
-    setTabs(updated); setActiveTab(id); saveLayout(updated);
+    const updated = [...tabs, { id, name, widgetOrder: [], hiddenWidgets: [] }];
+    setTabs(updated);
+    setActiveTab(id);
+    saveLayout(updated);
+    setNewTabPromptOpen(false);
+    setNewTabName('');
+  }
+
+  function addWidgetToTab(widgetId: string) {
+    if (currentTab.widgetOrder.includes(widgetId)) return;
+    const updated = tabs.map((t) =>
+      t.id === activeTab
+        ? { ...t, widgetOrder: [...t.widgetOrder, widgetId], hiddenWidgets: (t.hiddenWidgets ?? []).filter((h) => h !== widgetId) }
+        : t
+    );
+    setTabs(updated);
+    saveLayout(updated);
   }
 
   function renameTab(tabId: string, name: string) {
@@ -458,13 +486,91 @@ export function DashboardPage() {
           className="px-3 py-1.5 text-sm text-white/50 hover:text-white/80 rounded-lg hover:bg-white/10 transition-colors">
           + Tab
         </button>
+
+      {/* ── New tab name prompt modal ── */}
+      {newTabPromptOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-slate-800">New dashboard tab</h2>
+            <div>
+              <label className="form-label text-xs">Tab name</label>
+              <input
+                className="form-input"
+                autoFocus
+                placeholder="e.g. Safety, Procurement, My Team"
+                value={newTabName}
+                onChange={(e) => setNewTabName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') confirmAddTab(); if (e.key === 'Escape') setNewTabPromptOpen(false); }}
+              />
+            </div>
+            <div className="flex gap-3">
+              <button type="button" className="btn-primary !w-auto px-5" onClick={confirmAddTab}>Create tab</button>
+              <button type="button" className="btn-outline text-slate-500" onClick={() => setNewTabPromptOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
         {hidden.length > 0 && (
           <button type="button" onClick={restoreAllWidgets}
             className="px-3 py-1.5 text-xs text-white/40 hover:text-white/70 rounded-lg hover:bg-white/10 transition-colors ml-auto">
             Restore {hidden.length} hidden
           </button>
         )}
+        {orderedWidgets.length > 0 && (
+          <button type="button" onClick={() => setAddWidgetOpen(true)}
+            className="px-3 py-1.5 text-xs text-white/40 hover:text-white/80 rounded-lg hover:bg-white/10 transition-colors ml-auto">
+            + Add widget
+          </button>
+        )}
       </div>
+
+      {/* ── Empty tab state ── */}
+      {orderedWidgets.length === 0 && (
+        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/20 py-16 space-y-4">
+          <p className="text-white/50 text-sm">This tab has no widgets yet.</p>
+          <button
+            type="button"
+            className="btn-primary !w-auto px-6"
+            onClick={() => setAddWidgetOpen(true)}
+          >
+            + Add widget
+          </button>
+        </div>
+      )}
+
+      {/* ── Add widget picker modal ── */}
+      {addWidgetOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-800">Add widget to "{currentTab.name}"</h2>
+              <button type="button" className="text-slate-400 hover:text-slate-700" onClick={() => setAddWidgetOpen(false)}>✕</button>
+            </div>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {allWidgets.map((w) => {
+                const alreadyAdded = currentTab.widgetOrder.includes(w.id);
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    disabled={alreadyAdded}
+                    onClick={() => { addWidgetToTab(w.id); setAddWidgetOpen(false); }}
+                    className={`w-full text-left flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
+                      alreadyAdded
+                        ? 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
+                        : 'border-slate-200 hover:border-accent hover:bg-accent/5 text-slate-700'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">{w.title}</span>
+                    <span className="text-xs text-slate-400">{alreadyAdded ? 'Already added' : 'Add →'}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="btn-outline w-full text-slate-500" onClick={() => setAddWidgetOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
 
       {/* ── KPI strip ── */}
       {kpis.length > 0 && (

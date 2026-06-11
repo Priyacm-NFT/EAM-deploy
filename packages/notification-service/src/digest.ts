@@ -44,16 +44,26 @@ export async function queueDigestItem(
   item: {
     tenantId: string;
     triggerId: string;
-    recipientUserId?: string;
+    recipientUserId?: string | null;
     recipientEmail: string;
     subject: string;
     html: string;
-    entityType?: string;
-    entityId?: string;
+    entityType?: string | null;
+    entityId?: string | null;
     flushAfter: Date;
   },
 ): Promise<void> {
-  await db.insert(notificationDigestQueue).values(item);
+  await db.insert(notificationDigestQueue).values({
+    tenantId: item.tenantId,
+    triggerId: item.triggerId,
+    recipientUserId: item.recipientUserId ?? null,
+    recipientEmail: item.recipientEmail,
+    subject: item.subject,
+    html: item.html,
+    entityType: item.entityType ?? null,
+    entityId: item.entityId ?? null,
+    flushAfter: item.flushAfter,
+  });
 }
 
 export async function flushReadyDigests(

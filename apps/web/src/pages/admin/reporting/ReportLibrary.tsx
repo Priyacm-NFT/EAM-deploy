@@ -38,6 +38,11 @@ export function ReportLibraryPage() {
 
   // Permissions panel state
   const [permReportId, setPermReportId] = useState<string | null>(null);
+  const [historyReportId, setHistoryReportId] = useState<string | null>(null);
+  const [historyVersions, setHistoryVersions] = useState<Array<{
+    id: string; version: number; createdAt: string; createdBy?: string; changeSummary?: string;
+  }>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -52,6 +57,17 @@ export function ReportLibraryPage() {
       api<ReportDefinitionRow[]>('/reports/definitions'),
       api<ReportSubject[]>('/reports/subjects'),
     ]).then(([r, s]) => { setReports(r); setSubjects(s); }).catch((e) => setError(String(e)));
+
+    // Load users and roles once on mount so permission dropdowns are populated
+    Promise.all([
+      api<Role[]>('/admin/roles'),
+      api<UserRow[]>('/admin/users'),
+    ]).then(([roleList, userList]) => {
+      setRoles(roleList);
+      setUsers(userList);
+    }).catch(() => {
+      // Non-fatal — permission dropdowns will show empty but report library still works
+    });
   }
 
   useEffect(() => { load(); }, []);
@@ -99,14 +115,45 @@ export function ReportLibraryPage() {
   async function openPermissions(id: string) {
     if (permReportId === id) { setPermReportId(null); return; }
     setPermReportId(id);
-    const [perms, roleList, userList] = await Promise.all([
-      api<Permission[]>(`/reports/definitions/${id}/permissions`),
-      api<Role[]>('/admin/roles').catch(() => [] as Role[]),
-      api<UserRow[]>('/admin/users').catch(() => [] as UserRow[]),
-    ]);
+    const perms = await api<Permission[]>(`/reports/definitions/${id}/permissions`).catch(() => [] as Permission[]);
     setPermissions(perms);
-    setRoles(roleList);
-    setUsers(userList);
+    // roles and users already loaded on mount — refresh only if still empty
+    if (roles.length === 0 || users.length === 0) {
+      Promise.all([
+        api<Role[]>('/admin/roles'),
+        api<UserRow[]>('/admin/users'),
+      ]).then(([roleList, userList]) => {
+        setRoles(roleList);
+        setUsers(userList);
+      }).catch(() => {});
+    }
+  }
+
+  async function openHistory(id: string) {
+    if (historyReportId === id) { setHistoryReportId(null); setHistoryVersions([]); return; }
+    setHistoryReportId(id);
+    setHistoryLoading(true);
+    try {
+      const versions = await api<typeof historyVersions>(`/reports/definitions/${id}/versions`);
+      setHistoryVersions(versions);
+    } catch {
+      setHistoryVersions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function restoreVersion(reportId: string, versionId: string) {
+    if (!window.confirm('Restore this version? The current version will be saved as history.')) return;
+    try {
+      await api(`/reports/definitions/${reportId}/versions/${versionId}/restore`, { method: 'POST' });
+      setMsg('Version restored successfully.');
+      setHistoryReportId(null);
+      const updated = await api<typeof reports>('/reports/definitions');
+      setReports(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Restore failed');
+    }
   }
 
   async function grantPermission(reportId: string) {
@@ -221,8 +268,12 @@ export function ReportLibraryPage() {
                         </div>
                       </td>
                       <td>
-                        <div className="flex gap-2">
-                          <Link to={`/admin/reporting/designer?id=${r.id}`} className="btn-link text-xs">Edit</Link>
+                        <div className="flex gap-2 items-center">
+                          <Link to={`/admin/reporting/designer?id=${r.id}`} className="btn-link text-xs leading-none">Edit</Link>
+                          <button type="button" className="btn-link text-xs text-amber-600 hover:text-amber-800"
+                            onClick={() => openHistory(r.id)}>
+                            {historyReportId === r.id ? 'Hide history' : 'History'}
+                          </button>
                           <button type="button" className="btn-link text-xs"
                             onClick={() => openPermissions(r.id)}>
                             {permReportId === r.id ? 'Hide perms' : 'Permissions'}
@@ -232,6 +283,60 @@ export function ReportLibraryPage() {
                         </div>
                       </td>
                     </tr>
+
+                    {/* History panel */}
+                    {historyReportId === r.id && (
+                      <tr>
+                        <td colSpan={7} className="bg-amber-50 border-b border-amber-100 px-6 py-4">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 mb-3">
+                            Version history — {r.name}
+                          </p>
+                          {historyLoading ? (
+                            <p className="text-xs text-slate-400 animate-pulse">Loading versions…</p>
+                          ) : historyVersions.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic">No version history available. Versions are saved each time you publish a report.</p>
+                          ) : (
+                            <table className="w-full text-xs border border-amber-200 rounded-lg overflow-hidden">
+                              <thead className="bg-amber-100 text-amber-800">
+                                <tr>
+                                  <th className="px-3 py-2 text-left font-semibold">Version</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Saved at</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Saved by</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Notes</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-amber-100 bg-white">
+                                {historyVersions.map((v) => (
+                                  <tr key={v.id} className="hover:bg-amber-50">
+                                    <td className="px-3 py-2">
+                                      <span className="font-mono font-semibold text-primary">v{v.version}</span>
+                                      {v.version === r.currentVersion && (
+                                        <span className="ml-2 text-[10px] bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full">current</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2 text-slate-500">{new Date(v.createdAt).toLocaleString()}</td>
+                                    <td className="px-3 py-2 text-slate-500">{v.createdBy ?? '—'}</td>
+                                    <td className="px-3 py-2 text-slate-500">{v.changeSummary ?? '—'}</td>
+                                    <td className="px-3 py-2">
+                                      {v.version !== r.currentVersion && (
+                                        <button
+                                          type="button"
+                                          className="btn-link text-xs text-amber-700"
+                                          onClick={() => restoreVersion(r.id, v.id)}
+                                        >
+                                          Restore
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
 
                     {/* Permissions panel */}
                     {permReportId === r.id && (
@@ -249,7 +354,8 @@ export function ReportLibraryPage() {
                                 <select className="form-select text-sm w-48" value={permForm.userId}
                                   onChange={(e) => setPermForm({ ...permForm, userId: e.target.value, roleId: '' })}>
                                   <option value="">— select user —</option>
-                                  {users.map((u) => <option key={u.id} value={u.id}>{u.displayName}</option>)}
+                                  {users.length === 0 && <option disabled>Loading users…</option>}
+                                  {users.map((u) => <option key={u.id} value={u.id}>{u.displayName ?? u.email}</option>)}
                                 </select>
                               </div>
                               <div>
@@ -257,7 +363,8 @@ export function ReportLibraryPage() {
                                 <select className="form-select text-sm w-48" value={permForm.roleId}
                                   onChange={(e) => setPermForm({ ...permForm, roleId: e.target.value, userId: '' })}>
                                   <option value="">— select role —</option>
-                                  {roles.map((ro) => <option key={ro.id} value={ro.id}>{ro.label || ro.name}</option>)}
+                                  {roles.length === 0 && <option disabled>Loading roles…</option>}
+                                  {roles.map((ro) => <option key={ro.id} value={ro.id}>{ro.label ?? ro.name}</option>)}
                                 </select>
                               </div>
                               {(['canView', 'canRun', 'canEdit', 'canSchedule', 'canShare'] as const).map((perm) => (

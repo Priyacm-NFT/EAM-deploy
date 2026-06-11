@@ -66,18 +66,20 @@ export function JobPlanFormPage() {
               value={form.estimatedDurationHours} onChange={set('estimatedDurationHours')} />
           </FormField>
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
+            <button type="button" className="btn-outline !w-auto px-6"
+              onClick={() => navigate('/job-plans')}>Cancel</button>
             <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
               {saving ? 'Creating…' : 'Create Job Plan'}
             </button>
-            <button type="button" className="btn-secondary !w-auto px-4"
-              onClick={() => navigate('/job-plans')}>Cancel</button>
           </div>
         </div>
       </form>
     </IdentityPageLayout>
   );
 }
+
+
 
 
 

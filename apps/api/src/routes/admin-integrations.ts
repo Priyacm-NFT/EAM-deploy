@@ -399,6 +399,29 @@ export async function adminIntegrationRoutes(app: FastifyInstance) {
     },
   );
 
+  // ── Enable / disable connection toggle ────────────────────────────────────
+  app.post(
+    '/admin/integrations/connections/:id/toggle',
+    {
+      ...guard,
+      schema: { tags: ['Integrations'], summary: 'Enable or disable a connection without code changes' },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const tid = request.user!.tenantId;
+      const [current] = await db.select({ isActive: integrationConnections.isActive })
+        .from(integrationConnections)
+        .where(and(eq(integrationConnections.id, id), eq(integrationConnections.tenantId, tid)))
+        .limit(1);
+      if (!current) return reply.code(404).send({ error: 'Not found' });
+      const [row] = await db.update(integrationConnections)
+        .set({ isActive: !current.isActive })
+        .where(eq(integrationConnections.id, id))
+        .returning();
+      return { id, isEnabled: row!.isActive };
+    },
+  );
+
   app.delete(
     '/admin/integrations/connections/:id',
     {
@@ -686,33 +709,56 @@ export async function adminIntegrationRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: 'Not found' });
       }
 
-      // Send a test payload to the webhook URL
-      try {
-        const testPayload = JSON.stringify({
-          event: 'webhook.test',
-          timestamp: new Date().toISOString(),
-          data: { message: 'EAM webhook test delivery' },
-        });
+      const testPayload = {
+        event: 'webhook.test',
+        timestamp: new Date().toISOString(),
+        data: { message: 'EAM webhook test delivery' },
+      };
+      const body = JSON.stringify(testPayload);
+      const { createHmac } = await import('node:crypto');
+      const signature = createHmac('sha256', wh.secret ?? 'eam-default').update(body).digest('hex');
 
+      let httpStatus: number | undefined;
+      let error: string | undefined;
+      let ok = false;
+
+      try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);
         const resp = await fetch(wh.url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-EAM-Signature': wh.secret,
+            'X-EAM-Signature': signature,
+            'X-EAM-Event': 'webhook.test',
           },
-          body: testPayload,
+          body,
           signal: controller.signal,
         }).finally(() => clearTimeout(timeout));
-
-        return { ok: resp.ok, status: resp.status, url: wh.url };
+        httpStatus = resp.status;
+        ok = resp.ok;
       } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+
+      // ── Log this test delivery ────────────────────────────────────────────
+      await db.insert(webhookDeliveryLog).values({
+        subscriptionId: wh.id,
+        eventType: 'webhook.test',
+        payload: testPayload as Record<string, unknown>,
+        attempt: 1,
+        status: ok ? 'DELIVERED' : 'FAILED',
+        httpStatus,
+        error,
+      });
+
+      if (!ok) {
         return reply.code(502).send({
-          error: 'Webhook delivery failed',
-          detail: err instanceof Error ? err.message : String(err),
+          error: error ?? 'Webhook delivery failed',
+          httpStatus,
         });
       }
+      return { ok: true, status: httpStatus, url: wh.url };
     },
   );
 
@@ -904,3 +950,4 @@ export async function adminIntegrationRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 }
+

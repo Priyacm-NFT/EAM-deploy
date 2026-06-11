@@ -79,9 +79,7 @@ export class SchemaExtensionService {
       .returning();
 
     try {
-      await this.db.execute(sql.raw(`SELECT pg_advisory_lock(hashtext('${params.tableName}'))`));
       await params.execute();
-      await this.db.execute(sql.raw(`SELECT pg_advisory_unlock(hashtext('${params.tableName}'))`));
       await this.db
         .update(schemaMigrations)
         .set({ status: 'SUCCESS' })
@@ -120,9 +118,10 @@ export class SchemaExtensionService {
       execute: async () => {
         await this.db.execute(sql.raw(alterSql));
         if (params.addIndex) {
+          // Note: no CONCURRENTLY — cannot run inside implicit transaction
           await this.db.execute(
             sql.raw(
-              `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${params.tableName}_${columnName} ON ${params.tableName} (${columnName})`,
+              `CREATE INDEX IF NOT EXISTS idx_${params.tableName}_${columnName} ON ${params.tableName} (${columnName})`,
             ),
           );
         }
@@ -189,3 +188,4 @@ export class SchemaExtensionService {
     });
   }
 }
+

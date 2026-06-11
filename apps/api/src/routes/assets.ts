@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, and, desc, ilike, or, isNull } from 'drizzle-orm';
 import QRCode from 'qrcode';
+import { WorkflowEngine } from '@eam/workflow-engine';
 import {
   db,
   assets,
@@ -411,6 +412,10 @@ export async function assetRoutes(app: FastifyInstance) {
     const body = request.body as Partial<typeof assets.$inferInsert>;
     const tid = request.user!.tenantId;
 
+    // Get current status before update for transition detection
+    const [current] = await db.select({ status: assets.status })
+      .from(assets).where(and(eq(assets.id, id), eq(assets.tenantId, tid))).limit(1);
+
     const [row] = await db.update(assets)
       .set({ ...body, updatedAt: new Date() })
       .where(and(eq(assets.id, id), eq(assets.tenantId, tid)))
@@ -418,6 +423,20 @@ export async function assetRoutes(app: FastifyInstance) {
 
     if (!row) return reply.code(404).send({ error: 'Asset not found' });
     await audit(db, { tenantId: tid, userId: request.user!.id, action: 'UPDATE', resource: 'Asset', resourceId: id });
+
+    // Auto-start matching workflow on status transition
+    if (body.status && current?.status && body.status !== current.status) {
+      const engine = new WorkflowEngine(db);
+      void engine.startWorkflow({
+        tenantId: tid,
+        entityType: 'Asset',
+        entityId: id,
+        fromStatus: current.status,
+        toStatus: body.status,
+        triggeredBy: request.user!.id,
+      }).catch((e: unknown) => console.warn('[workflow] Asset trigger failed:', e));
+    }
+
     return row;
   });
 

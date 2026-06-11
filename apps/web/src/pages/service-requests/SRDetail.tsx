@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { AttachmentPanel } from '../../components/AttachmentPanel.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 
 interface SR {
@@ -25,6 +26,7 @@ export function SRDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [sr, setSr] = useState<SR | null>(null);
+  const [tab, setTab] = useState<'overview' | 'attachments'>('overview');
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [error, setError] = useState('');
   const [transitioning, setTransitioning] = useState(false);
@@ -84,6 +86,7 @@ export function SRDetailPage() {
             {sr.slaBreached && <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">SLA BREACHED</span>}
           </div>
         </div>
+        <Link to={`/chat?context=ServiceRequest&contextId=${id}&contextLabel=${encodeURIComponent(`SR: ${sr.srNum}`)}`} className="btn-outline !w-auto px-4 text-sm">💬 Chat</Link>
         <Link to={`/service-requests/${id}/edit`} className="btn-primary !w-auto px-4 text-sm">Edit</Link>
       </div>
 
@@ -152,6 +155,24 @@ export function SRDetailPage() {
         onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
         readOnly
       />
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-slate-200 mt-4 mb-4" role="tablist">
+        {(['overview', 'attachments'] as const).map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize ${tab === t ? 'border-accent text-accent-dark' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Attachments tab */}
+      {tab === 'attachments' && (
+        <div className="admin-section">
+          <AttachmentPanel entityType="ServiceRequest" entityId={sr.id} />
+        </div>
+      )}
     </IdentityPageLayout>
   );
 }

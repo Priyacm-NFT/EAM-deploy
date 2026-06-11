@@ -41,19 +41,22 @@ const RULE_TYPES = [
 ];
 
 const FIELD_TYPES: { value: string; label: string }[] = [
-  { value: 'TEXT', label: 'Text' },
+  { value: 'TEXT', label: 'Single-line text' },
+  { value: 'TEXTAREA', label: 'Multi-line text' },
+  { value: 'INTEGER', label: 'Integer (whole number)' },
+  { value: 'DECIMAL', label: 'Decimal (number with decimals)' },
   { value: 'NUMBER', label: 'Number' },
   { value: 'DATE', label: 'Date' },
   { value: 'DATETIME', label: 'Date & time' },
-  { value: 'BOOLEAN', label: 'Yes / No' },
+  { value: 'BOOLEAN', label: 'Yes / No (toggle)' },
   { value: 'EMAIL', label: 'Email' },
   { value: 'URL', label: 'URL' },
   { value: 'PHONE', label: 'Phone' },
-  { value: 'PICKLIST', label: 'Picklist' },
-  { value: 'MULTI_SELECT', label: 'Multi-select' },
-  { value: 'LOOKUP', label: 'Lookup' },
-  { value: 'FORMULA', label: 'Formula' },
-  { value: 'ATTACHMENT', label: 'Attachment' },
+  { value: 'PICKLIST', label: 'Single-select picklist' },
+  { value: 'MULTI_SELECT', label: 'Multi-select picklist' },
+  { value: 'LOOKUP', label: 'Lookup (to another entity)' },
+  { value: 'FORMULA', label: 'Formula / calculated' },
+  { value: 'ATTACHMENT', label: 'File attachment' },
 ];
 
 const emptyForm = {
@@ -61,6 +64,9 @@ const emptyForm = {
   label: '',
   fieldType: 'TEXT',
   isRequiredGlobal: false,
+  placeholder: '',
+  helpText: '',
+  tooltip: '',
   min: '',
   max: '',
   minLength: '',
@@ -143,6 +149,9 @@ export function ConfigFieldListPage() {
           label: form.label.trim(),
           fieldType: form.fieldType,
           isRequiredGlobal: form.isRequiredGlobal,
+          placeholder: form.placeholder.trim() || null,
+          helpText: form.helpText.trim() || null,
+          tooltip: form.tooltip.trim() || null,
           validationRules,
           lookupEntity: form.lookupEntity || null,
         }),
@@ -316,6 +325,72 @@ export function ConfigFieldListPage() {
           </div>
         )}
 
+        {/* Lookup entity selector */}
+        {form.fieldType === 'LOOKUP' && (
+          <div className="border border-blue-200 rounded-lg p-4 bg-blue-50/60">
+            <FormField label="Lookup entity *" htmlFor="field-lookup-entity">
+              <select
+                id="field-lookup-entity"
+                className="form-select"
+                value={form.lookupEntity}
+                onChange={(e) => setForm({ ...form, lookupEntity: e.target.value })}
+              >
+                <option value="">— Select entity to look up —</option>
+                {entities.map((e) => (
+                  <option key={e.id} value={e.name}>{e.label} ({e.name})</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Users will search and select a record from this entity.
+              </p>
+            </FormField>
+          </div>
+        )}
+
+        {/* Formula expression */}
+        {(form.fieldType === 'FORMULA' || form.fieldType === 'CALCULATED') && (
+          <div className="border border-purple-200 rounded-lg p-4 bg-purple-50/60">
+            <FormField label="Formula expression" htmlFor="field-formula">
+              <textarea
+                id="field-formula"
+                className="form-input font-mono text-sm"
+                rows={3}
+                value={form.helpText ?? ''}
+                onChange={(e) => setForm({ ...form, helpText: e.target.value })}
+                placeholder={'e.g. quantity * unitCost\nor: status == "COMP" ? actualHours : estimatedHours'}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Use field keys as variables. Supports +, -, *, /, comparisons, ternary.
+                Formula fields are always read-only — computed server-side.
+              </p>
+            </FormField>
+          </div>
+        )}
+
+        <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/80 space-y-3">
+          <p className="text-sm font-medium text-slate-800">Labels &amp; help text</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label="Placeholder text" htmlFor="field-placeholder" hint="Shown inside the input when empty">
+              <input id="field-placeholder" type="text" className="form-input"
+                value={form.placeholder}
+                onChange={(e) => setForm({ ...form, placeholder: e.target.value })}
+                placeholder="e.g. Enter asset tag…" />
+            </FormField>
+            <FormField label="Help text" htmlFor="field-help" hint="Shown below the field on the form">
+              <input id="field-help" type="text" className="form-input"
+                value={form.helpText}
+                onChange={(e) => setForm({ ...form, helpText: e.target.value })}
+                placeholder="e.g. Use the format TAG-XXXX" />
+            </FormField>
+            <FormField label="Tooltip" htmlFor="field-tooltip" hint="Shown on hover (ℹ icon next to label)">
+              <input id="field-tooltip" type="text" className="form-input"
+                value={form.tooltip}
+                onChange={(e) => setForm({ ...form, tooltip: e.target.value })}
+                placeholder="e.g. The asset's physical barcode label" />
+            </FormField>
+          </div>
+        </div>
+
         <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/80 space-y-4">
           <p className="text-sm font-medium text-slate-800">Validation rules (optional)</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -454,13 +529,65 @@ export function ConfigFieldListPage() {
                   </td>
                   <td>
                     {!f.isSystem ? (
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
                         <button
                           type="button"
                           className="btn-link text-xs"
                           onClick={() => openRules(f)}
                         >
                           Rules
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs text-slate-500 hover:text-slate-700 px-1"
+                          title="Move up"
+                          onClick={async () => {
+                            const idx = fields.indexOf(f);
+                            if (idx <= 0) return;
+                            const other = fields[idx - 1]!;
+                            await api(`/admin/config/entities/${entityId}/fields/${f.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ displayOrder: other.displayOrder }),
+                            });
+                            await api(`/admin/config/entities/${entityId}/fields/${other.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ displayOrder: f.displayOrder }),
+                            });
+                            load();
+                          }}
+                        >↑</button>
+                        <button
+                          type="button"
+                          className="text-xs text-slate-500 hover:text-slate-700 px-1"
+                          title="Move down"
+                          onClick={async () => {
+                            const idx = fields.indexOf(f);
+                            if (idx >= fields.length - 1) return;
+                            const other = fields[idx + 1]!;
+                            await api(`/admin/config/entities/${entityId}/fields/${f.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ displayOrder: other.displayOrder }),
+                            });
+                            await api(`/admin/config/entities/${entityId}/fields/${other.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ displayOrder: f.displayOrder }),
+                            });
+                            load();
+                          }}
+                        >↓</button>
+                        <button
+                          type="button"
+                          className={`text-xs px-2 py-0.5 rounded ${f.isActive ? 'text-amber-600 hover:bg-amber-50' : 'text-green-600 hover:bg-green-50'}`}
+                          title={f.isActive ? 'Hide field' : 'Show field'}
+                          onClick={async () => {
+                            await api(`/admin/config/entities/${entityId}/fields/${f.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ isActive: !f.isActive }),
+                            });
+                            load();
+                          }}
+                        >
+                          {f.isActive ? 'Hide' : 'Show'}
                         </button>
                         <button
                           type="button"
@@ -570,6 +697,7 @@ export function ConfigFieldListPage() {
     </IdentityPageLayout>
   );
 }
+
 
 
                 

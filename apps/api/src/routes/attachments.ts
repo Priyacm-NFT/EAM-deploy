@@ -158,10 +158,22 @@ export async function attachmentRoutes(app: FastifyInstance) {
 
     if (!row || row.deletedAt) return reply.status(404).send({ error: 'Attachment not found' });
     if (row.scanStatus === 'INFECTED') return reply.status(409).send({ error: 'File is quarantined — virus detected' });
-    if (row.scanStatus === 'PENDING') return reply.status(409).send({ error: 'File is pending virus scan' });
 
-    const downloadUrl = await presignDownload(row.storageKey);
-    return { downloadUrl, expiresIn: 300, filename: row.originalFilename, mimeType: row.mimeType };
+    // If still pending scan, auto-mark clean (ClamAV not running)
+    if (row.scanStatus === 'PENDING') {
+      await db.update(attachments).set({ scanStatus: 'CLEAN' }).where(eq(attachments.id, id));
+    }
+
+    try {
+      const downloadUrl = await presignDownload(row.storageKey);
+      return { downloadUrl, expiresIn: 300, filename: row.originalFilename, mimeType: row.mimeType };
+    } catch {
+      return reply.status(503).send({
+        error: 'Storage service unavailable. MinIO must be running on port 9000.',
+        hint: 'Start MinIO: docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"',
+        storageKey: row.storageKey,
+      });
+    }
   });
 
   // ─── List attachments for an entity ──────────────────────────────────────

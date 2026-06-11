@@ -1,3 +1,5 @@
+import { useTableView } from '../../hooks/useTableView.js';
+import { TableViewBar } from '../../components/TableViewBar.js';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -21,12 +23,26 @@ const PRIORITY_COLORS: Record<string, string> = {
   LOW: 'bg-slate-100 text-slate-500',
 };
 
+const DEFAULT_COLUMNS = [
+  { fieldKey: 'woNum', label: 'WO #' },
+  { fieldKey: 'description', label: 'Description' },
+  { fieldKey: 'status', label: 'Status' },
+  { fieldKey: 'type', label: 'Type' },
+  { fieldKey: 'priority', label: 'Priority' },
+  { fieldKey: 'assetNum', label: 'Asset' },
+  { fieldKey: 'targetFinishDate', label: 'Target finish' },
+];
+
 export function WOListPage() {
   const [wos, setWos] = useState<WO[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [type, setType] = useState('');
   const [priority, setPriority] = useState('');
+
+  const { views, activeView, setActiveView } = useTableView('WorkOrder');
+  const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -69,6 +85,7 @@ export function WOListPage() {
           <button type="button" className="btn-primary !w-auto px-4" onClick={() => navigate('/work-orders/new')}>+ New WO</button>
         </div>
 
+              <TableViewBar views={views} activeView={activeView} onSwitch={setActiveView} />
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
@@ -107,3 +124,4 @@ export function WOListPage() {
     </IdentityPageLayout>
   );
 }
+

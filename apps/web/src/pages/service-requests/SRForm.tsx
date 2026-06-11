@@ -134,21 +134,23 @@ export function SRFormPage() {
         </FormField>
       </div>
 
-      <FormActions>
-        <DynamicFormRenderer
-          entityName="ServiceRequest"
-          record={form as unknown as Record<string, unknown>}
-          values={customData}
-          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
-        />
-        <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : isNew ? 'Create Service Request' : 'Save Changes'}
-        </button>
-        <button type="button" className="btn-link"
+      <DynamicFormRenderer
+        entityName="ServiceRequest"
+        record={form as unknown as Record<string, unknown>}
+        values={customData}
+        onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+      />
+
+      <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
+        <button type="button" className="btn-outline !w-auto px-6"
           onClick={() => navigate(isNew ? '/service-requests' : `/service-requests/${id}`)}>
           Cancel
         </button>
-      </FormActions>
+        <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : isNew ? 'Create Service Request' : 'Save Changes'}
+        </button>
+      </div>
     </IdentityPageLayout>
   );
 }
+

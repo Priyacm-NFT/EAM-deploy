@@ -186,6 +186,17 @@ export async function workOrderRoutes(app: FastifyInstance) {
 
     await audit(db, { tenantId: tid, userId: request.user!.id, action: 'CREATE', resource: 'WorkOrder', resourceId: row!.id });
     void dispatchWebhookEvent(tid, 'WO_CREATED', { woId: row!.id, woNum: row!.woNum });
+    // Fire notification dispatcher
+    void globalEventBus.emit('WO_CREATED', {
+      tenantId: tid,
+      entityType: 'WorkOrder',
+      entityId: row!.id,
+      woNum: row!.woNum,
+      assignedToUserId: row!.assignedToUserId,
+      subject: `Work Order ${row!.woNum} created`,
+      body: `<p>Work Order <strong>${row!.woNum}</strong> has been created.</p>`,
+      context: { wo_num: row!.woNum, description: row!.description },
+    });
     return reply.code(201).send(row);
   });
 
@@ -318,9 +329,12 @@ export async function workOrderRoutes(app: FastifyInstance) {
       }
     }
 
-    // Validate via status set
+    // Validate via status set — check both casing conventions
     const [woSet] = await db.select().from(statusSets)
-      .where(and(eq(statusSets.entityType, 'WorkOrder'), eq(statusSets.tenantId, tid))).limit(1);
+      .where(and(
+        or(eq(statusSets.entityType, 'WorkOrder'), eq(statusSets.entityType, 'work_order')),
+        eq(statusSets.tenantId, tid)
+      )).limit(1);
 
     if (woSet) {
       const [transition] = await db.select().from(statusTransitions)
@@ -382,23 +396,30 @@ export async function workOrderRoutes(app: FastifyInstance) {
 
     // ── Auto-start matching workflow on status transition ──────────────────
     const engine = new WorkflowEngine(db);
-    void engine.startWorkflow(
-      'WorkOrder',
-      id,
-      `WO_${wo.status}_TO_${body.toStatus}`,
-      tid,
-      {
-        woId: id,
-        woNum: wo.woNum,
-        fromStatus: wo.status,
-        toStatus: body.toStatus,
+    const triggerEvent = `${wo.status} → ${body.toStatus}`;
+    const triggerEventAlt = `WO_${wo.status}_TO_${body.toStatus}`;
+    console.info(`[workflow] Firing trigger: "${triggerEvent}" for WorkOrder ${id} (tenant: ${tid})`);
+    void (async () => {
+      const r = await engine.startWorkflow('WorkOrder', id, triggerEvent, tid, {
+        woId: id, woNum: wo.woNum, fromStatus: wo.status, toStatus: body.toStatus,
         requesterId: (wo as Record<string, unknown>).requesterId as string ?? request.user!.id,
-        assignedToUserId: wo.assignedToUserId,
-        assetId: wo.assetId,
-        priority: wo.priority,
-        totalcost: parseFloat(wo.totalCost ?? '0'),
-      },
-    );
+        assignedToUserId: wo.assignedToUserId, assetId: wo.assetId,
+        priority: wo.priority, totalcost: parseFloat(wo.totalCost ?? '0'),
+      });
+      if (r) {
+        console.info(`[workflow] ✅ Instance created: ${r.id}`);
+      } else {
+        console.warn(`[workflow] ❌ No matching workflow for trigger: "${triggerEvent}" — also trying: "${triggerEventAlt}"`);
+        const r2 = await engine.startWorkflow('WorkOrder', id, triggerEventAlt, tid, {
+          woId: id, woNum: wo.woNum, fromStatus: wo.status, toStatus: body.toStatus,
+          requesterId: (wo as Record<string, unknown>).requesterId as string ?? request.user!.id,
+          assignedToUserId: wo.assignedToUserId, assetId: wo.assetId,
+          priority: wo.priority, totalcost: parseFloat(wo.totalCost ?? '0'),
+        });
+        if (r2) console.info(`[workflow] ✅ Instance created via alt trigger: ${r2.id}`);
+        else console.warn(`[workflow] ❌ Still no match. Check trigger_event in workflow_definitions table.`);
+      }
+    })().catch((e: unknown) => console.warn('[workflow] trigger failed:', e));
 
     return updated;
   });

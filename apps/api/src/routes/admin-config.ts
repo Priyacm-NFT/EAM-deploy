@@ -34,6 +34,44 @@ const FIELD_TYPE_TO_PG: Record<string, 'TEXT' | 'INTEGER' | 'NUMERIC' | 'BOOLEAN
 export async function adminConfigRoutes(app: FastifyInstance) {
   const guard = { preHandler: requirePermission('admin:config:manage') };
 
+  // ── Helper: record an immutable config version snapshot ──────────────────
+  async function saveConfigVersion(params: {
+    tenantId: string;
+    entityType: string;
+    entityId: string;
+    snapshot: Record<string, unknown>;
+    createdBy: string;
+  }) {
+    try {
+      const [last] = await db
+        .select({ versionNum: configVersions.versionNum })
+        .from(configVersions)
+        .where(
+          and(
+            eq(configVersions.tenantId, params.tenantId),
+            eq(configVersions.entityType, params.entityType),
+            eq(configVersions.entityId, params.entityId),
+          ),
+        )
+        .orderBy(desc(configVersions.versionNum))
+        .limit(1);
+
+      const nextNum = (last?.versionNum ?? 0) + 1;
+
+      await db.insert(configVersions).values({
+        tenantId: params.tenantId,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        versionNum: nextNum,
+        snapshot: params.snapshot,
+        createdBy: params.createdBy,
+      });
+    } catch (e) {
+      // Non-fatal — versioning failure should not block the actual save
+      console.warn('[config-versions] Failed to save version:', e);
+    }
+  }
+
   app.get('/admin/config/entities/:entityId/fields', guard, async (request, reply) => {
     const { entityId } = request.params as { entityId: string };
     const [entity] = await db
@@ -71,6 +109,9 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       validationRules?: Record<string, unknown>;
       placeholder?: string;
       helpText?: string;
+      tooltip?: string;
+      lookupEntity?: string | null;
+      formulaExpression?: string | null;
       displayOrder?: number;
       pgType?: 'TEXT';
     };
@@ -100,8 +141,10 @@ export async function adminConfigRoutes(app: FastifyInstance) {
         isRequiredGlobal: body.isRequiredGlobal ?? false,
         isSearchable: body.isSearchable ?? false,
         validationRules: body.validationRules ?? {},
-        placeholder: body.placeholder,
-        helpText: body.helpText,
+        placeholder: body.placeholder ?? null,
+        helpText: body.tooltip ? `${body.helpText ?? ''}\n[tooltip] ${body.tooltip}`.trim() : (body.helpText ?? null),
+        lookupEntity: body.lookupEntity ?? null,
+        formulaExpression: body.formulaExpression ?? null,
         displayOrder: body.displayOrder ?? 0,
       })
       .returning();
@@ -111,7 +154,7 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       tableName: entity.tableName,
       columnName: body.fieldKey,
       pgType,
-      addIndex: body.isSearchable,
+      addIndex: false, // Index creation done separately to avoid transaction issues
       tenantId: request.user!.tenantId,
       adminUserId: request.user!.id,
     });
@@ -120,6 +163,15 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       await db.delete(fieldDefinitions).where(eq(fieldDefinitions.id, field!.id));
       return reply.status(500).send({ error: migration.error ?? 'Schema migration failed' });
     }
+
+    // Record config version
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FieldDefinition',
+      entityId: field!.id,
+      snapshot: { ...field, operation: 'CREATE' },
+      createdBy: request.user!.id,
+    });
 
     return reply.status(201).send(field);
   });
@@ -135,6 +187,8 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       validationRules?: Record<string, unknown>;
       placeholder?: string;
       helpText?: string;
+      lookupEntity?: string | null;
+      formulaExpression?: string | null;
       displayOrder?: number;
       isActive?: boolean;
     };
@@ -188,6 +242,8 @@ export async function adminConfigRoutes(app: FastifyInstance) {
     if (body.validationRules != null) updates.validationRules = body.validationRules;
     if (body.placeholder != null) updates.placeholder = body.placeholder;
     if (body.helpText != null) updates.helpText = body.helpText;
+    if (body.lookupEntity !== undefined) updates.lookupEntity = body.lookupEntity;
+    if (body.formulaExpression !== undefined) updates.formulaExpression = body.formulaExpression;
     if (body.displayOrder != null) updates.displayOrder = body.displayOrder;
     if (body.isActive != null) updates.isActive = body.isActive;
     updates.updatedAt = new Date();
@@ -197,6 +253,15 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       .set(updates)
       .where(eq(fieldDefinitions.id, fieldId))
       .returning();
+
+    // Record config version
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FieldDefinition',
+      entityId: fieldId,
+      snapshot: { ...field, operation: 'UPDATE' },
+      createdBy: request.user!.id,
+    });
 
     return field;
   });
@@ -231,19 +296,48 @@ export async function adminConfigRoutes(app: FastifyInstance) {
     if (existing.isSystem) return reply.status(403).send({ error: 'System fields cannot be deleted' });
 
     if (!existing.isSystem) {
-      const ext = new SchemaExtensionService(db);
-      const migration = await ext.dropColumn({
-        tableName: entity.tableName,
-        columnName: existing.fieldKey,
-        tenantId: request.user!.tenantId,
-        adminUserId: request.user!.id,
-      });
-      if (!migration.success) {
-        return reply.status(500).send({ error: migration.error ?? 'Column drop failed' });
+      try {
+        // Check if the column actually exists before trying to drop it
+        const colCheck = await db.execute(
+          sql.raw(`
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = '${entity.tableName}'
+            AND column_name = 'custom__${existing.fieldKey}'
+            LIMIT 1
+          `)
+        );
+        const colExists = (colCheck as { rows?: unknown[] }).rows?.length ?? 0;
+
+        if (colExists > 0) {
+          const ext = new SchemaExtensionService(db);
+          const migration = await ext.dropColumn({
+            tableName: entity.tableName,
+            columnName: existing.fieldKey,
+            tenantId: request.user!.tenantId,
+            adminUserId: request.user!.id,
+          });
+          // Log but don't fail if DDL fails — still delete the metadata record
+          if (!migration.success) {
+            request.log.warn(`Column drop failed for ${existing.fieldKey}: ${migration.error} — deleting metadata only`);
+          }
+        }
+      } catch (ddlErr) {
+        // DDL failed — just delete metadata record, column will be cleaned up manually
+        request.log.warn(`DDL error during field delete: ${ddlErr} — deleting metadata only`);
       }
     }
 
     await db.delete(fieldDefinitions).where(eq(fieldDefinitions.id, fieldId));
+
+    // Record config version for delete
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FieldDefinition',
+      entityId: fieldId,
+      snapshot: { fieldKey: existing.fieldKey, label: existing.label, operation: 'DELETE' },
+      createdBy: request.user!.id,
+    });
+
     return reply.status(204).send();
   });
 
@@ -279,6 +373,14 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       })
       .returning();
 
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FormLayout',
+      entityId: form!.id,
+      snapshot: { ...form, operation: 'CREATE' },
+      createdBy: request.user!.id,
+    });
+
     return reply.status(201).send(form);
   });
 
@@ -307,6 +409,15 @@ export async function adminConfigRoutes(app: FastifyInstance) {
       .returning();
 
     if (!form) return reply.status(404).send({ error: 'Form layout not found' });
+
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FormLayout',
+      entityId: formId,
+      snapshot: { ...form, operation: 'UPDATE' },
+      createdBy: request.user!.id,
+    });
+
     return form;
   });
 
@@ -355,11 +466,27 @@ export async function adminConfigRoutes(app: FastifyInstance) {
         statusCondition: body.statusCondition,
       })
       .returning();
+
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FieldRule',
+      entityId: rule!.id,
+      snapshot: { ...rule, operation: 'CREATE' },
+      createdBy: request.user!.id,
+    });
+
     return reply.status(201).send(rule);
   });
 
   app.delete('/admin/config/entities/:entityId/rules/:ruleId', guard, async (request, reply) => {
-    const { ruleId } = request.params as { entityId: string; ruleId: string };
+    const { ruleId, entityId } = request.params as { entityId: string; ruleId: string };
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'FieldRule',
+      entityId: ruleId,
+      snapshot: { ruleId, entityId, operation: 'DELETE' },
+      createdBy: request.user!.id,
+    });
     await db.delete(fieldRules).where(eq(fieldRules.id, ruleId));
     return reply.status(204).send();
   });
@@ -403,6 +530,14 @@ export async function adminConfigRoutes(app: FastifyInstance) {
         isDefault: body.isDefault ?? false,
       })
       .returning();
+
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'TableView',
+      entityId: view!.id,
+      snapshot: { ...view, operation: 'CREATE' },
+      createdBy: request.user!.id,
+    });
 
     return reply.status(201).send(view);
   });
@@ -474,6 +609,15 @@ export async function adminConfigRoutes(app: FastifyInstance) {
         label: body.label,
       })
       .returning();
+
+    await saveConfigVersion({
+      tenantId: request.user!.tenantId,
+      entityType: 'PicklistDefinition',
+      entityId: pl!.id,
+      snapshot: { ...pl, operation: 'CREATE' },
+      createdBy: request.user!.id,
+    });
+
     return reply.status(201).send(pl);
   });
 

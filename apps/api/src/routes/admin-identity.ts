@@ -531,4 +531,88 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
   app.get('/admin/permissions', guard, async () => {
     return db.select().from(permissions);
   });
+
+  // ── CSV bulk user import ─────────────────────────────────────────────────
+  app.post('/admin/users/import-csv', guard, async (request, reply) => {
+    const { csv } = request.body as { csv: string };
+    if (!csv?.trim()) return reply.code(400).send({ error: 'CSV content is required' });
+
+    const tid = request.user!.tenantId;
+    const lines = csv.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) return reply.code(400).send({ error: 'CSV must have a header row and at least one data row' });
+
+    // Parse header
+    const header = lines[0]!.split(',').map((h) => h.trim().toLowerCase());
+    const colIdx = (name: string) => header.indexOf(name);
+
+    const imported: number[] = [];
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    // Get All Users group
+    const [allUsersGroup] = await db.select().from(groups)
+      .where(and(eq(groups.tenantId, tid), eq(groups.name, 'All Users'))).limit(1);
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i]!.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+      const email       = cols[colIdx('email')]?.toLowerCase();
+      const username    = cols[colIdx('username')] ?? email?.split('@')[0];
+      const displayName = cols[colIdx('displayname')] ?? cols[colIdx('display_name')] ?? username ?? '';
+      const password    = cols[colIdx('password')] ?? 'Welcome@1234!';
+      const groupName   = cols[colIdx('groupname')] ?? cols[colIdx('group_name')] ?? '';
+
+      if (!email) { errors.push(`Row ${i + 1}: email is required`); continue; }
+
+      // Skip if user already exists
+      const [existing] = await db.select().from(users)
+        .where(eq(users.email, email)).limit(1);
+      if (existing) { skipped.push(email); continue; }
+
+      try {
+        const { hashPassword } = await import('@eam/auth');
+        const passwordHash = await hashPassword(password);
+        const now = new Date();
+
+        const [newUser] = await db.insert(users).values({
+          tenantId: tid,
+          email,
+          username: username ?? email.split('@')[0],
+          displayName,
+          passwordHash,
+          authSource: 'LOCAL',
+          isActive: true,
+          passwordChangedAt: now,
+        }).returning();
+
+        // Add to All Users group
+        if (allUsersGroup && newUser) {
+          await db.insert(userGroups)
+            .values({ userId: newUser.id, groupId: allUsersGroup.id })
+            .onConflictDoNothing();
+        }
+
+        // Add to specified group if provided
+        if (groupName.trim() && newUser) {
+          const [grp] = await db.select().from(groups)
+            .where(and(eq(groups.tenantId, tid), eq(groups.name, groupName.trim()))).limit(1);
+          if (grp) {
+            await db.insert(userGroups)
+              .values({ userId: newUser.id, groupId: grp.id })
+              .onConflictDoNothing();
+          }
+        }
+
+        imported.push(1);
+      } catch (err) {
+        errors.push(`Row ${i + 1} (${email}): ${err instanceof Error ? err.message : 'Failed'}`);
+      }
+    }
+
+    return {
+      imported: imported.length,
+      skipped: skipped.length,
+      errors,
+      skippedEmails: skipped,
+    };
+  });
 }

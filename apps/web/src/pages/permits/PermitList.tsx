@@ -1,3 +1,5 @@
+import { useTableView } from '../../hooks/useTableView.js';
+import { TableViewBar } from '../../components/TableViewBar.js';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -11,11 +13,24 @@ const STATUS_COLORS: Record<string, string> = {
   CLOSED: 'bg-gray-100 text-gray-500', REJECTED: 'bg-red-100 text-red-700',
 };
 
+
+const DEFAULT_COLUMNS = [
+  { fieldKey: 'permitNum', label: 'PTW #', width: 100 },
+  { fieldKey: 'type', label: 'Type', width: 120 },
+  { fieldKey: 'status', label: 'Status', width: 110 },
+  { fieldKey: 'validFrom', label: 'Valid from', width: 130 },
+  { fieldKey: 'validTo', label: 'Valid to', width: 130 },
+];
+
 export function PermitListPage() {
   const [permits, setPermits] = useState<Permit[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [type, setType] = useState('');
+
+  const { views, activeView, setActiveView } = useTableView('Permit');
+  const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
+
   const navigate = useNavigate();
 
   useEffect(() => {

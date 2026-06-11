@@ -157,20 +157,23 @@ export function AssetFormPage() {
         </div>
       </div>
 
-      <FormActions>
-        <DynamicFormRenderer
-          entityName="Asset"
-          record={form as unknown as Record<string, unknown>}
-          values={customData}
-          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
-        />
+      <DynamicFormRenderer
+        entityName="Asset"
+        record={form as unknown as Record<string, unknown>}
+        values={customData}
+        onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+      />
+
+      <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
+        <button type="button" className="btn-outline !w-auto px-6"
+          onClick={() => navigate(isNew ? '/assets' : `/assets/${id}`)}>
+          Cancel
+        </button>
         <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>
-        <button type="button" className="btn-link" onClick={() => navigate(isNew ? '/assets' : `/assets/${id}`)}>
-          Cancel
-        </button>
-      </FormActions>
+      </div>
     </IdentityPageLayout>
   );
 }
+

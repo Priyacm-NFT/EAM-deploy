@@ -20,7 +20,17 @@ const ADAPTER_ICONS: Record<string, string> = {
   REST: '🌐', SOAP: '📋', KAFKA: '⚡', RABBITMQ: '🐇', SFTP: '📁', JDBC: '🗄️',
 };
 
-const EMPTY_FORM = { name: '', adapterType: 'REST', config: '{}' };
+
+const CONFIG_TEMPLATES: Record<string, string> = {
+  REST: JSON.stringify({ url: 'https://api.example.com/endpoint', method: 'POST', headers: { 'Content-Type': 'application/json' }, authType: 'none', retryAttempts: 3 }, null, 2),
+  SOAP: JSON.stringify({ endpoint: 'https://soap.example.com/service', soapAction: 'ProcessRequest', envelopeTemplate: '' }, null, 2),
+  KAFKA: JSON.stringify({ brokers: ['kafka:9092'], topic: 'eam-events', deadLetterTopic: 'eam-dlq', retryAttempts: 3 }, null, 2),
+  RABBITMQ: JSON.stringify({ url: 'amqp://guest:guest@localhost:5672', exchange: 'eam', routingKey: 'events' }, null, 2),
+  SFTP: JSON.stringify({ host: 'sftp.example.com', port: 22, username: 'eam', password: '', remotePath: '/imports/data.csv', direction: 'inbound', fileFormat: 'csv' }, null, 2),
+  JDBC: JSON.stringify({ connectionString: 'postgres://user:pass@host:5432/db', query: 'SELECT * FROM assets WHERE updated_at > :lastRun', dryRun: false }, null, 2),
+};
+
+const EMPTY_FORM = { name: '', adapterType: 'REST', config: CONFIG_TEMPLATES['REST'] ?? '{}' };
 
 export function ConnectionListPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -157,7 +167,8 @@ export function ConnectionListPage() {
                 <input id="conn-name" className="form-input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. SAP Production" />
               </FormField>
               <FormField label="Adapter type" htmlFor="conn-adapter">
-                <select id="conn-adapter" className="form-select" value={form.adapterType} onChange={(e) => setForm({ ...form, adapterType: e.target.value })}>
+                <select id="conn-adapter" className="form-select" value={form.adapterType}
+                  onChange={(e) => setForm({ ...form, adapterType: e.target.value, config: CONFIG_TEMPLATES[e.target.value] ?? '{}' })}>
                   {(adapters.length > 0 ? adapters : ADAPTER_TYPES).map((a) => <option key={a} value={a}>{a}</option>)}
                 </select>
               </FormField>

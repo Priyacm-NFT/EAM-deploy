@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../../api/client.js';
 import {
   FormField,
@@ -33,6 +33,35 @@ export function PicklistManagerPage() {
   const [showValueForm, setShowValueForm] = useState(false);
   const [plForm, setPlForm] = useState({ name: '', label: '' });
   const [valForm, setValForm] = useState({ value: '', label: '', displayOrder: 0, parentValue: '', effectiveFrom: '', effectiveTo: '' });
+  const csvFileRef = useRef<HTMLInputElement>(null);
+
+  async function importCSV(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !selected) return;
+    const text = await file.text();
+    const lines = text.trim().split('\n').slice(1); // skip header
+    let imported = 0;
+    for (const line of lines) {
+      const [value, label, displayOrder, parentValue, effectiveFrom, effectiveTo] = line.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+      if (!value || !label) continue;
+      try {
+        await api(`/admin/config/picklists/${selected.id}/values`, {
+          method: 'POST',
+          body: JSON.stringify({
+            value, label,
+            displayOrder: Number(displayOrder ?? 0),
+            parentValue: parentValue || undefined,
+            effectiveFrom: effectiveFrom || undefined,
+            effectiveTo: effectiveTo || undefined,
+          }),
+        });
+        imported++;
+      } catch { /* skip duplicates */ }
+    }
+    loadValues(selected.id);
+    if (csvFileRef.current) csvFileRef.current.value = '';
+    alert(`Imported ${imported} value(s).`);
+  }
   const [editValId, setEditValId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -212,6 +241,16 @@ export function PicklistManagerPage() {
                     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
                     a.download = `${selected.name}-values.csv`; a.click();
                   }}>↓ CSV</button>
+                  <label className="btn-outline text-xs cursor-pointer">
+                    ↑ Import CSV
+                    <input
+                      ref={csvFileRef}
+                      type="file"
+                      accept=".csv"
+                      className="hidden"
+                      onChange={importCSV}
+                    />
+                  </label>
                   <button
                     type="button"
                     className="btn-primary !w-auto px-3 text-xs"
@@ -304,3 +343,4 @@ export function PicklistManagerPage() {
     </IdentityPageLayout>
   );
 }
+

@@ -27,9 +27,59 @@ const JOB_STATUS_STYLE: Record<string, string> = {
   running: 'bg-accent/15 text-accent-dark',
 };
 
+/**
+ * Maps each adapter type (as stored in Connection.adapterType) to the
+ * job types that make sense for it, per PRD §12.0.4 P0-4.
+ *
+ * Adapter types here must match whatever the Connections admin UI stores
+ * in the `adapterType` field (e.g. 'REST', 'SOAP', 'SFTP', 'MQ', 'JDBC').
+ */
+const ADAPTER_JOB_TYPES: Record<string, { value: string; label: string }[]> = {
+  REST: [
+    { value: 'REST_PULL', label: 'REST Pull (inbound sync)' },
+    { value: 'REST_PUSH', label: 'REST Push (outbound sync)' },
+    { value: 'WEBHOOK_REPLAY', label: 'Webhook replay' },
+  ],
+  SOAP: [
+    { value: 'SOAP_PULL', label: 'SOAP Pull (inbound sync)' },
+    { value: 'SOAP_PUSH', label: 'SOAP Push (outbound sync)' },
+  ],
+  SFTP: [
+    { value: 'SFTP_PULL', label: 'SFTP Pull (inbound file)' },
+    { value: 'SFTP_PUSH', label: 'SFTP Push (outbound file)' },
+    { value: 'BULK_EXPORT', label: 'Bulk export to SFTP' },
+  ],
+  MQ: [
+    { value: 'KAFKA_PUBLISH', label: 'Kafka / MQ Publish' },
+    { value: 'KAFKA_SUBSCRIBE', label: 'Kafka / MQ Subscribe' },
+  ],
+  JDBC: [
+    { value: 'JDBC_QUERY_SYNC', label: 'JDBC Query Sync (read-only)' },
+  ],
+};
+
+/** Fallback list shown when no connection is selected or the adapter type is unknown. */
+const FALLBACK_JOB_TYPES: { value: string; label: string }[] = [
+  { value: 'INBOUND_SYNC',   label: 'Inbound sync'   },
+  { value: 'OUTBOUND_SYNC',  label: 'Outbound sync'  },
+  { value: 'BULK_EXPORT',    label: 'Bulk export'    },
+  { value: 'WEBHOOK_REPLAY', label: 'Webhook replay' },
+];
+
+function getJobTypesForConnection(
+  connectionId: string,
+  connections: Connection[],
+): { value: string; label: string }[] {
+  const conn = connections.find((c) => c.id === connectionId);
+  if (!conn) return FALLBACK_JOB_TYPES;
+  // adapterType might be stored as 'REST', 'rest', 'REST_HTTP', etc. — normalise.
+  const key = conn.adapterType.toUpperCase().split('_')[0]; // 'REST_HTTP' → 'REST'
+  return ADAPTER_JOB_TYPES[key] ?? FALLBACK_JOB_TYPES;
+}
+
 const EMPTY_FORM = {
   connectionId: '',
-  jobType: 'INBOUND_SYNC',
+  jobType: '',
   scheduleCron: '0 * * * *',
   triggerEvent: '',
   mappingConfig: '{}',
@@ -55,6 +105,12 @@ export function IntegrationJobsPage() {
 
   const connName = (id: string) => connections.find((c) => c.id === id)?.name ?? id;
 
+  /** When connection changes, reset jobType to the first valid option for that adapter. */
+  function handleConnectionChange(connectionId: string) {
+    const types = getJobTypesForConnection(connectionId, connections);
+    setForm((prev) => ({ ...prev, connectionId, jobType: types[0]?.value ?? '' }));
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -63,7 +119,12 @@ export function IntegrationJobsPage() {
     try {
       let mapping: Record<string, unknown> = {};
       try { mapping = JSON.parse(form.mappingConfig); } catch { throw new Error('Mapping config must be valid JSON'); }
-      const payload = { ...form, mappingConfig: mapping, scheduleCron: form.scheduleCron || null, triggerEvent: form.triggerEvent || null };
+      const payload = {
+        ...form,
+        mappingConfig: mapping,
+        scheduleCron: form.scheduleCron || null,
+        triggerEvent: form.triggerEvent || null,
+      };
       if (editId) {
         await api(`/admin/integrations/jobs/${editId}`, { method: 'PUT', body: JSON.stringify(payload) });
         setMsg('Job updated.');
@@ -121,6 +182,9 @@ export function IntegrationJobsPage() {
     setShowCreate(true);
   }
 
+  // Job type options that match the currently-selected connection
+  const jobTypeOptions = getJobTypesForConnection(form.connectionId, connections);
+
   return (
     <IdentityPageLayout
       title="Integration jobs"
@@ -133,7 +197,11 @@ export function IntegrationJobsPage() {
         <h2 className="admin-section-title">Scheduled & triggered jobs</h2>
 
         <div className="flex justify-end">
-          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+          <button
+            type="button"
+            className="btn-primary !w-auto px-4"
+            onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}
+          >
             {showCreate && !editId ? 'Cancel' : '+ New job'}
           </button>
         </div>
@@ -142,33 +210,82 @@ export function IntegrationJobsPage() {
           <form onSubmit={submit} className="border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
             <h3 className="font-semibold text-primary text-sm">{editId ? 'Edit job' : 'New integration job'}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+              {/* Connection — drives the job type list */}
               <FormField label="Connection" htmlFor="job-conn">
-                <select id="job-conn" className="form-select" required value={form.connectionId} onChange={(e) => setForm({ ...form, connectionId: e.target.value })}>
+                <select
+                  id="job-conn"
+                  className="form-select"
+                  required
+                  value={form.connectionId}
+                  onChange={(e) => handleConnectionChange(e.target.value)}
+                >
                   <option value="">Select connection…</option>
-                  {connections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.adapterType})</option>)}
+                  {connections.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.adapterType})</option>
+                  ))}
                 </select>
               </FormField>
-              <FormField label="Job type" htmlFor="job-type">
-                <select id="job-type" className="form-select" value={form.jobType} onChange={(e) => setForm({ ...form, jobType: e.target.value })}>
-                  <option value="INBOUND_SYNC">Inbound sync</option>
-                  <option value="OUTBOUND_SYNC">Outbound sync</option>
-                  <option value="BULK_EXPORT">Bulk export</option>
-                  <option value="WEBHOOK_REPLAY">Webhook replay</option>
+
+              {/* Job type — options filtered by selected connection's adapterType */}
+              <FormField
+                label="Job type"
+                htmlFor="job-type"
+                hint={form.connectionId ? undefined : 'Select a connection first'}
+              >
+                <select
+                  id="job-type"
+                  className="form-select"
+                  required
+                  disabled={!form.connectionId}
+                  value={form.jobType}
+                  onChange={(e) => setForm({ ...form, jobType: e.target.value })}
+                >
+                  {!form.connectionId && <option value="">— select connection first —</option>}
+                  {jobTypeOptions.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
                 </select>
               </FormField>
+
               <FormField label="Cron schedule" htmlFor="job-cron" hint="e.g. 0 * * * * for every hour">
-                <input id="job-cron" className="form-input font-mono" placeholder="0 6 * * *" value={form.scheduleCron} onChange={(e) => setForm({ ...form, scheduleCron: e.target.value })} />
+                <input
+                  id="job-cron"
+                  className="form-input font-mono"
+                  placeholder="0 6 * * *"
+                  value={form.scheduleCron}
+                  onChange={(e) => setForm({ ...form, scheduleCron: e.target.value })}
+                />
               </FormField>
+
               <FormField label="Trigger event" htmlFor="job-event" hint="EAM event that fires this job (optional)">
-                <input id="job-event" className="form-input" placeholder="e.g. work_order.closed" value={form.triggerEvent} onChange={(e) => setForm({ ...form, triggerEvent: e.target.value })} />
+                <input
+                  id="job-event"
+                  className="form-input"
+                  placeholder="e.g. work_order.closed"
+                  value={form.triggerEvent}
+                  onChange={(e) => setForm({ ...form, triggerEvent: e.target.value })}
+                />
               </FormField>
             </div>
+
             <FormField label="Mapping configuration (JSON)" htmlFor="job-mapping" hint="Field mapping between EAM and external system">
-              <textarea id="job-mapping" className="form-input font-mono text-xs" rows={4} value={form.mappingConfig} onChange={(e) => setForm({ ...form, mappingConfig: e.target.value })} />
+              <textarea
+                id="job-mapping"
+                className="form-input font-mono text-xs"
+                rows={4}
+                value={form.mappingConfig}
+                onChange={(e) => setForm({ ...form, mappingConfig: e.target.value })}
+              />
             </FormField>
+
             <div className="flex gap-3">
-              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
-              <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
+                {saving ? 'Saving…' : editId ? 'Update' : 'Create'}
+              </button>
+              <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>
+                Cancel
+              </button>
             </div>
           </form>
         )}
@@ -193,7 +310,7 @@ export function IntegrationJobsPage() {
               )}
               {jobs.map((j) => (
                 <tr key={j.id}>
-                  <td className="font-medium text-primary">{j.jobType.replace('_', ' ')}</td>
+                  <td className="font-medium text-primary">{j.jobType.replace(/_/g, ' ')}</td>
                   <td className="text-sm text-slate-600">{connName(j.connectionId)}</td>
                   <td><code className="text-xs bg-slate-100 px-1 rounded">{j.scheduleCron ?? '—'}</code></td>
                   <td className="text-xs text-slate-500">{j.triggerEvent ?? '—'}</td>

@@ -12,7 +12,7 @@ import type { EventBus } from '@eam/shared';
 import { SYSTEM_EVENT_TYPES } from './events.js';
 import { renderTemplate } from './template.js';
 import { resolveDistributionRecipients } from './recipient-resolver.js';
-import type { DistributionRule } from './recipients.js';
+import { type DistributionRule, splitRecipientsByRole } from './recipients.js';
 import { triggerApplies } from './trigger.js';
 import {
   parseDigestConfig,
@@ -27,7 +27,10 @@ import {
 import { publishNotificationPush } from './event-bridge.js';
 
 export type EmailEnqueueFn = (job: {
+  tenantId: string;
   to: string;
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   html: string;
 }) => Promise<void>;
@@ -88,7 +91,12 @@ export class NotificationDispatcher {
   attach(bus: EventBus): void {
     for (const eventType of SYSTEM_EVENT_TYPES) {
       bus.on(eventType, (payload) => {
-        void this.dispatch(eventType, payload as Record<string, unknown>);
+        void this.dispatch(eventType, payload as Record<string, unknown>).catch((err) => {
+          console.error(
+            `[notification] dispatch failed for ${eventType}:`,
+            err instanceof Error ? err.message : err,
+          );
+        });
       });
     }
   }
@@ -175,12 +183,15 @@ export class NotificationDispatcher {
         rateLimitConfig.overflowMode === 'drop';
 
       for (const recipient of recipients) {
-        const prefs = await this.loadUserPrefs(recipient.userId, trigger.id);
+        const prefs = recipient.userId
+          ? await this.loadUserPrefs(recipient.userId, trigger.id)
+          : undefined;
         const emailAllowed =
           trigger.isMandatory || prefs?.emailEnabled !== false;
-        const inAppAllowed = prefs?.inAppEnabled !== false;
+        const inAppAllowed =
+          Boolean(recipient.userId) && prefs?.inAppEnabled !== false;
 
-        if (inAppAllowed) {
+        if (inAppAllowed && recipient.userId) {
           const [row] = await this.db
             .insert(inAppNotifications)
             .values({
@@ -188,8 +199,8 @@ export class NotificationDispatcher {
               userId: recipient.userId,
               title: subject,
               body: html.replace(/<[^>]+>/g, ' ').trim(),
-              entityType: payload.entityType as string | undefined,
-              entityId: payload.entityId as string | undefined,
+              entityType: (payload.entityType as string | undefined) ?? null,
+              entityId: (payload.entityId as string | undefined) ?? null,
             })
             .returning();
 
@@ -218,7 +229,7 @@ export class NotificationDispatcher {
           if (row) {
             await this.db.insert(notificationDeliveryLog).values({
               triggerId: trigger.id,
-              entityId: payload.entityId as string | undefined,
+              entityId: (payload.entityId as string | undefined) ?? null,
               recipientUserId: recipient.userId,
               recipientEmail: recipient.email,
               channel: 'IN_APP',
@@ -240,24 +251,56 @@ export class NotificationDispatcher {
           await queueDigestItem(this.db, {
             tenantId,
             triggerId: trigger.id,
-            recipientUserId: recipient.userId,
+            recipientUserId: recipient.userId ?? null,
             recipientEmail: recipient.email,
             subject,
             html,
-            entityType: payload.entityType as string | undefined,
-            entityId: payload.entityId as string | undefined,
+            entityType: (payload.entityType as string | undefined) ?? null,
+            entityId: (payload.entityId as string | undefined) ?? null,
             flushAfter: digestFlushAfter(windowMinutes),
           });
           await this.logDelivery(trigger.id, recipient, payload, 'DIGEST_QUEUED');
           continue;
         }
 
-        await this.enqueueEmail({
-          to: recipient.email,
-          subject,
-          html,
-        });
-        await this.logDelivery(trigger.id, recipient, payload, 'QUEUED');
+        // ── P0-8: split CC/BCC from TO using rule types ──────────────────────
+        // Build a map of rule.value → [recipient] for splitRecipientsByRole
+        const recipientsByRule = new Map<string, { userId?: string; email: string }[]>();
+        for (const rule of effectiveRules) {
+          const existing = recipientsByRule.get(rule.value) ?? [];
+          if (rule.type === 'CC' || rule.type === 'BCC') {
+            // CC/BCC rules carry static email as the value
+            existing.push({ email: rule.value });
+          } else {
+            // For TO rules, map each resolved recipient by their rule value
+            for (const r of recipients) {
+              existing.push(r);
+            }
+          }
+          recipientsByRule.set(rule.value, existing);
+        }
+        const { cc, bcc } = splitRecipientsByRole(effectiveRules, recipientsByRule);
+
+        try {
+          await this.enqueueEmail({
+            tenantId,
+            to: recipient.email,
+            cc: cc.length > 0 ? cc : undefined,
+            bcc: bcc.length > 0 ? bcc : undefined,
+            subject,
+            html,
+          });
+          await this.logDelivery(trigger.id, recipient, payload, 'DELIVERED');
+        } catch (err) {
+          await this.logDelivery(
+            trigger.id,
+            recipient,
+            payload,
+            err instanceof Error && err.message.includes('No active SMTP')
+              ? 'SKIPPED'
+              : 'FAILED',
+          );
+        }
       }
     }
   }
@@ -278,14 +321,14 @@ export class NotificationDispatcher {
 
   private async logDelivery(
     triggerId: string,
-    recipient: { userId: string; email: string },
+    recipient: { userId?: string; email: string },
     payload: Record<string, unknown>,
     status: string,
   ): Promise<void> {
     await this.db.insert(notificationDeliveryLog).values({
       triggerId,
-      entityId: payload.entityId as string | undefined,
-      recipientUserId: recipient.userId,
+      entityId: (payload.entityId as string | undefined) ?? null,
+      recipientUserId: recipient.userId ?? null,
       recipientEmail: recipient.email,
       channel: 'EMAIL',
       status,

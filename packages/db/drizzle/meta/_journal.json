@@ -71,6 +71,13 @@
       "when": 1780487261745,
       "tag": "0009_confused_jubilee",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781155000000,
+      "tag": "0010_notification_bounce",
+      "breakpoints": true
     }
   ]
 }

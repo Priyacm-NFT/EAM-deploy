@@ -27,10 +27,10 @@ import { inventoryRoutes } from './routes/inventory.js';
 import { labourRoutes } from './routes/labour.js';
 import { setupSocketIO } from './socket.js';
 import { wireApiNotificationBridge, getNotificationRedis } from './lib/notification-bridge.js';
-import { NotificationDispatcher } from '@eam/notification-service';
+import { NotificationDispatcher, createSmtpTransport, smtpFromAddress } from '@eam/notification-service';
 import { globalEventBus } from '@eam/shared';
 import { smtpConfigurations } from '@eam/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { WorkflowEngine } from '@eam/workflow-engine';
 
 export { setupSocketIO };
@@ -50,34 +50,38 @@ export async function buildApp() {
 
   // Attach notification dispatcher to event bus so triggers fire on events
   // enqueueEmail: look up the active SMTP config for the tenant and send via nodemailer
-  const enqueueEmail = async (job: { to: string; subject: string; html: string }) => {
+  const enqueueEmail = async (job: {
+    tenantId: string;
+    to: string;
+    cc?: string[];
+    bcc?: string[];
+    subject: string;
+    html: string;
+  }) => {
     try {
       const [smtp] = await db
         .select()
         .from(smtpConfigurations)
-        .where(eq(smtpConfigurations.isActive, true))
+        .where(
+          and(
+            eq(smtpConfigurations.tenantId, job.tenantId),
+            eq(smtpConfigurations.isActive, true),
+          ),
+        )
         .limit(1);
 
       if (!smtp) {
-        console.warn('[notification] No active SMTP configuration found — email not sent');
-        return;
+        console.warn(`[notification] No active SMTP for tenant ${job.tenantId} — email not sent`);
+        throw new Error('No active SMTP configuration found');
       }
 
-      const nodemailer = await import('nodemailer');
-      const transport = nodemailer.createTransport({
-        host: smtp.host,
-        port: smtp.port,
-        secure: smtp.secure ?? false,
-        auth: smtp.username && smtp.password
-          ? { user: smtp.username, pass: smtp.password }
-          : undefined,
-      });
+      const transport = await createSmtpTransport(smtp);
 
       await transport.sendMail({
-        from: smtp.fromName
-          ? `"${smtp.fromName}" <${smtp.fromEmail}>`
-          : smtp.fromEmail,
+        from: smtpFromAddress(smtp),
         to: job.to,
+        cc: job.cc?.join(', '),
+        bcc: job.bcc?.join(', '),
         subject: job.subject,
         html: job.html,
       });
@@ -85,6 +89,7 @@ export async function buildApp() {
       console.info(`[notification] Email sent to ${job.to} — subject: "${job.subject}"`);
     } catch (err) {
       console.error('[notification] Failed to send email:', err instanceof Error ? err.message : err);
+      throw err;
     }
   };
 
@@ -104,6 +109,18 @@ export async function buildApp() {
       console.error('[sla-cron] Error during SLA escalation:', err instanceof Error ? err.message : err);
     }
   }, SLA_CHECK_INTERVAL_MS);
+
+  // ── LDAP/AD sync cron — runs every 30 minutes ────────────────────────────
+  const LDAP_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const { LdapSyncService } = await import('@eam/auth');
+      const ldapSync = new LdapSyncService(db);
+      await ldapSync.syncAllActive();
+    } catch (err) {
+      console.error('[ldap-cron] Error during LDAP sync:', err instanceof Error ? err.message : err);
+    }
+  }, LDAP_SYNC_INTERVAL_MS);
 
   // ── Integration job cron — checks for due scheduled jobs every minute ────
   const JOB_CRON_INTERVAL_MS = 60 * 1000;

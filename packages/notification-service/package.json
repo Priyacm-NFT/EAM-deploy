@@ -18,7 +18,12 @@
     "drizzle-orm": "^0.38.3",
     "expr-eval": "^2.0.2",
     "handlebars": "^4.7.8",
-    "ioredis": "^5.4.2"
+    "ioredis": "^5.4.2",
+    "nodemailer": "^6.9.16"
   },
-  "devDependencies": { "typescript": "~5.4.5", "vitest": "^2.1.8" }
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.17",
+    "typescript": "~5.4.5",
+    "vitest": "^2.1.8"
+  }
 }

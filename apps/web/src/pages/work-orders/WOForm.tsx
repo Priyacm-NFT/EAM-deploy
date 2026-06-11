@@ -23,6 +23,7 @@ export function WOFormPage() {
 
   const [form, setForm] = useState({
     description: '', longDescription: '', type: 'CM', priority: 'MEDIUM',
+    status: 'DRAFT',
     assetId: searchParams.get('assetId') ?? '', locationId: '', jobPlanId: '',
     targetStartDate: '', targetFinishDate: '', notes: '',
   });
@@ -95,6 +96,11 @@ export function WOFormPage() {
             <input id="desc" className="form-input" value={form.description} onChange={(e) => set('description', e.target.value)} />
           </FormField>
         </div>
+        <FormField label="Status" htmlFor="status">
+          <select id="status" className="form-input" value={form.status} onChange={(e) => set('status', e.target.value)}>
+            {['DRAFT', 'WAPPR', 'APPR', 'INPRG', 'COMP', 'CLOSE', 'HOLD', 'CAN'].map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </FormField>
         <FormField label="Type" htmlFor="type">
           <select id="type" className="form-input" value={form.type} onChange={(e) => set('type', e.target.value)}>
             {['CM', 'PM', 'PROJECT', 'INSPECTION', 'CALIBRATION'].map((t) => <option key={t}>{t}</option>)}
@@ -135,21 +141,23 @@ export function WOFormPage() {
           </FormField>
         </div>
       </div>
-      <FormActions>
-        <DynamicFormRenderer
-          entityName="WorkOrder"
-          record={form as unknown as Record<string, unknown>}
-          values={customData}
-          onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
-        />
+
+      <DynamicFormRenderer
+        entityName="WorkOrder"
+        record={form as unknown as Record<string, unknown>}
+        values={customData}
+        onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+      />
+
+      <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
+        <button type="button" className="btn-outline !w-auto px-6"
+          onClick={() => navigate(isNew ? '/work-orders' : `/work-orders/${id}`)}>
+          Cancel
+        </button>
         <button type="button" className="btn-primary !w-auto px-6" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>
-        <button type="button" className="btn-link" onClick={() => navigate(isNew ? '/work-orders' : `/work-orders/${id}`)}>
-          Cancel
-        </button>
-      </FormActions>
+      </div>
     </IdentityPageLayout>
   );
 }
-

@@ -1,3 +1,5 @@
+import { useTableView } from '../../hooks/useTableView.js';
+import { TableViewBar } from '../../components/TableViewBar.js';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -20,11 +22,24 @@ const STATUS_COLORS: Record<string, string> = {
   CONVERTED: 'bg-teal-100 text-teal-700',
 };
 
+
+const DEFAULT_COLUMNS = [
+  { fieldKey: 'srNum', label: 'SR #', width: 100 },
+  { fieldKey: 'description', label: 'Description', width: 220 },
+  { fieldKey: 'status', label: 'Status', width: 110 },
+  { fieldKey: 'priority', label: 'Priority', width: 100 },
+  { fieldKey: 'slaDue', label: 'SLA Due', width: 130 },
+];
+
 export function SRListPage() {
   const [srs, setSrs] = useState<SR[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
+
+  const { views, activeView, setActiveView } = useTableView('ServiceRequest');
+  const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -62,6 +77,7 @@ export function SRListPage() {
             onClick={() => navigate('/service-requests/new')}>+ New SR</button>
         </div>
 
+              <TableViewBar views={views} activeView={activeView} onSwitch={setActiveView} />
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>

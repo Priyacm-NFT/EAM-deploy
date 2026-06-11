@@ -1,3 +1,5 @@
+import { useTableView } from '../../hooks/useTableView.js';
+import { TableViewBar } from '../../components/TableViewBar.js';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -10,10 +12,23 @@ interface PM {
   assetNum: string | null; assetDescription: string | null; siteName: string | null;
 }
 
+
+const DEFAULT_COLUMNS = [
+  { fieldKey: 'pmNum', label: 'PM #', width: 100 },
+  { fieldKey: 'description', label: 'Description', width: 200 },
+  { fieldKey: 'frequency', label: 'Frequency', width: 120 },
+  { fieldKey: 'nextDueDate', label: 'Next due', width: 130 },
+  { fieldKey: 'assetDescription', label: 'Asset', width: 150 },
+];
+
 export function PMMasterListPage() {
   const [pms, setPms] = useState<PM[]>([]);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  const { views, activeView, setActiveView } = useTableView('PMaster');
+  const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
+
   const navigate = useNavigate();
 
   useEffect(() => {

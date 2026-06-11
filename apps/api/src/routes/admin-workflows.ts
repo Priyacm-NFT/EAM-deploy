@@ -239,18 +239,21 @@ export async function adminWorkflowRoutes(app: FastifyInstance) {
     if (!wf) return reply.code(404).send({ error: 'Workflow not found' });
 
     const definition = wf.definition as {
-      nodes?: Array<{ id: string; type: string; data?: Record<string, unknown> }>;
-      edges?: Array<{ source: string; target: string; label?: string }>;
+      nodes?: Array<{ id: string; type: string; label?: string; data?: Record<string, unknown> }>;
+      edges?: Array<{ fromId?: string; toId?: string; source?: string; target?: string; label?: string }>;
     };
 
     const nodes = definition.nodes ?? [];
     const edges = definition.edges ?? [];
 
-    // Build adjacency list and simulate traversal
+    // Support both fromId/toId (designer) and source/target (react-flow)
     const adj: Record<string, string[]> = {};
     for (const e of edges) {
-      if (!adj[e.source]) adj[e.source] = [];
-      adj[e.source]!.push(e.target);
+      const from = e.fromId ?? e.source;
+      const to = e.toId ?? e.target;
+      if (!from || !to) continue;
+      if (!adj[from]) adj[from] = [];
+      adj[from]!.push(to);
     }
 
     const nodeMap: Record<string, (typeof nodes)[0]> = {};
@@ -265,7 +268,7 @@ export async function adminWorkflowRoutes(app: FastifyInstance) {
       visited.add(nodeId);
       const node = nodeMap[nodeId];
       if (!node) return;
-      const label = (node.data?.label as string) ?? node.type;
+      const label = node.label ?? (node.data?.label as string) ?? node.type;
       trace.push({ nodeId, type: node.type, label, status: 'SIMULATED' });
       for (const next of adj[nodeId] ?? []) {
         traverse(next);
@@ -365,5 +368,119 @@ export async function adminWorkflowRoutes(app: FastifyInstance) {
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : 'Advance failed' });
     }
+  });
+
+  // ── List all instances for a workflow ──────────────────────────────────────
+  app.get('/admin/workflows/:id/instances', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tid = request.user!.tenantId;
+
+    const [wf] = await db
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.id, id), eq(workflowDefinitions.tenantId, tid)))
+      .limit(1);
+
+    if (!wf) return reply.code(404).send({ error: 'Workflow not found' });
+
+    const rows = await db
+      .select()
+      .from(workflowInstances)
+      .where(and(eq(workflowInstances.workflowDefId, id), eq(workflowInstances.tenantId, tid)))
+      .orderBy(desc(workflowInstances.startedAt))
+      .limit(100);
+
+    return rows.map((r: typeof rows[0]) => ({
+      id: r.id,
+      workflowId: r.workflowDefId,
+      entityType: r.entityType,
+      entityId: r.entityId,
+      status: r.status,
+      currentNodeId: r.currentNodeId,
+      startedAt: r.startedAt,
+      completedAt: r.completedAt,
+      error: r.error,
+    }));
+  });
+
+  // ── Node-by-node trace for one instance ────────────────────────────────────
+  app.get('/admin/workflows/:id/instances/:instanceId/nodes', guard, async (request, reply) => {
+    const { id, instanceId } = request.params as { id: string; instanceId: string };
+    const tid = request.user!.tenantId;
+
+    const [inst] = await db
+      .select({ id: workflowInstances.id })
+      .from(workflowInstances)
+      .where(
+        and(
+          eq(workflowInstances.id, instanceId),
+          eq(workflowInstances.workflowDefId, id),
+          eq(workflowInstances.tenantId, tid),
+        ),
+      )
+      .limit(1);
+
+    if (!inst) return reply.code(404).send({ error: 'Instance not found' });
+
+    const rows = await db
+      .select()
+      .from(workflowHistory)
+      .where(eq(workflowHistory.instanceId, instanceId))
+      .orderBy(workflowHistory.createdAt);
+
+    return rows.map((r: typeof rows[0]) => ({
+      id: r.id,
+      nodeId: r.nodeId,
+      action: r.action,
+      actorId: r.actorId,
+      fromStatus: r.fromStatus,
+      toStatus: r.toStatus,
+      comment: r.comment,
+      metadata: r.metadata,
+      createdAt: r.createdAt,
+    }));
+  });
+
+  // ── Pending tasks for one instance ─────────────────────────────────────────
+  app.get('/admin/workflows/:id/instances/:instanceId/tasks', guard, async (request, reply) => {
+    const { id, instanceId } = request.params as { id: string; instanceId: string };
+    const tid = request.user!.tenantId;
+
+    const [inst] = await db
+      .select({ id: workflowInstances.id })
+      .from(workflowInstances)
+      .where(
+        and(
+          eq(workflowInstances.id, instanceId),
+          eq(workflowInstances.workflowDefId, id),
+          eq(workflowInstances.tenantId, tid),
+        ),
+      )
+      .limit(1);
+
+    if (!inst) return reply.code(404).send({ error: 'Instance not found' });
+
+    const rows = await db
+      .select()
+      .from(workflowTasks)
+      .where(
+        and(
+          eq(workflowTasks.instanceId, instanceId),
+          eq(workflowTasks.status, 'PENDING'),
+        ),
+      )
+      .orderBy(workflowTasks.createdAt);
+
+    return rows.map((r: typeof rows[0]) => ({
+      id: r.id,
+      nodeId: r.nodeId,
+      nodeType: r.nodeType,
+      assignedToUserId: r.assignedToUserId,
+      assignedToRole: r.assignedToRole,
+      assignedToGroup: r.assignedToGroup,
+      status: r.status,
+      dueAt: r.dueAt,
+      createdAt: r.createdAt,
+    }));
   });
 }

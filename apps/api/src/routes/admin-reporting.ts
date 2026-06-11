@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, and } from 'drizzle-orm';
-import { db, reportBiConnections, reportSubjects } from '@eam/db';
+import { db, reportBiConnections, reportSubjects, reportBiPermissionMappings } from '@eam/db';
 import {
   getBiConnectionInfo,
   getBiAdapter,
@@ -230,6 +230,96 @@ export async function adminReportingRoutes(app: FastifyInstance) {
         Number(q.page ?? 1),
         Number(q.pageSize ?? 100),
       );
+    },
+  );
+
+  // ─── BI Permission Group Mappings ──────────────────────────────────────────
+  // Maps EAM roles to BI tool permission groups per connection.
+  // e.g. EAM 'MAINT_SUPERVISOR' → Power BI workspace 'Viewer'
+
+  app.get(
+    '/admin/reporting/bi-connections/:connId/permission-mappings',
+    { ...guard, schema: { tags: ['Reports'], summary: 'List role → BI group mappings for a connection' } },
+    async (request, reply) => {
+      const { connId } = request.params as { connId: string };
+      const { reportBiPermissionMappings } = await import('@eam/db');
+
+      const [conn] = await db
+        .select({ id: reportBiConnections.id })
+        .from(reportBiConnections)
+        .where(and(eq(reportBiConnections.id, connId), eq(reportBiConnections.tenantId, request.user!.tenantId)))
+        .limit(1);
+      if (!conn) return reply.status(404).send({ error: 'Connection not found' });
+
+      return db
+        .select()
+        .from(reportBiPermissionMappings)
+        .where(
+          and(
+            eq(reportBiPermissionMappings.connectionId, connId),
+            eq(reportBiPermissionMappings.tenantId, request.user!.tenantId),
+          ),
+        );
+    },
+  );
+
+  app.post(
+    '/admin/reporting/bi-connections/:connId/permission-mappings',
+    { ...guard, schema: { tags: ['Reports'], summary: 'Create role → BI group mapping' } },
+    async (request, reply) => {
+      const { connId } = request.params as { connId: string };
+      const body = request.body as {
+        eamRole: string;
+        biGroup: string;
+        biWorkspaceId?: string;
+      };
+      const { reportBiPermissionMappings } = await import('@eam/db');
+
+      if (!body.eamRole?.trim() || !body.biGroup?.trim()) {
+        return reply.status(400).send({ error: 'eamRole and biGroup are required' });
+      }
+
+      const [row] = await db
+        .insert(reportBiPermissionMappings)
+        .values({
+          tenantId: request.user!.tenantId,
+          connectionId: connId,
+          eamRole: body.eamRole.trim(),
+          biGroup: body.biGroup.trim(),
+          biWorkspaceId: body.biWorkspaceId ?? null,
+        })
+        .onConflictDoUpdate({
+          target: [
+            reportBiPermissionMappings.tenantId,
+            reportBiPermissionMappings.connectionId,
+            reportBiPermissionMappings.eamRole,
+          ],
+          set: {
+            biGroup: body.biGroup.trim(),
+            biWorkspaceId: body.biWorkspaceId ?? null,
+          },
+        })
+        .returning();
+      return reply.status(201).send(row);
+    },
+  );
+
+  app.delete(
+    '/admin/reporting/bi-connections/:connId/permission-mappings/:mappingId',
+    { ...guard, schema: { tags: ['Reports'], summary: 'Delete a role → BI group mapping' } },
+    async (request, reply) => {
+      const { mappingId } = request.params as { connId: string; mappingId: string };
+      const { reportBiPermissionMappings } = await import('@eam/db');
+
+      await db
+        .delete(reportBiPermissionMappings)
+        .where(
+          and(
+            eq(reportBiPermissionMappings.id, mappingId),
+            eq(reportBiPermissionMappings.tenantId, request.user!.tenantId),
+          ),
+        );
+      return reply.status(204).send();
     },
   );
 }

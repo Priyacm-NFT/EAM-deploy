@@ -1,3 +1,5 @@
+import { useTableView } from '../../hooks/useTableView.js';
+import { TableViewBar } from '../../components/TableViewBar.js';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -5,9 +7,21 @@ import { IdentityPageLayout, MessageBanner } from '../../components/identity/Ide
 
 interface JP { id: string; jpNum: string; description: string; estimatedDurationHours: string | null; updatedAt: string }
 
+
+const DEFAULT_COLUMNS = [
+  { fieldKey: 'jpNum', label: 'JP #', width: 100 },
+  { fieldKey: 'description', label: 'Description', width: 220 },
+  { fieldKey: 'estimatedDurationHours', label: 'Est. hours', width: 120 },
+  { fieldKey: 'updatedAt', label: 'Updated', width: 130 },
+];
+
 export function JobPlanListPage() {
   const [jps, setJps] = useState<JP[]>([]);
   const [error, setError] = useState('');
+
+  const { views, activeView, setActiveView } = useTableView('JobPlan');
+  const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
+
   const navigate = useNavigate();
 
   useEffect(() => {

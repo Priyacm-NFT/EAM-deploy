@@ -443,14 +443,16 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
       }
     }
 
-    if (tenantId) {
-      // Record in bounce suppression list
+    // Always record in bounce suppression list
+    // Fall back to the authenticated user's tenantId if not found from delivery log
+    const effectiveTenantId = tenantId ?? (request.user as { tenantId?: string } | undefined)?.tenantId;
+    if (effectiveTenantId) {
       const suppressUntil = bounceType === 'soft'
         ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)  // soft: suppress 7 days
         : null; // hard: permanent suppression
 
       await db.insert(emailBounceList).values({
-        tenantId,
+        tenantId: effectiveTenantId,
         email,
         bounceType,
         bounceCode,

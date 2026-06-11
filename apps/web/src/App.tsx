@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import { isLoggedIn } from './api/client.js';
 import { HomePage } from './pages/HomePage.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { RegisterPage } from './pages/RegisterPage.js';
@@ -46,6 +47,7 @@ import { NotificationTriggersPage } from './pages/admin/notifications/Notificati
 import { SmtpConfigPage } from './pages/admin/notifications/SmtpConfig.js';
 import { DeliveryLogPage } from './pages/admin/notifications/DeliveryLog.js';
 import { BounceListPage } from './pages/admin/notifications/BounceList.js';
+import { UserNotificationPrefsPage } from './pages/admin/notifications/UserNotificationPrefs.js';
 import { LocationTreePage } from './pages/assets/LocationTree.js';
 import { AssetListPage } from './pages/assets/AssetList.js';
 import { AssetFormPage } from './pages/assets/AssetForm.js';
@@ -76,6 +78,12 @@ import { PicklistManagerPage } from './pages/admin/config/PicklistManager.js';
 import { StatusModelPage } from './pages/admin/config/StatusModel.js';
 import { ConfigVersionsPage } from './pages/admin/config/ConfigVersions.js';
 import { TableDesignerPage } from './pages/admin/config/TableDesigner.js';
+
+// ── Route guard — redirects unauthenticated users to /login ────────────────
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  if (!isLoggedIn()) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
 
 function SidebarLink({ to, label }: { to: string; label: string }) {
   const { pathname } = useLocation();
@@ -203,8 +211,12 @@ export default function App() {
     (canManageIdentity || canManageConfig || canManageReporting ||
      canManageWorkflows || canManageIntegrations || canManageAttachments || canManageNotifications);
 
+  const publicPaths = ['/', '/login', '/login/mfa', '/register', '/forgot-password', '/reset-password'];
+  const isPublicPage = publicPaths.some(p => pathname === p);
+
   return (
-    <div className="app-shell">
+    <div className={isPublicPage ? '' : 'app-shell'}>
+      {!isPublicPage && (
       <aside className="app-sidebar">
         <Link to="/" className="app-sidebar-logo">
           <span className="app-logo-mark" />
@@ -346,13 +358,16 @@ export default function App() {
                 <SidebarLink to="/admin/notifications/smtp" label="SMTP Config" />
                 <SidebarLink to="/admin/notifications/delivery-log" label="Delivery Log" />
                 <SidebarLink to="/admin/notifications/bounce-list" label="Bounce List" />
+                <SidebarLink to="/admin/notifications/my-prefs" label="My Preferences" />
               </CollapsibleSection>
             )}
           </>
         )}
       </aside>
+      )}
 
-      <div className="app-main">
+      <div className={isPublicPage ? 'w-full' : 'app-main'}>
+        {!isPublicPage && (
         <header className="app-topbar">
           <div className="flex flex-col justify-center">
             <span className="text-white font-bold text-base leading-tight">{topbarTitle}</span>
@@ -363,91 +378,99 @@ export default function App() {
             <AuthNav />
           </div>
         </header>
+        )}
 
         <div className="app-content">
           <Routes>
+            {/* ── Public pages ── */}
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/login/mfa" element={<MfaChallengePage />} />
             <Route path="/register" element={<RegisterPage />} />
-            <Route path="/account" element={<AccountPage />} />
-            <Route path="/account/mfa/setup" element={<MfaSetupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/admin/dashboard-templates" element={<DashboardTemplatePage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/admin/identity/users" element={<AdminIdentityPage />} />
-            <Route path="/admin/identity/users/:id" element={<UserFormPage />} />
-            <Route path="/admin/identity/groups" element={<GroupListPage />} />
-            <Route path="/admin/identity/groups/:id" element={<GroupFormPage />} />
-            <Route path="/admin/identity/roles" element={<RoleListPage />} />
-            <Route path="/admin/identity/roles/:id" element={<RoleFormPage />} />
-            <Route path="/admin/identity/providers" element={<SsoConfigPage />} />
-            <Route path="/admin/config" element={<ConfigEntityListPage />} />
-            <Route path="/admin/config/entities/:entityId/fields" element={<ConfigFieldListPage />} />
-            <Route path="/admin/config/entities/:entityId/forms" element={<FormDesignerPage />} />
-            <Route path="/admin/config/entities/:entityId/table" element={<TableDesignerPage />} />
-            <Route path="/admin/schema/migrations" element={<SchemaMigrationLogPage />} />
-            <Route path="/admin/workflows" element={<WorkflowListPage />} />
-            <Route path="/admin/workflows/:id" element={<WorkflowDesignerPage />} />
-            <Route path="/admin/workflows/:id/history" element={<WorkflowDesignerPage />} />
-            <Route path="/admin/integrations/connections" element={<ConnectionListPage />} />
-            <Route path="/admin/integrations/jobs" element={<IntegrationJobsPage />} />
-            <Route path="/admin/integrations/webhooks" element={<WebhookConfigPage />} />
-            <Route path="/admin/integrations/history" element={<IntegrationHistoryPage />} />
-            <Route path="/admin/integrations/api-keys" element={<ApiKeyManagerPage />} />
-            <Route path="/admin/attachments/document-types" element={<DocumentTypesPage />} />
-            <Route path="/admin/attachments/library" element={<AttachmentLibraryPage />} />
-            <Route path="/admin/attachments/scan-config" element={<ScanConfigPage />} />
-            <Route path="/admin/attachments/retention" element={<RetentionPoliciesPage />} />
-            <Route path="/admin/reporting/designer" element={<ReportDesignerPage />} />
-            <Route path="/admin/reporting/library" element={<ReportLibraryPage />} />
-            <Route path="/admin/reporting/schedules" element={<ScheduledReportsPage />} />
-            <Route path="/admin/reporting/bi" element={<BIConnectionsPage />} />
-            <Route path="/admin/reporting/bi-rls" element={<BIRlsViewsPage />} />
-            <Route path="/admin/org" element={<OrgStructurePage />} />
-            <Route path="/admin/config/picklists" element={<PicklistManagerPage />} />
-            <Route path="/admin/config/status-model" element={<StatusModelPage />} />
-            <Route path="/admin/config/versions" element={<ConfigVersionsPage />} />
-            <Route path="/admin/notifications/templates" element={<NotificationTemplatesPage />} />
-            <Route path="/admin/notifications/triggers" element={<NotificationTriggersPage />} />
-            <Route path="/admin/notifications/smtp" element={<SmtpConfigPage />} />
-            <Route path="/admin/notifications/delivery-log" element={<DeliveryLogPage />} />
-            <Route path="/admin/notifications/bounce-list" element={<BounceListPage />} />
-            <Route path="/locations" element={<LocationTreePage />} />
-            <Route path="/assets" element={<AssetListPage />} />
-            <Route path="/assets/new" element={<AssetFormPage />} />
-            <Route path="/assets/:id" element={<AssetDetailPage />} />
-            <Route path="/assets/:id/edit" element={<AssetFormPage />} />
-            <Route path="/service-requests" element={<SRListPage />} />
-            <Route path="/service-requests/new" element={<SRFormPage />} />
-            <Route path="/service-requests/:id" element={<SRDetailPage />} />
-            <Route path="/service-requests/:id/edit" element={<SRFormPage />} />
-            <Route path="/work-orders" element={<WOListPage />} />
-            <Route path="/work-orders/new" element={<WOFormPage />} />
-            <Route path="/work-orders/:id" element={<WODetailPage />} />
-            <Route path="/work-orders/:id/edit" element={<WOFormPage />} />
-            <Route path="/job-plans" element={<JobPlanListPage />} />
-            <Route path="/job-plans/new" element={<JobPlanFormPage />} />
-            <Route path="/job-plans/:id" element={<JobPlanDetailPage />} />
-            <Route path="/job-plans/:id/edit" element={<JobPlanDetailPage />} />
-            <Route path="/pm" element={<PMMasterListPage />} />
-            <Route path="/pm/new" element={<PMFormPage />} />
-            <Route path="/pm/forecast" element={<PMForecastPage />} />
-            <Route path="/pm/:id" element={<PMDetailPage />} />
-            <Route path="/permits" element={<PermitListPage />} />
-            <Route path="/permits/new" element={<PermitFormPage />} />
-            <Route path="/permits/:id" element={<PermitDetailPage />} />
-            <Route path="/inventory" element={<ItemMasterListPage />} />
-            <Route path="/inventory/transactions" element={<TransactionLogPage />} />
-            <Route path="/inventory/storerooms" element={<StoreroomListPage />} />
-            <Route path="/labour" element={<LabourPage />} />
-            <Route path="/reports/standard" element={<StandardReportsPage />} />
+            {/* ── All routes below require login ── */}
+            <Route path="/account" element={<RequireAuth><AccountPage /></RequireAuth>} />
+            <Route path="/account/mfa/setup" element={<RequireAuth><MfaSetupPage /></RequireAuth>} />
+            <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+            <Route path="/admin/dashboard-templates" element={<RequireAuth><DashboardTemplatePage /></RequireAuth>} />
+            <Route path="/chat" element={<RequireAuth><ChatPage /></RequireAuth>} />
+            <Route path="/admin/identity/users" element={<RequireAuth><AdminIdentityPage /></RequireAuth>} />
+            <Route path="/admin/identity/users/:id" element={<RequireAuth><UserFormPage /></RequireAuth>} />
+            <Route path="/admin/identity/groups" element={<RequireAuth><GroupListPage /></RequireAuth>} />
+            <Route path="/admin/identity/groups/:id" element={<RequireAuth><GroupFormPage /></RequireAuth>} />
+            <Route path="/admin/identity/roles" element={<RequireAuth><RoleListPage /></RequireAuth>} />
+            <Route path="/admin/identity/roles/:id" element={<RequireAuth><RoleFormPage /></RequireAuth>} />
+            <Route path="/admin/identity/providers" element={<RequireAuth><SsoConfigPage /></RequireAuth>} />
+            <Route path="/admin/config" element={<RequireAuth><ConfigEntityListPage /></RequireAuth>} />
+            <Route path="/admin/config/entities/:entityId/fields" element={<RequireAuth><ConfigFieldListPage /></RequireAuth>} />
+            <Route path="/admin/config/entities/:entityId/forms" element={<RequireAuth><FormDesignerPage /></RequireAuth>} />
+            <Route path="/admin/config/entities/:entityId/table" element={<RequireAuth><TableDesignerPage /></RequireAuth>} />
+            <Route path="/admin/schema/migrations" element={<RequireAuth><SchemaMigrationLogPage /></RequireAuth>} />
+            <Route path="/admin/workflows" element={<RequireAuth><WorkflowListPage /></RequireAuth>} />
+            <Route path="/admin/workflows/:id" element={<RequireAuth><WorkflowDesignerPage /></RequireAuth>} />
+            <Route path="/admin/workflows/:id/history" element={<RequireAuth><WorkflowDesignerPage /></RequireAuth>} />
+            <Route path="/admin/integrations/connections" element={<RequireAuth><ConnectionListPage /></RequireAuth>} />
+            <Route path="/admin/integrations/jobs" element={<RequireAuth><IntegrationJobsPage /></RequireAuth>} />
+            <Route path="/admin/integrations/webhooks" element={<RequireAuth><WebhookConfigPage /></RequireAuth>} />
+            <Route path="/admin/integrations/history" element={<RequireAuth><IntegrationHistoryPage /></RequireAuth>} />
+            <Route path="/admin/integrations/api-keys" element={<RequireAuth><ApiKeyManagerPage /></RequireAuth>} />
+            <Route path="/admin/attachments/document-types" element={<RequireAuth><DocumentTypesPage /></RequireAuth>} />
+            <Route path="/admin/attachments/library" element={<RequireAuth><AttachmentLibraryPage /></RequireAuth>} />
+            <Route path="/admin/attachments/scan-config" element={<RequireAuth><ScanConfigPage /></RequireAuth>} />
+            <Route path="/admin/attachments/retention" element={<RequireAuth><RetentionPoliciesPage /></RequireAuth>} />
+            <Route path="/admin/reporting/designer" element={<RequireAuth><ReportDesignerPage /></RequireAuth>} />
+            <Route path="/admin/reporting/library" element={<RequireAuth><ReportLibraryPage /></RequireAuth>} />
+            <Route path="/admin/reporting/schedules" element={<RequireAuth><ScheduledReportsPage /></RequireAuth>} />
+            <Route path="/admin/reporting/bi" element={<RequireAuth><BIConnectionsPage /></RequireAuth>} />
+            <Route path="/admin/reporting/bi-rls" element={<RequireAuth><BIRlsViewsPage /></RequireAuth>} />
+            <Route path="/admin/org" element={<RequireAuth><OrgStructurePage /></RequireAuth>} />
+            <Route path="/admin/config/picklists" element={<RequireAuth><PicklistManagerPage /></RequireAuth>} />
+            <Route path="/admin/config/status-model" element={<RequireAuth><StatusModelPage /></RequireAuth>} />
+            <Route path="/admin/config/versions" element={<RequireAuth><ConfigVersionsPage /></RequireAuth>} />
+            <Route path="/admin/notifications/templates" element={<RequireAuth><NotificationTemplatesPage /></RequireAuth>} />
+            <Route path="/admin/notifications/triggers" element={<RequireAuth><NotificationTriggersPage /></RequireAuth>} />
+            <Route path="/admin/notifications/smtp" element={<RequireAuth><SmtpConfigPage /></RequireAuth>} />
+            <Route path="/admin/notifications/my-prefs" element={<RequireAuth><UserNotificationPrefsPage /></RequireAuth>} />
+            <Route path="/admin/notifications/delivery-log" element={<RequireAuth><DeliveryLogPage /></RequireAuth>} />
+            <Route path="/admin/notifications/bounce-list" element={<RequireAuth><BounceListPage /></RequireAuth>} />
+            <Route path="/locations" element={<RequireAuth><LocationTreePage /></RequireAuth>} />
+            <Route path="/assets" element={<RequireAuth><AssetListPage /></RequireAuth>} />
+            <Route path="/assets/new" element={<RequireAuth><AssetFormPage /></RequireAuth>} />
+            <Route path="/assets/:id" element={<RequireAuth><AssetDetailPage /></RequireAuth>} />
+            <Route path="/assets/:id/edit" element={<RequireAuth><AssetFormPage /></RequireAuth>} />
+            <Route path="/service-requests" element={<RequireAuth><SRListPage /></RequireAuth>} />
+            <Route path="/service-requests/new" element={<RequireAuth><SRFormPage /></RequireAuth>} />
+            <Route path="/service-requests/:id" element={<RequireAuth><SRDetailPage /></RequireAuth>} />
+            <Route path="/service-requests/:id/edit" element={<RequireAuth><SRFormPage /></RequireAuth>} />
+            <Route path="/work-orders" element={<RequireAuth><WOListPage /></RequireAuth>} />
+            <Route path="/work-orders/new" element={<RequireAuth><WOFormPage /></RequireAuth>} />
+            <Route path="/work-orders/:id" element={<RequireAuth><WODetailPage /></RequireAuth>} />
+            <Route path="/work-orders/:id/edit" element={<RequireAuth><WOFormPage /></RequireAuth>} />
+            <Route path="/job-plans" element={<RequireAuth><JobPlanListPage /></RequireAuth>} />
+            <Route path="/job-plans/new" element={<RequireAuth><JobPlanFormPage /></RequireAuth>} />
+            <Route path="/job-plans/:id" element={<RequireAuth><JobPlanDetailPage /></RequireAuth>} />
+            <Route path="/job-plans/:id/edit" element={<RequireAuth><JobPlanDetailPage /></RequireAuth>} />
+            <Route path="/pm" element={<RequireAuth><PMMasterListPage /></RequireAuth>} />
+            <Route path="/pm/new" element={<RequireAuth><PMFormPage /></RequireAuth>} />
+            <Route path="/pm/forecast" element={<RequireAuth><PMForecastPage /></RequireAuth>} />
+            <Route path="/pm/:id" element={<RequireAuth><PMDetailPage /></RequireAuth>} />
+            <Route path="/permits" element={<RequireAuth><PermitListPage /></RequireAuth>} />
+            <Route path="/permits/new" element={<RequireAuth><PermitFormPage /></RequireAuth>} />
+            <Route path="/permits/:id" element={<RequireAuth><PermitDetailPage /></RequireAuth>} />
+            <Route path="/inventory" element={<RequireAuth><ItemMasterListPage /></RequireAuth>} />
+            <Route path="/inventory/transactions" element={<RequireAuth><TransactionLogPage /></RequireAuth>} />
+            <Route path="/inventory/storerooms" element={<RequireAuth><StoreroomListPage /></RequireAuth>} />
+            <Route path="/labour" element={<RequireAuth><LabourPage /></RequireAuth>} />
+            <Route path="/reports/standard" element={<RequireAuth><StandardReportsPage /></RequireAuth>} />
           </Routes>
         </div>
       </div>
     </div>
   );
 }
+
+
+
+
 

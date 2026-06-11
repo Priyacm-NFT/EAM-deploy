@@ -5,7 +5,7 @@ export const reportSubjects = pgTable('report_subjects', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull().unique(),
   label: text('label').notNull(),
-  category: text('category').notNull().default('Work Orders'), // ADDED
+  category: text('category').notNull().default('Work Orders'),
   baseQuery: text('base_query').notNull(),
   availableFields: jsonb('available_fields').$type<unknown[]>().notNull().default([]),
   joins: jsonb('joins').$type<unknown[]>().default([]),
@@ -73,6 +73,48 @@ export const reportBiConnections = pgTable('report_bi_connections', {
   lastTestStatus: text('last_test_status'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Report definition version history ─────────────────────────────────────────
+export const reportDefinitionVersions = pgTable('report_definition_versions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reportId: uuid('report_id')
+    .notNull()
+    .references(() => reportDefinitions.id, { onDelete: 'cascade' }),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull().default(1),
+  definition: jsonb('definition').$type<Record<string, unknown>>().notNull(),
+  changedBy: uuid('changed_by'),
+  changeNote: text('change_note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── User report favourites / pins ─────────────────────────────────────────────
+export const reportFavourites = pgTable('report_favourites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reportId: uuid('report_id')
+    .notNull()
+    .references(() => reportDefinitions.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  pinned: boolean('pinned').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── BI permission group mappings (EAM role ↔ BI tool role) ───────────────────
+export const reportBiPermissionMappings = pgTable('report_bi_permission_mappings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  connectionId: uuid('connection_id')
+    .notNull()
+    .references(() => reportBiConnections.id, { onDelete: 'cascade' }),
+  eamRole: text('eam_role').notNull(),
+  biGroup: text('bi_group').notNull(),
+  biWorkspaceId: text('bi_workspace_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // ── Per-report access control ─────────────────────────────────────────────────

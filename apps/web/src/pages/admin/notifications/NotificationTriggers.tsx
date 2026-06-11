@@ -8,6 +8,8 @@ import {
 
 interface NotificationTemplate { id: string; name: string; }
 
+interface DistributionRule { type: string; value: string; }
+
 interface NotificationTrigger {
   id: string;
   eventType: string;
@@ -15,41 +17,60 @@ interface NotificationTrigger {
   conditionExpression: string | null;
   templateId: string | null;
   templateName: string | null;
-  distributionConfig: {
-    roles?: string[];
-    userIds?: string[];
-    emails?: string[];
-    notifyRequester?: boolean;
-    notifyAssignee?: boolean;
-  };
+  distributionConfig: Record<string, unknown>;
   isMandatory: boolean;
   isActive: boolean;
   createdAt: string;
 }
 
 const EVENT_TYPES = [
-  'work_order.created', 'work_order.approved', 'work_order.status_changed', 'work_order.completed',
-  'purchase_requisition.submitted', 'purchase_requisition.approved', 'purchase_requisition.rejected',
-  'asset.status_changed', 'service_request.created', 'service_request.converted',
-  'attachment.infected', 'workflow.task_assigned', 'workflow.sla_breached',
+  'WO_CREATED', 'WO_ASSIGNED', 'WO_STATUS_CHANGED',
+  'SR_CREATED', 'SR_STATUS_CHANGED',
+  'WF_TASK_ASSIGNED', 'WF_TASK_APPROVED', 'WF_TASK_ESCALATED', 'WF_NOTIFICATION',
+  'ATTACHMENT_VIRUS_FOUND', 'REPORT_READY', 'PERMIT_EXPIRING',
+];
+
+const RULE_TYPES = [
+  { value: 'ROLE',         label: 'EAM Role',          placeholder: 'e.g. maintenance_supervisor' },
+  { value: 'GROUP',        label: 'EAM Group',          placeholder: 'e.g. Maintenance Team' },
+  { value: 'AD_GROUP',     label: 'AD / LDAP Group',    placeholder: 'e.g. AD:Maintenance-Supervisors' },
+  { value: 'STATIC_EMAIL', label: 'Static email (To)',  placeholder: 'e.g. manager@company.com' },
+  { value: 'CC',           label: 'CC email',           placeholder: 'e.g. supervisor@company.com' },
+  { value: 'BCC',          label: 'BCC email',          placeholder: 'e.g. audit@company.com' },
+  { value: 'FIELD',        label: 'Event field (user)', placeholder: 'e.g. assignedToUserId' },
 ];
 
 const EMPTY_FORM = {
-  eventType: 'work_order.approved',
+  eventType: 'WO_CREATED',
   entityType: '',
   conditionExpression: '',
   templateId: '',
-  roles: '',
-  emails: '',
   notifyRequester: false,
   notifyAssignee: true,
   isMandatory: false,
 };
 
+const EMPTY_RULE: DistributionRule = { type: 'STATIC_EMAIL', value: '' };
+
+function rulesFromConfig(cfg: Record<string, unknown>): DistributionRule[] {
+  // If already in rules format
+  if (Array.isArray(cfg.rules) && cfg.rules.length > 0) {
+    return cfg.rules as DistributionRule[];
+  }
+  // Convert legacy format
+  const rules: DistributionRule[] = [];
+  if (cfg.notifyAssignee) rules.push({ type: 'FIELD', value: 'assignedToUserId' });
+  if (cfg.notifyRequester) rules.push({ type: 'FIELD', value: 'requestedByUserId' });
+  if (Array.isArray(cfg.roles)) (cfg.roles as string[]).forEach((r) => rules.push({ type: 'ROLE', value: r }));
+  if (Array.isArray(cfg.emails)) (cfg.emails as string[]).forEach((e) => rules.push({ type: 'STATIC_EMAIL', value: e }));
+  return rules.length > 0 ? rules : [{ ...EMPTY_RULE }];
+}
+
 export function NotificationTriggersPage() {
   const [triggers, setTriggers] = useState<NotificationTrigger[]>([]);
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [rules, setRules] = useState<DistributionRule[]>([{ ...EMPTY_RULE }]);
   const [editId, setEditId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,25 +84,47 @@ export function NotificationTriggersPage() {
 
   useEffect(() => { load(); }, []);
 
+  function addRule() {
+    setRules((prev) => [...prev, { ...EMPTY_RULE }]);
+  }
+
+  function removeRule(i: number) {
+    setRules((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  function updateRule(i: number, field: keyof DistributionRule, value: string) {
+    setRules((prev) => prev.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
-    setError('');
-    setMsg('');
+    setSaving(true); setError(''); setMsg('');
     try {
+      const validRules = rules.filter((r) => r.value.trim());
+      if (validRules.length === 0 && !form.notifyAssignee && !form.notifyRequester) {
+        setError('Add at least one distribution rule or enable Notify assignee/requester.');
+        setSaving(false);
+        return;
+      }
+
+      // Merge notifyAssignee/Requester into rules
+      const allRules = [...validRules];
+      if (form.notifyAssignee && !allRules.find((r) => r.type === 'FIELD' && r.value === 'assignedToUserId')) {
+        allRules.push({ type: 'FIELD', value: 'assignedToUserId' });
+      }
+      if (form.notifyRequester && !allRules.find((r) => r.type === 'FIELD' && r.value === 'requestedByUserId')) {
+        allRules.push({ type: 'FIELD', value: 'requestedByUserId' });
+      }
+
       const payload = {
         eventType: form.eventType,
         entityType: form.entityType || null,
         conditionExpression: form.conditionExpression || null,
         templateId: form.templateId || null,
-        distributionConfig: {
-          roles: form.roles.split(',').map((s) => s.trim()).filter(Boolean),
-          emails: form.emails.split(',').map((s) => s.trim()).filter(Boolean),
-          notifyRequester: form.notifyRequester,
-          notifyAssignee: form.notifyAssignee,
-        },
+        distributionConfig: { rules: allRules },
         isMandatory: form.isMandatory,
       };
+
       if (editId) {
         await api(`/admin/notifications/triggers/${editId}`, { method: 'PATCH', body: JSON.stringify(payload) });
         setMsg('Trigger updated.');
@@ -89,15 +132,11 @@ export function NotificationTriggersPage() {
         await api('/admin/notifications/triggers', { method: 'POST', body: JSON.stringify(payload) });
         setMsg('Trigger created.');
       }
-      setShowCreate(false);
-      setEditId(null);
-      setForm(EMPTY_FORM);
+      setShowCreate(false); setEditId(null); setForm(EMPTY_FORM); setRules([{ ...EMPTY_RULE }]);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   async function toggleActive(t: NotificationTrigger) {
@@ -110,102 +149,166 @@ export function NotificationTriggersPage() {
     if (!window.confirm(`Delete trigger for "${t.eventType}"?`)) return;
     try {
       await api(`/admin/notifications/triggers/${t.id}`, { method: 'DELETE' });
-      setMsg('Trigger deleted.');
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
-    }
+      setMsg('Trigger deleted.'); load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Delete failed'); }
   }
 
   function startEdit(t: NotificationTrigger) {
+    const cfg = t.distributionConfig as Record<string, unknown>;
+    const parsedRules = rulesFromConfig(cfg);
     setForm({
       eventType: t.eventType,
       entityType: t.entityType ?? '',
       conditionExpression: t.conditionExpression ?? '',
       templateId: t.templateId ?? '',
-      roles: t.distributionConfig.roles?.join(', ') ?? '',
-      emails: t.distributionConfig.emails?.join(', ') ?? '',
-      notifyRequester: t.distributionConfig.notifyRequester ?? false,
-      notifyAssignee: t.distributionConfig.notifyAssignee ?? false,
+      notifyRequester: Boolean(cfg.notifyRequester) || parsedRules.some((r) => r.type === 'FIELD' && r.value === 'requestedByUserId'),
+      notifyAssignee: Boolean(cfg.notifyAssignee) || parsedRules.some((r) => r.type === 'FIELD' && r.value === 'assignedToUserId'),
       isMandatory: t.isMandatory,
     });
+    setRules(parsedRules.filter((r) => !(r.type === 'FIELD')));
     setEditId(t.id);
     setShowCreate(true);
   }
 
+  function cancelForm() { setShowCreate(false); setEditId(null); setForm(EMPTY_FORM); setRules([{ ...EMPTY_RULE }]); }
+
+  const ruleTypeInfo = (type: string) => RULE_TYPES.find((r) => r.value === type);
+
   return (
     <IdentityPageLayout
       title="Notification triggers"
-      subtitle="Define which EAM events send emails, who receives them, and any conditional filters"
+      subtitle="Define which EAM events send notifications, who receives them, and via which channel"
     >
       {error && <MessageBanner type="error" text={error} />}
       {msg && <MessageBanner type="success" text={msg} />}
 
       <div className="admin-section">
-        <h2 className="admin-section-title">Triggers</h2>
-
-        <div className="flex justify-end">
-          <button type="button" className="btn-primary !w-auto px-4" onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); }}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="admin-section-title !border-0 !pb-0 !mb-0">Triggers</h2>
+          <button type="button" className="btn-primary !w-auto px-4"
+            onClick={() => { setShowCreate((v) => !v); setEditId(null); setForm(EMPTY_FORM); setRules([{ ...EMPTY_RULE }]); }}>
             {showCreate && !editId ? 'Cancel' : '+ New trigger'}
           </button>
         </div>
 
         {showCreate && (
-          <form onSubmit={submit} className="border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
-            <h3 className="font-semibold text-primary text-sm">{editId ? 'Edit trigger' : 'New notification trigger'}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <form onSubmit={submit} className="border border-slate-200 rounded-lg p-5 space-y-4 bg-slate-50 mb-6">
+            <h3 className="font-semibold text-sm text-slate-800">{editId ? 'Edit trigger' : 'New notification trigger'}</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField label="Event type" htmlFor="trig-event">
-                <select id="trig-event" className="form-select" required value={form.eventType} onChange={(e) => setForm({ ...form, eventType: e.target.value })}>
+                <select id="trig-event" className="form-select" required value={form.eventType}
+                  onChange={(e) => setForm({ ...form, eventType: e.target.value })}>
                   {EVENT_TYPES.map((ev) => <option key={ev} value={ev}>{ev}</option>)}
-                  <option value="__custom__">Custom event…</option>
                 </select>
               </FormField>
+
               <FormField label="Email template" htmlFor="trig-tpl">
-                <select id="trig-tpl" className="form-select" value={form.templateId} onChange={(e) => setForm({ ...form, templateId: e.target.value })}>
+                <select id="trig-tpl" className="form-select" value={form.templateId}
+                  onChange={(e) => setForm({ ...form, templateId: e.target.value })}>
                   <option value="">No email (in-app only)</option>
                   {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </FormField>
-              <FormField label="Entity type filter" htmlFor="trig-entity" hint="Optional — limit to specific entity type">
-                <input id="trig-entity" className="form-input" value={form.entityType} onChange={(e) => setForm({ ...form, entityType: e.target.value })} placeholder="e.g. work_order (leave blank for all)" />
+
+              <FormField label="Entity type filter" htmlFor="trig-entity" hint="Optional — leave blank for all">
+                <input id="trig-entity" className="form-input" value={form.entityType}
+                  onChange={(e) => setForm({ ...form, entityType: e.target.value })}
+                  placeholder="e.g. WorkOrder" />
               </FormField>
-              <FormField label="Condition expression" htmlFor="trig-cond" hint="Optional — SQL-like condition to filter events">
-                <input id="trig-cond" className="form-input font-mono" value={form.conditionExpression} onChange={(e) => setForm({ ...form, conditionExpression: e.target.value })} placeholder=":priority = 'CRITICAL'" />
-              </FormField>
-              <FormField label="Notify roles" htmlFor="trig-roles" hint="Comma-separated role names">
-                <input id="trig-roles" className="form-input" value={form.roles} onChange={(e) => setForm({ ...form, roles: e.target.value })} placeholder="maintenance_supervisor, planner" />
-              </FormField>
-              <FormField label="Additional email addresses" htmlFor="trig-emails" hint="Comma-separated, for external recipients">
-                <input id="trig-emails" className="form-input" value={form.emails} onChange={(e) => setForm({ ...form, emails: e.target.value })} placeholder="ops@company.com, alerts@company.com" />
+
+              <FormField label="Condition expression" htmlFor="trig-cond" hint="Optional SQL-like filter">
+                <input id="trig-cond" className="form-input font-mono text-sm" value={form.conditionExpression}
+                  onChange={(e) => setForm({ ...form, conditionExpression: e.target.value })}
+                  placeholder=":priority = 'CRITICAL'" />
               </FormField>
             </div>
-            <div className="flex flex-wrap gap-4">
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
-                <input type="checkbox" checked={form.notifyAssignee} onChange={(e) => setForm({ ...form, notifyAssignee: e.target.checked })} className="rounded border-slate-300 text-accent" />
-                Notify assignee
-              </label>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
-                <input type="checkbox" checked={form.notifyRequester} onChange={(e) => setForm({ ...form, notifyRequester: e.target.checked })} className="rounded border-slate-300 text-accent" />
-                Notify requester
-              </label>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
-                <input type="checkbox" checked={form.isMandatory} onChange={(e) => setForm({ ...form, isMandatory: e.target.checked })} className="rounded border-slate-300 text-accent" />
-                Mandatory (cannot be disabled by users)
-              </label>
+
+            {/* Distribution rules builder */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="form-label !mb-0">Distribution rules</span>
+                <button type="button" onClick={addRule}
+                  className="text-xs text-accent hover:underline font-medium">
+                  + Add another rule
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mb-3">
+                Define who receives this notification. Use CC/BCC for copy recipients, AD_GROUP for Active Directory groups.
+              </p>
+
+              <div className="space-y-2">
+                {rules.map((rule, i) => (
+                  <div key={i} className="flex gap-2 items-center bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <select
+                      className="form-select text-sm w-48 shrink-0"
+                      value={rule.type}
+                      onChange={(e) => updateRule(i, 'type', e.target.value)}
+                    >
+                      {RULE_TYPES.map((rt) => (
+                        <option key={rt.value} value={rt.value}>{rt.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      className="form-input text-sm flex-1"
+                      value={rule.value}
+                      onChange={(e) => updateRule(i, 'value', e.target.value)}
+                      placeholder={ruleTypeInfo(rule.type)?.placeholder ?? ''}
+                    />
+                    <button type="button" onClick={() => removeRule(i)}
+                      className="text-slate-400 hover:text-red-500 text-lg font-bold px-1 shrink-0"
+                      title="Remove rule">
+                      ✕
+                    </button>
+                  </div>
+                ))}
+
+                {rules.length === 0 && (
+                  <p className="text-xs text-slate-400 italic">
+                    No rules yet. Click "+ Add another rule" or enable assignee/requester below.
+                  </p>
+                )}
+              </div>
+
+              {/* Quick toggles */}
+              <div className="flex flex-wrap gap-4 mt-3">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                  <input type="checkbox" checked={form.notifyAssignee}
+                    onChange={(e) => setForm({ ...form, notifyAssignee: e.target.checked })}
+                    className="rounded border-slate-300 text-accent" />
+                  Notify assignee
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                  <input type="checkbox" checked={form.notifyRequester}
+                    onChange={(e) => setForm({ ...form, notifyRequester: e.target.checked })}
+                    className="rounded border-slate-300 text-accent" />
+                  Notify requester
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                  <input type="checkbox" checked={form.isMandatory}
+                    onChange={(e) => setForm({ ...form, isMandatory: e.target.checked })}
+                    className="rounded border-slate-300 text-accent" />
+                  Mandatory (cannot be disabled by users)
+                </label>
+              </div>
             </div>
-            <div className="flex gap-3">
-              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Create'}</button>
-              <button type="button" className="btn-outline text-slate-500" onClick={() => { setShowCreate(false); setEditId(null); }}>Cancel</button>
+
+            <div className="flex gap-3 pt-1">
+              <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
+                {saving ? 'Saving…' : editId ? 'Update' : 'Create'}
+              </button>
+              <button type="button" className="btn-outline text-slate-500" onClick={cancelForm}>Cancel</button>
             </div>
           </form>
         )}
 
+        {/* Triggers table */}
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <table className="admin-table">
             <thead>
               <tr>
                 <th>Event type</th>
-                <th>Entity filter</th>
+                <th>Entity</th>
                 <th>Template</th>
                 <th>Recipients</th>
                 <th>Condition</th>
@@ -216,38 +319,37 @@ export function NotificationTriggersPage() {
             </thead>
             <tbody>
               {triggers.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-10">No triggers configured. Create one above.</td></tr>
+                <tr><td colSpan={8} className="text-center text-slate-400 py-10">No triggers yet. Create one above.</td></tr>
               )}
               {triggers.map((t) => {
-                const recipientParts: string[] = [];
-                if (t.distributionConfig.notifyAssignee) recipientParts.push('assignee');
-                if (t.distributionConfig.notifyRequester) recipientParts.push('requester');
-                if (t.distributionConfig.roles?.length) recipientParts.push(...t.distributionConfig.roles);
-                if (t.distributionConfig.emails?.length) recipientParts.push(...t.distributionConfig.emails);
+                const cfg = t.distributionConfig as Record<string, unknown>;
+                const ruleList = rulesFromConfig(cfg);
+                const recipientLabels = ruleList.map((r) => {
+                  if (r.type === 'CC') return `CC: ${r.value}`;
+                  if (r.type === 'BCC') return `BCC: ${r.value}`;
+                  if (r.type === 'FIELD') return r.value === 'assignedToUserId' ? 'assignee' : 'requester';
+                  return r.value;
+                });
                 return (
                   <tr key={t.id}>
-                    <td>
-                      <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">{t.eventType}</code>
-                    </td>
+                    <td><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">{t.eventType}</code></td>
                     <td className="text-xs text-slate-500">{t.entityType ?? '—'}</td>
-                    <td className="text-sm">{t.templateName ?? <span className="text-slate-400">In-app only</span>}</td>
+                    <td className="text-sm">{t.templateName ?? <span className="text-slate-400 italic">In-app only</span>}</td>
                     <td>
                       <div className="flex flex-wrap gap-1">
-                        {recipientParts.slice(0, 3).map((r) => <span key={r} className="text-xs bg-accent/10 text-accent-dark px-1.5 py-0.5 rounded">{r}</span>)}
-                        {recipientParts.length > 3 && <span className="text-xs text-slate-400">+{recipientParts.length - 3}</span>}
+                        {recipientLabels.slice(0, 3).map((r, i) => (
+                          <span key={i} className={`text-xs px-1.5 py-0.5 rounded ${r.startsWith('CC:') ? 'bg-blue-100 text-blue-700' : r.startsWith('BCC:') ? 'bg-purple-100 text-purple-700' : 'bg-accent/10 text-accent-dark'}`}>
+                            {r}
+                          </span>
+                        ))}
+                        {recipientLabels.length > 3 && <span className="text-xs text-slate-400">+{recipientLabels.length - 3}</span>}
                       </div>
                     </td>
                     <td className="text-xs font-mono text-slate-500 max-w-[120px] truncate">{t.conditionExpression ?? '—'}</td>
+                    <td>{t.isMandatory && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">Mandatory</span>}</td>
                     <td>
-                      {t.isMandatory && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">Mandatory</span>}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        disabled={t.isMandatory}
-                        onClick={() => toggleActive(t)}
-                        className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer disabled:cursor-not-allowed ${t.isActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}
-                      >
+                      <button type="button" disabled={t.isMandatory} onClick={() => toggleActive(t)}
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${t.isActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                         {t.isActive ? 'Active' : 'Inactive'}
                       </button>
                     </td>

@@ -37,6 +37,18 @@ export class JdbcAdapter implements IntegrationAdapter {
         : undefined);
     if (!query) return { success: false, error: 'query required in config or payload' };
 
+    // ── Read-only enforcement — only SELECT allowed ──────────────────────────
+    const trimmed = query.trim().toUpperCase();
+    const forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'CREATE'];
+    for (const kw of forbidden) {
+      if (trimmed.startsWith(kw)) {
+        return { success: false, error: `Read-only adapter: ${kw} statements are not allowed. Use REST adapter for writes.` };
+      }
+    }
+    if (!trimmed.startsWith('SELECT') && !trimmed.startsWith('WITH')) {
+      return { success: false, error: 'Read-only adapter: only SELECT (or WITH...SELECT) queries are allowed.' };
+    }
+
     try {
       const postgres = (await import('postgres')).default;
       const sql = postgres(c.connectionString, { max: 1 });

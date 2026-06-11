@@ -3,8 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
+import { AttachmentPanel } from '../../components/AttachmentPanel.js';
 
-type Tab = 'overview' | 'tasks' | 'labour' | 'materials' | 'tools' | 'safety' | 'costs' | 'permits';
+type Tab = 'overview' | 'tasks' | 'labour' | 'materials' | 'tools' | 'safety' | 'costs' | 'permits' | 'attachments';
 
 interface WO {
   id: string; woNum: string; description: string; status: string;
@@ -20,7 +21,8 @@ interface WO {
 }
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
-  WAPPR: ['APPR', 'CAN'],
+  DRAFT: ['WAPPR', 'CAN'],
+  WAPPR: ['APPR', 'DRAFT', 'CAN'],
   APPR: ['INPRG', 'WAPPR', 'HOLD'],
   INPRG: ['COMP', 'HOLD'],
   HOLD: ['APPR', 'INPRG', 'CAN'],
@@ -141,6 +143,7 @@ export function WODetailPage() {
     { id: 'safety', label: `Safety (${safety.length})` },
     { id: 'costs', label: 'Costs' },
     { id: 'permits', label: 'Permits' },
+    { id: 'attachments', label: 'Attachments' },
   ];
 
   const totalCost = [wo.laborCost, wo.materialCost, wo.serviceCost, wo.toolCost]
@@ -161,6 +164,7 @@ export function WODetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Link to={`/chat?context=WorkOrder&contextId=${id}&contextLabel=${encodeURIComponent(`WO: ${wo.woNum}`)}`} className="btn-outline !w-auto px-4 text-sm">💬 Chat</Link>
           <Link to={`/work-orders/${id}/edit`} className="btn-primary !w-auto px-4 text-sm">Edit</Link>
           {wo.jobPlanDescription && wo.status !== 'CLOSE' && (
             <button type="button" className="btn-primary !w-auto px-4 text-sm bg-indigo-600" onClick={applyJobPlan} disabled={applyingJP}>
@@ -394,6 +398,13 @@ export function WODetailPage() {
             <Link to={`/permits/new?woId=${id}`} className="btn-primary !w-auto px-4 text-sm">+ Request permit</Link>
           </div>
           <p className="text-slate-400 text-sm">View permits linked to this work order in the <Link to="/permits" className="text-blue-600">Permits</Link> module.</p>
+        </div>
+      )}
+
+      {/* Attachments */}
+      {tab === 'attachments' && wo && (
+        <div className="admin-section">
+          <AttachmentPanel entityType="WorkOrder" entityId={wo.id} />
         </div>
       )}
     </IdentityPageLayout>

@@ -32,8 +32,15 @@ interface Workflow {
 }
 
 interface SimResult {
-  path: string[];
-  decisions: Record<string, string>;
+  simulationId?: string;
+  trace?: { nodeId: string; type: string; label: string; status: string }[];
+  path?: string[];
+  result?: string;
+  decisions?: Record<string, string>;
+}
+
+function midpoint(a: WFNode, b: WFNode) {
+  return { x: (a.x + b.x) / 2 + 55, y: (a.y + b.y) / 2 + 20 };
 }
 
 const NODE_COLORS: Record<NodeType, string> = {
@@ -63,18 +70,11 @@ const NODE_PALETTE: { type: NodeType; label: string; desc: string }[] = [
 const CANVAS_W = 900;
 const CANVAS_H = 580;
 const NODE_W = 110;
-const NODE_H = 46;
-
-function midpoint(a: WFNode, b: WFNode) {
-  const ax = a.x + NODE_W / 2;
-  const ay = a.y + NODE_H / 2;
-  const bx = b.x + NODE_W / 2;
-  const by = b.y + NODE_H / 2;
-  return { ax, ay, bx, by };
-}
+const NODE_H = 44;
 
 export function WorkflowDesignerPage() {
   const { id } = useParams<{ id: string }>();
+
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [nodes, setNodes] = useState<WFNode[]>([]);
   const [edges, setEdges] = useState<WFEdge[]>([]);
@@ -87,6 +87,15 @@ export function WorkflowDesignerPage() {
   const [simResult, setSimResult] = useState<SimResult | null>(null);
   const [activeTab, setActiveTab] = useState<'canvas' | 'history'>('canvas');
   const [versions, setVersions] = useState<{ version: number; publishedAt: string; publishedBy: string }[]>([]);
+  const [instances, setInstances] = useState<{
+    id: string; entityType: string; entityId: string;
+    status: string; currentNodeId: string | null;
+    startedAt: string; completedAt: string | null;
+  }[]>([]);
+  const [expandedInstance, setExpandedInstance] = useState<string | null>(null);
+  const [nodeTrace, setNodeTrace] = useState<Record<string, unknown[]>>({});
+  const [pageLoading, setPageLoading] = useState(true);
+
   const dragRef = useRef<{ nodeId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
 
@@ -99,10 +108,26 @@ export function WorkflowDesignerPage() {
           setEdges(w.definition.edges ?? []);
         }
       })
+      .catch(() => setError('Workflow not found'))
+      .finally(() => setPageLoading(false));
+
+    api<{ action: string; version?: number; createdAt?: string; userId?: string }[]>(`/admin/workflows/${id}/history`)
+      .then((history) => {
+        const vList = Array.isArray(history)
+          ? history
+              .filter((h) => h.action === 'PUBLISHED')
+              .map((h) => ({
+                version: Number(h.version ?? 1),
+                publishedAt: String(h.createdAt ?? ''),
+                publishedBy: String(h.userId ?? ''),
+              }))
+          : [];
+        setVersions(vList);
+      })
       .catch(() => {});
 
-    api<typeof versions>(`/admin/workflows/${id}/versions`)
-      .then(setVersions)
+    api<typeof instances>(`/admin/workflows/${id}/instances`)
+      .then((rows) => setInstances(Array.isArray(rows) ? rows : []))
       .catch(() => {});
   }, [id]);
 
@@ -190,23 +215,21 @@ export function WorkflowDesignerPage() {
     );
   }
 
-  function deleteEdge(edgeId: string) {
-    setEdges((eds) => eds.filter((e) => e.id !== edgeId));
-  }
-
   async function save(publish = false) {
     setSaving(true);
     setError('');
     setMsg('');
     try {
-      await api(`/admin/workflows/${id}`, {
+      await api(`/admin/workflows/${id}/designer`, {
         method: 'PUT',
-        body: JSON.stringify({ definition: { nodes, edges }, publish }),
+        body: JSON.stringify({ definition: { nodes, edges } }),
       });
-      setMsg(publish ? 'Workflow published as a new version.' : 'Draft saved.');
       if (publish) {
-        api<Workflow>(`/admin/workflows/${id}`).then((w) => setWorkflow(w));
-        api<typeof versions>(`/admin/workflows/${id}/versions`).then(setVersions).catch(() => {});
+        await api(`/admin/workflows/${id}/publish`, { method: 'POST' });
+        setMsg('Workflow published as a new version.');
+        api<Workflow>(`/admin/workflows/${id}`).then((w) => setWorkflow(w)).catch(() => {});
+      } else {
+        setMsg('Draft saved.');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
@@ -218,6 +241,7 @@ export function WorkflowDesignerPage() {
   async function simulate() {
     setError('');
     setSimResult(null);
+    setSimMode(false);
     try {
       const result = await api<SimResult>(`/admin/workflows/${id}/simulate`, {
         method: 'POST',
@@ -226,9 +250,19 @@ export function WorkflowDesignerPage() {
       setSimResult(result);
       setSimMode(true);
     } catch {
-      setSimResult({ path: nodes.map((n) => n.id), decisions: {} });
+      // Fallback: build a local trace from the nodes
+      const trace = nodes.map((n) => ({ nodeId: n.id, type: n.type, label: n.label, status: 'SIMULATED' }));
+      setSimResult({ trace, result: 'SIMULATED (local)' });
       setSimMode(true);
     }
+  }
+
+  if (pageLoading) {
+    return (
+      <div className="admin-page flex items-center justify-center h-64 text-slate-400">
+        <p>Loading workflow…</p>
+      </div>
+    );
   }
 
   return (
@@ -240,7 +274,9 @@ export function WorkflowDesignerPage() {
           </Link>
           <h1 className="page-title">{workflow?.name ?? 'Workflow designer'}</h1>
           <p className="page-subtitle">
-            {workflow ? `Entity: ${workflow.entityType} · Trigger: ${workflow.triggerCondition || 'none'} · v${workflow.currentVersion}` : 'Loading…'}
+            {workflow
+              ? `Entity: ${workflow.entityType} · Trigger: ${workflow.triggerCondition || 'none'} · v${workflow.currentVersion}`
+              : 'Loading…'}
           </p>
         </div>
         <div className="flex gap-2 shrink-0 pt-1">
@@ -258,23 +294,47 @@ export function WorkflowDesignerPage() {
 
       {error && <MessageBanner type="error" text={error} />}
       {msg && <MessageBanner type="success" text={msg} />}
+
       {simMode && simResult && (
-        <div className="content-card border border-purple-200 bg-purple-50 text-purple-900 text-sm space-y-1">
-          <p className="font-semibold">Simulation result</p>
-          <p>Path: {simResult.path.map((nid) => nodes.find((n) => n.id === nid)?.label ?? nid).join(' → ')}</p>
-          <button type="button" className="btn-link text-purple-700" onClick={() => setSimMode(false)}>
-            Close simulation
-          </button>
+        <div className="content-card border border-purple-200 bg-purple-50 text-purple-900 text-sm space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold">Simulation result: <span className={simResult.result === 'COMPLETED' ? 'text-green-700' : 'text-amber-700'}>{simResult.result ?? 'SIMULATED'}</span></p>
+            <button type="button" className="btn-link text-purple-700 text-xs" onClick={() => { setSimMode(false); setSimResult(null); }}>
+              ✕ Close
+            </button>
+          </div>
+          {simResult.trace && simResult.trace.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {simResult.trace.map((step, i) => (
+                <div key={step.nodeId} className="flex items-center gap-1">
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                    step.status === 'SIMULATED' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                    step.type === 'END' ? 'bg-slate-700 text-white' :
+                    step.type === 'START' ? 'bg-green-500 text-white' :
+                    'bg-white border border-purple-200 text-purple-700'
+                  }`}>
+                    {step.label}
+                  </span>
+                  {i < simResult.trace!.length - 1 && <span className="text-purple-400 text-xs">→</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="flex gap-2 border-b border-white/10 pb-0.5">
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-slate-200 mb-4">
         {(['canvas', 'history'] as const).map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`text-sm font-medium px-4 py-2 rounded-t-md transition-colors ${activeTab === tab ? 'bg-white text-primary' : 'text-white/70 hover:text-white'}`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab
+                ? 'border-accent text-accent'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
           >
             {tab === 'canvas' ? 'Designer canvas' : 'Version history'}
           </button>
@@ -315,7 +375,6 @@ export function WorkflowDesignerPage() {
               style={{ background: '#f8fafc', cursor: connecting ? 'crosshair' : 'default' }}
               onClick={handleCanvasClick}
             >
-              {/* Grid */}
               <defs>
                 <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
                   <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" strokeWidth="0.5" />
@@ -328,37 +387,28 @@ export function WorkflowDesignerPage() {
 
               {/* Edges */}
               {edges.map((edge) => {
-                const from = nodes.find((n) => n.id === edge.fromId);
-                const to = nodes.find((n) => n.id === edge.toId);
-                if (!from || !to) return null;
-                const { ax, ay, bx, by } = midpoint(from, to);
-                const mx = (ax + bx) / 2;
-                const my = (ay + by) / 2;
+                const fromNode = nodes.find((n) => n.id === edge.fromId);
+                const toNode = nodes.find((n) => n.id === edge.toId);
+                if (!fromNode || !toNode) return null;
+                const x1 = fromNode.x + NODE_W;
+                const y1 = fromNode.y + NODE_H / 2;
+                const x2 = toNode.x;
+                const y2 = toNode.y + NODE_H / 2;
+                const mp = midpoint(fromNode, toNode);
                 return (
                   <g key={edge.id}>
                     <path
-                      d={`M ${ax} ${ay} C ${ax} ${my}, ${bx} ${my}, ${bx} ${by}`}
+                      d={`M ${x1} ${y1} C ${x1 + 40} ${y1}, ${x2 - 40} ${y2}, ${x2} ${y2}`}
                       fill="none"
                       stroke="#94a3b8"
                       strokeWidth="2"
                       markerEnd="url(#arrow)"
                     />
                     {edge.label && (
-                      <text x={mx} y={my - 6} textAnchor="middle" fontSize="10" fill="#64748b">
+                      <text x={mp.x} y={mp.y} textAnchor="middle" fontSize="10" fill="#64748b">
                         {edge.label}
                       </text>
                     )}
-                    <circle
-                      cx={mx}
-                      cy={my}
-                      r={6}
-                      fill="white"
-                      stroke="#94a3b8"
-                      strokeWidth="1.5"
-                      style={{ cursor: 'pointer' }}
-                      onClick={(e) => { e.stopPropagation(); deleteEdge(edge.id); }}
-                    />
-                    <text x={mx} y={my + 4} textAnchor="middle" fontSize="9" fill="#94a3b8" style={{ pointerEvents: 'none' }}>✕</text>
                   </g>
                 );
               })}
@@ -367,10 +417,18 @@ export function WorkflowDesignerPage() {
               {nodes.map((node) => {
                 const isSelected = selected === node.id;
                 const isConnecting = connecting === node.id;
-                const inSimPath = simMode && simResult?.path.includes(node.id);
+                const inSimPath = simMode && simResult?.trace?.some((t) => t.nodeId === node.id);
                 const colorClass = NODE_COLORS[node.type];
                 const [bg] = colorClass.split(' ');
-                const bgHex = bg === 'bg-green-500' ? '#22c55e' : bg === 'bg-slate-700' ? '#334155' : bg === 'bg-blue-500' ? '#3b82f6' : bg === 'bg-orange-500' ? '#f97316' : bg === 'bg-purple-500' ? '#a855f7' : bg === 'bg-teal-500' ? '#14b8a6' : '#ec4899';
+                const bgHex =
+                  bg === 'bg-green-500' ? '#22c55e' :
+                  bg === 'bg-slate-700' ? '#334155' :
+                  bg === 'bg-blue-500' ? '#3b82f6' :
+                  bg === 'bg-orange-500' ? '#f97316' :
+                  bg === 'bg-purple-500' ? '#a855f7' :
+                  bg === 'bg-teal-500' ? '#14b8a6' :
+                  bg === 'bg-cyan-600' ? '#0891b2' :
+                  bg === 'bg-teal-600' ? '#0d9488' : '#ec4899';
                 return (
                   <g
                     key={node.id}
@@ -436,49 +494,111 @@ export function WorkflowDesignerPage() {
                     onChange={(e) => updateNodeProp(selectedNode.id, 'label', e.target.value)}
                   />
                 </div>
+
                 {selectedNode.type === 'TASK' && (
                   <>
                     <div>
                       <label className="form-label text-xs">Assign to</label>
-                      <input className="form-input text-xs py-1" placeholder="Role / user / SQL" value={selectedNode.config.assignTo ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'assignTo', e.target.value)} />
+                      <select
+                        className="form-select text-xs py-1"
+                        value={selectedNode.config.assigneeType ?? 'role'}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'assigneeType', e.target.value)}
+                      >
+                        <option value="role">EAM Role</option>
+                        <option value="user">Named user</option>
+                        <option value="group">AD/LDAP group</option>
+                        <option value="supervisor">Requester's supervisor</option>
+                        <option value="asset_owner">Asset owner</option>
+                        <option value="sql">SQL expression</option>
+                      </select>
+                      <input
+                        className="form-input text-xs py-1 mt-1"
+                        placeholder={
+                          selectedNode.config.assigneeType === 'supervisor'
+                            ? 'auto — resolves at runtime'
+                            : selectedNode.config.assigneeType === 'sql'
+                            ? 'e.g. SELECT supervisor FROM persons...'
+                            : 'Role / user / group name'
+                        }
+                        value={selectedNode.config.assignTo ?? ''}
+                        disabled={selectedNode.config.assigneeType === 'supervisor'}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'assignTo', e.target.value)}
+                      />
                     </div>
                     <div>
                       <label className="form-label text-xs">SLA (hours)</label>
-                      <input type="number" className="form-input text-xs py-1" value={selectedNode.config.slaHours ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'slaHours', e.target.value)} />
+                      <input
+                        type="number"
+                        className="form-input text-xs py-1"
+                        value={selectedNode.config.slaHours ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'slaHours', e.target.value)}
+                      />
                     </div>
                     <div>
                       <label className="form-label text-xs">Escalation role</label>
-                      <input className="form-input text-xs py-1" value={selectedNode.config.escalationRole ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'escalationRole', e.target.value)} />
+                      <input
+                        className="form-input text-xs py-1"
+                        value={selectedNode.config.escalationRole ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'escalationRole', e.target.value)}
+                      />
                     </div>
                   </>
                 )}
+
                 {selectedNode.type === 'APPROVAL' && (
                   <>
                     <div>
                       <label className="form-label text-xs">Approver</label>
-                      <input className="form-input text-xs py-1" placeholder="Role or user" value={selectedNode.config.approver ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'approver', e.target.value)} />
+                      <input
+                        className="form-input text-xs py-1"
+                        placeholder="Role or user"
+                        value={selectedNode.config.approver ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'approver', e.target.value)}
+                      />
                     </div>
                     <div>
                       <label className="form-label text-xs">Auto-approve after (hrs)</label>
-                      <input type="number" className="form-input text-xs py-1" value={selectedNode.config.autoApproveHrs ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'autoApproveHrs', e.target.value)} />
+                      <input
+                        type="number"
+                        className="form-input text-xs py-1"
+                        value={selectedNode.config.autoApproveHrs ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'autoApproveHrs', e.target.value)}
+                      />
                     </div>
                   </>
                 )}
+
                 {selectedNode.type === 'DECISION' && (
                   <div>
                     <label className="form-label text-xs">SQL condition</label>
-                    <textarea className="form-input text-xs py-1 font-mono" rows={3} placeholder=":totalcost > 500000" value={selectedNode.config.condition ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'condition', e.target.value)} />
+                    <textarea
+                      className="form-input text-xs py-1 font-mono"
+                      rows={3}
+                      placeholder=":totalcost > 500000"
+                      value={selectedNode.config.condition ?? ''}
+                      onChange={(e) => updateNodeProp(selectedNode.id, 'condition', e.target.value)}
+                    />
                   </div>
                 )}
+
                 {selectedNode.type === 'NOTIFICATION' && (
                   <>
                     <div>
                       <label className="form-label text-xs">Template</label>
-                      <input className="form-input text-xs py-1" placeholder="Template name" value={selectedNode.config.template ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'template', e.target.value)} />
+                      <input
+                        className="form-input text-xs py-1"
+                        placeholder="Template name"
+                        value={selectedNode.config.template ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'template', e.target.value)}
+                      />
                     </div>
                     <div>
                       <label className="form-label text-xs">Channel</label>
-                      <select className="form-select text-xs py-1" value={selectedNode.config.channel ?? 'email'} onChange={(e) => updateNodeProp(selectedNode.id, 'channel', e.target.value)}>
+                      <select
+                        className="form-select text-xs py-1"
+                        value={selectedNode.config.channel ?? 'email'}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'channel', e.target.value)}
+                      >
                         <option value="email">Email</option>
                         <option value="in_app">In-app</option>
                         <option value="both">Both</option>
@@ -486,32 +606,46 @@ export function WorkflowDesignerPage() {
                     </div>
                   </>
                 )}
+
                 {selectedNode.type === 'INTEGRATION' && (
                   <>
                     <div>
                       <label className="form-label text-xs">Connection</label>
-                      <input className="form-input text-xs py-1" placeholder="Connection name" value={selectedNode.config.connection ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'connection', e.target.value)} />
+                      <input
+                        className="form-input text-xs py-1"
+                        placeholder="Connection name"
+                        value={selectedNode.config.connection ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'connection', e.target.value)}
+                      />
                     </div>
                     <div>
-                      <label className="form-label text-xs">Endpoint path</label>
-                      <input className="form-input text-xs py-1 font-mono" placeholder="/api/sync" value={selectedNode.config.endpoint ?? ''} onChange={(e) => updateNodeProp(selectedNode.id, 'endpoint', e.target.value)} />
+                      <label className="form-label text-xs">Endpoint / payload</label>
+                      <textarea
+                        className="form-input text-xs py-1 font-mono"
+                        rows={2}
+                        value={selectedNode.config.payload ?? ''}
+                        onChange={(e) => updateNodeProp(selectedNode.id, 'payload', e.target.value)}
+                      />
                     </div>
                   </>
                 )}
-                <button
-                  type="button"
-                  className="btn-danger w-full text-xs"
-                  onClick={() => deleteNode(selectedNode.id)}
-                >
-                  Remove node
-                </button>
-                <button
-                  type="button"
-                  className={`w-full text-xs btn-outline ${connecting === selectedNode.id ? 'border-purple-400 text-purple-700' : ''}`}
-                  onClick={() => setConnecting(connecting === selectedNode.id ? null : selectedNode.id)}
-                >
-                  {connecting === selectedNode.id ? 'Click target node…' : 'Connect →'}
-                </button>
+
+                <div className="flex gap-2 pt-1 border-t border-slate-100">
+                  <button
+                    type="button"
+                    className="text-xs text-slate-500 hover:text-accent"
+                    onClick={() => setConnecting(connecting === selectedNode.id ? null : selectedNode.id)}
+                  >
+                    {connecting === selectedNode.id ? '✕ Cancel connect' : '→ Connect to…'}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-red-400 hover:text-red-600 ml-auto"
+                    onClick={() => deleteNode(selectedNode.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -519,52 +653,124 @@ export function WorkflowDesignerPage() {
       )}
 
       {activeTab === 'history' && (
-        <div className="admin-section">
-          <h2 className="admin-section-title">Version history</h2>
-          <p className="text-sm text-slate-600">
-            Published versions are immutable. In-flight records complete on their started version.
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Version</th>
-                  <th>Published at</th>
-                  <th>Published by</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {versions.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="text-center text-slate-400 py-8">
-                      No published versions yet. Click "Publish" to create the first one.
-                    </td>
+        <div className="space-y-4">
+          {/* Published versions summary */}
+          <div className="content-card">
+            <h2 className="admin-section-title mb-1">Published versions</h2>
+            <p className="text-xs text-slate-400 mb-3">Published workflows are immutable. In-flight records complete on their started version.</p>
+            {versions.length === 0 ? (
+              <p className="text-sm text-slate-400">No published versions yet. Click &quot;Publish&quot; to create the first one.</p>
+            ) : (
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                    <th className="py-2 pr-4">Version</th>
+                    <th className="py-2 pr-4">Published at</th>
+                    <th className="py-2 pr-4">Published by</th>
+                    <th className="py-2">Actions</th>
                   </tr>
-                )}
-                {versions.map((v) => (
-                  <tr key={v.version}>
-                    <td>
-                      <span className="font-mono font-semibold text-primary">v{v.version}</span>
-                      {v.version === workflow?.currentVersion && (
-                        <span className="ml-2 text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full">current</span>
+                </thead>
+                <tbody>
+                  {versions.map((v) => (
+                    <tr key={v.version} className="border-b border-slate-100">
+                      <td className="py-2 pr-4 font-mono font-bold">v{v.version}</td>
+                      <td className="py-2 pr-4 text-slate-500">{v.publishedAt}</td>
+                      <td className="py-2 pr-4 text-slate-500">{v.publishedBy}</td>
+                      <td className="py-2">
+                        <span className="text-xs text-green-600 font-medium">Active</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Instance run history */}
+          <div className="content-card">
+            <h2 className="admin-section-title mb-3">Instance run history</h2>
+            {instances.length === 0 ? (
+              <p className="text-sm text-slate-400">
+                No instances yet. Trigger a workflow by changing a {workflow?.entityType ?? 'record'} status to <code className="text-xs bg-slate-100 px-1 rounded">{workflow?.triggerCondition ?? 'trigger condition'}</code>.
+              </p>
+            ) : (
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                    <th className="py-2 pr-4">Instance ID</th>
+                    <th className="py-2 pr-4">Entity</th>
+                    <th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-4">Current node</th>
+                    <th className="py-2 pr-4">Started</th>
+                    <th className="py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {instances.map((inst) => (
+                    <>
+                      <tr key={inst.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="py-2 pr-4 font-mono text-xs text-slate-500">{inst.id.slice(0, 8)}…</td>
+                        <td className="py-2 pr-4 text-xs">{inst.entityType}<br /><span className="text-slate-400">{inst.entityId.slice(0, 8)}…</span></td>
+                        <td className="py-2 pr-4">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            inst.status === 'RUNNING' ? 'bg-blue-100 text-blue-700' :
+                            inst.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                            inst.status === 'FAILED' ? 'bg-red-100 text-red-700' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>{inst.status}</span>
+                        </td>
+                        <td className="py-2 pr-4 text-xs text-slate-500">{inst.currentNodeId ?? '—'}</td>
+                        <td className="py-2 pr-4 text-xs text-slate-500">
+                          {inst.startedAt ? new Date(inst.startedAt).toLocaleString() : '—'}
+                        </td>
+                        <td className="py-2">
+                          <button
+                            type="button"
+                            className="btn-link text-xs"
+                            onClick={() => {
+                              if (expandedInstance === inst.id) {
+                                setExpandedInstance(null);
+                              } else {
+                                setExpandedInstance(inst.id);
+                                if (!nodeTrace[inst.id]) {
+                                  api<unknown[]>(`/admin/workflows/${id}/instances/${inst.id}/nodes`)
+                                    .then((trace) => setNodeTrace((prev) => ({ ...prev, [inst.id]: trace })))
+                                    .catch(() => {});
+                                }
+                              }
+                            }}
+                          >
+                            {expandedInstance === inst.id ? 'Hide trace' : 'Show trace'}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedInstance === inst.id && (
+                        <tr key={`${inst.id}-trace`}>
+                          <td colSpan={6} className="py-3 px-4 bg-slate-50">
+                            {!nodeTrace[inst.id] ? (
+                              <p className="text-xs text-slate-400">Loading trace…</p>
+                            ) : (nodeTrace[inst.id] as Record<string, unknown>[]).length === 0 ? (
+                              <p className="text-xs text-slate-400">No node history yet.</p>
+                            ) : (
+                              <div className="flex gap-2 flex-wrap">
+                                {(nodeTrace[inst.id] as Record<string, unknown>[]).map((h, i) => (
+                                  <div key={String(h.id ?? i)} className="bg-white border border-slate-200 rounded px-3 py-1.5 text-xs">
+                                    <span className="font-medium">{String(h.action ?? h.nodeId ?? 'Node')}</span>
+                                    {h.comment && <span className="ml-2 text-slate-400">— {String(h.comment)}</span>}
+                                    <br />
+                                    <span className="text-slate-400">{h.createdAt ? new Date(String(h.createdAt)).toLocaleTimeString() : ''}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="text-slate-600 text-sm">{new Date(v.publishedAt).toLocaleString()}</td>
-                    <td className="text-slate-600 text-sm">{v.publishedBy}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-link text-sm"
-                        onClick={() => api(`/admin/workflows/${id}/versions/${v.version}/restore`, { method: 'POST' }).then(() => setMsg(`Restored to v${v.version}`))}
-                      >
-                        Restore
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}

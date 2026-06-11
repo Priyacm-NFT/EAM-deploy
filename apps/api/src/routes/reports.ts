@@ -4,6 +4,8 @@ import {
   db,
   reportSubjects,
   reportDefinitions,
+  reportDefinitionVersions,
+  reportFavourites,
   reportSchedules,
   reportRunLog,
   reportPermissions,
@@ -89,12 +91,37 @@ export async function reportRoutes(app: FastifyInstance) {
         name?: string;
         definition?: ReportDefinitionBody;
         isPublic?: boolean;
+        changeNote?: string;
       };
+
+      // Fetch current row so we can snapshot it before overwriting
+      const [current] = await db
+        .select()
+        .from(reportDefinitions)
+        .where(and(eq(reportDefinitions.id, id), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+        .limit(1);
+      if (!current) return reply.status(404).send({ error: 'Report not found' });
+
+      // If definition is changing, snapshot the old one first
+      if (body.definition) {
+        await db.insert(reportDefinitionVersions).values({
+          reportId: id,
+          tenantId: current.tenantId,
+          version: current.version,
+          definition: current.definition,
+          changedBy: request.user!.id,
+          changeNote: body.changeNote ?? null,
+        });
+      }
+
       const [row] = await db
         .update(reportDefinitions)
         .set({
           ...(body.name ? { name: body.name } : {}),
-          ...(body.definition ? { definition: body.definition as Record<string, unknown> } : {}),
+          ...(body.definition ? {
+            definition: body.definition as Record<string, unknown>,
+            version: current.version + 1,
+          } : {}),
           ...(body.isPublic !== undefined ? { isPublic: body.isPublic } : {}),
           updatedAt: new Date(),
         })
@@ -105,7 +132,6 @@ export async function reportRoutes(app: FastifyInstance) {
           ),
         )
         .returning();
-      if (!row) return reply.status(404).send({ error: 'Report not found' });
       return row;
     },
   );
@@ -342,6 +368,223 @@ export async function reportRoutes(app: FastifyInstance) {
     async (request) => {
       const { getBiConnectionInfo } = await import('@eam/reporting-engine');
       return getBiConnectionInfo(request.user!.tenantId);
+    },
+  );
+
+  // ─── Version History ────────────────────────────────────────────────────────
+
+  app.get(
+    '/reports/definitions/:id/versions',
+    { ...authGuard, schema: { tags: ['Reports'], summary: 'List definition version history' } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const [report] = await db
+        .select({ id: reportDefinitions.id })
+        .from(reportDefinitions)
+        .where(and(eq(reportDefinitions.id, id), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+        .limit(1);
+      if (!report) return reply.status(404).send({ error: 'Report not found' });
+
+      return db
+        .select()
+        .from(reportDefinitionVersions)
+        .where(eq(reportDefinitionVersions.reportId, id))
+        .orderBy(desc(reportDefinitionVersions.createdAt))
+        .limit(50);
+    },
+  );
+
+  app.post(
+    '/reports/definitions/:id/restore/:version',
+    { ...manageGuard, schema: { tags: ['Reports'], summary: 'Restore a definition version' } },
+    async (request, reply) => {
+      const { id, version } = request.params as { id: string; version: string };
+      const vNum = parseInt(version, 10);
+
+      const [snap] = await db
+        .select()
+        .from(reportDefinitionVersions)
+        .where(
+          and(
+            eq(reportDefinitionVersions.reportId, id),
+            eq(reportDefinitionVersions.version, vNum),
+          ),
+        )
+        .limit(1);
+      if (!snap) return reply.status(404).send({ error: 'Version not found' });
+
+      // Snapshot current before restoring
+      const [current] = await db
+        .select()
+        .from(reportDefinitions)
+        .where(and(eq(reportDefinitions.id, id), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+        .limit(1);
+      if (!current) return reply.status(404).send({ error: 'Report not found' });
+
+      await db.insert(reportDefinitionVersions).values({
+        reportId: id,
+        tenantId: current.tenantId,
+        version: current.version,
+        definition: current.definition,
+        changedBy: request.user!.id,
+        changeNote: `Before restore to v${vNum}`,
+      });
+
+      const [row] = await db
+        .update(reportDefinitions)
+        .set({
+          definition: snap.definition,
+          version: current.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(reportDefinitions.id, id), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+        .returning();
+      return row;
+    },
+  );
+
+  // ─── Favourites & Pins ──────────────────────────────────────────────────────
+
+  app.get(
+    '/reports/favourites',
+    { ...authGuard, schema: { tags: ['Reports'], summary: 'List favourited reports for current user' } },
+    async (request) => {
+      const userId = request.user!.id;
+      const favs = await db
+        .select()
+        .from(reportFavourites)
+        .where(eq(reportFavourites.userId, userId));
+
+      const ids = favs.map((f) => f.reportId);
+      if (ids.length === 0) return [];
+
+      const reports = await Promise.all(
+        ids.map((rid) =>
+          db.select().from(reportDefinitions)
+            .where(and(eq(reportDefinitions.id, rid), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+            .limit(1)
+            .then((r) => r[0] ?? null),
+        ),
+      );
+      return reports.filter(Boolean).map((r) => ({
+        ...r,
+        pinned: favs.find((f) => f.reportId === r!.id)?.pinned ?? false,
+      }));
+    },
+  );
+
+  app.post(
+    '/reports/definitions/:id/favourite',
+    { ...authGuard, schema: { tags: ['Reports'], summary: 'Favourite a report' } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { pinned } = (request.body as { pinned?: boolean }) ?? {};
+      const userId = request.user!.id;
+
+      const [existing] = await db
+        .select()
+        .from(reportFavourites)
+        .where(and(eq(reportFavourites.reportId, id), eq(reportFavourites.userId, userId)))
+        .limit(1);
+
+      if (existing) {
+        const [row] = await db
+          .update(reportFavourites)
+          .set({ pinned: pinned ?? existing.pinned })
+          .where(eq(reportFavourites.id, existing.id))
+          .returning();
+        return row;
+      }
+
+      const [row] = await db
+        .insert(reportFavourites)
+        .values({ reportId: id, userId, pinned: pinned ?? false })
+        .returning();
+      return reply.status(201).send(row);
+    },
+  );
+
+  app.delete(
+    '/reports/definitions/:id/favourite',
+    { ...authGuard, schema: { tags: ['Reports'], summary: 'Remove favourite' } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      await db
+        .delete(reportFavourites)
+        .where(
+          and(
+            eq(reportFavourites.reportId, id),
+            eq(reportFavourites.userId, request.user!.id),
+          ),
+        );
+      return reply.status(204).send();
+    },
+  );
+
+  // ─── Run with parameter overrides ──────────────────────────────────────────
+  // POST /reports/definitions/:id/run already exists above.
+  // This PATCH-style route lets callers pass ad-hoc filter overrides without
+  // saving them — useful for prompted-filter dialogs in the UI.
+
+  app.post(
+    '/reports/definitions/:id/run-with-params',
+    { ...authGuard, schema: { tags: ['Reports'], summary: 'Run report with parameter overrides' } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = (request.body ?? {}) as {
+        format?: string;
+        skipIfEmpty?: boolean;
+        paramFilters?: Array<{ field: string; operator: string; value?: unknown }>;
+      };
+
+      const [report] = await db
+        .select()
+        .from(reportDefinitions)
+        .where(and(eq(reportDefinitions.id, id), eq(reportDefinitions.tenantId, request.user!.tenantId)))
+        .limit(1);
+      if (!report) return reply.status(404).send({ error: 'Report not found' });
+
+      // Merge paramFilters over the saved definition filters
+      const savedDef = report.definition as ReportDefinitionBody;
+      const mergedDef: ReportDefinitionBody = {
+        ...savedDef,
+        filters: [
+          ...(savedDef.filters ?? []),
+          ...(body.paramFilters ?? []),
+        ],
+      };
+
+      // Temporarily write merged def to a throwaway run (no DB update)
+      try {
+        const { executeReportQuery, ReportQueryBuilder, outputFormatToExport, formatReportOutput, buildReportOutputKey, uploadReportOutput, presignReportDownload } = await import('@eam/reporting-engine');
+        const [subject] = await db.select().from(reportSubjects).where(eq(reportSubjects.id, report.subjectId)).limit(1);
+        if (!subject) return reply.status(400).send({ error: 'Report subject not found' });
+
+        const builder = new ReportQueryBuilder();
+        const safeQuery = builder.buildQuery(subject.name, request.user!.tenantId, {
+          fields: mergedDef.fields,
+          filters: mergedDef.filters as import('@eam/reporting-engine').ReportFilter[],
+          groupBy: mergedDef.groupBy,
+          orderBy: mergedDef.orderBy,
+        });
+
+        const rows = await executeReportQuery(safeQuery.sql, safeQuery.params, 5000);
+
+        if ((body.skipIfEmpty ?? false) && rows.length === 0) {
+          return reply.status(204).send();
+        }
+
+        const fmt = outputFormatToExport(body.format ?? 'PDF');
+        const formatted = await formatReportOutput(rows, fmt, report.name);
+        const runId = `param-${Date.now()}`;
+        const key = buildReportOutputKey(request.user!.tenantId, id, runId, formatted.extension);
+        await uploadReportOutput(key, formatted.body, formatted.contentType);
+        const downloadUrl = await presignReportDownload(key);
+        return { status: 'COMPLETED', rowCount: rows.length, downloadUrl };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return reply.status(400).send({ error: msg });
+      }
     },
   );
 }

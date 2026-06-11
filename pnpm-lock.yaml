@@ -442,7 +442,13 @@ importers:
       ioredis:
         specifier: ^5.4.2
         version: 5.10.1
+      nodemailer:
+        specifier: ^6.9.16
+        version: 6.10.1
     devDependencies:
+      '@types/nodemailer':
+        specifier: ^6.4.17
+        version: 6.4.23
       typescript:
         specifier: ~5.4.5
         version: 5.4.5

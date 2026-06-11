@@ -148,16 +148,17 @@ export function PMFormPage() {
           </FormField>
         </div>
 
-        <FormActions>
+        <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
+          <button type="button" className="btn-outline !w-auto px-6" onClick={() => navigate('/pm')}>Cancel</button>
           <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
             {saving ? 'Creating…' : 'Create PM Master'}
           </button>
-          <button type="button" className="btn-link" onClick={() => navigate('/pm')}>Cancel</button>
-        </FormActions>
+        </div>
       </form>
     </IdentityPageLayout>
   );
 }
+
 
 
 

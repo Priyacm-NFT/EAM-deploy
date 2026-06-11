@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 
 interface Notification {
@@ -11,21 +12,104 @@ interface Notification {
   entityId?: string;
 }
 
+// Entity type → route prefix mapping
+const ENTITY_ROUTES: Record<string, string> = {
+  ChatMessage:    '/chat',
+  WorkOrder:      '/work-orders',
+  Asset:          '/assets',
+  ServiceRequest: '/service-requests',
+  Permit:         '/permits',
+  PM:             '/pm',
+};
+
+// P0-8: polling interval — 30s standard, 15s when tab is visible
+const POLL_INTERVAL_VISIBLE = 15_000;
+const POLL_INTERVAL_HIDDEN  = 60_000;
+
 export function NotificationBell() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const ref = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function load() {
     api<Notification[]>('/notifications').then(setNotifications).catch(() => {});
   }
 
+  // ── P0-8: SSE streaming + polling fallback ─────────────────────────────────
+  // Try SSE first. If EventSource isn't supported or the connection drops,
+  // fall back to interval polling so notifications always arrive.
   useEffect(() => {
-    load();
-    const t = setInterval(load, 30000); // poll every 30s
-    return () => clearInterval(t);
+    load(); // initial load
+
+    const API_URL = (import.meta as Record<string, unknown>).env
+      ? String((import.meta as Record<string, { VITE_API_URL?: string }>).env?.VITE_API_URL ?? 'http://localhost:3000')
+      : 'http://localhost:3000';
+
+    let sseConnected = false;
+
+    function startPolling() {
+      if (pollRef.current) return; // already polling
+      const interval = document.hidden ? POLL_INTERVAL_HIDDEN : POLL_INTERVAL_VISIBLE;
+      pollRef.current = setInterval(load, interval);
+    }
+
+    function stopPolling() {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    }
+
+    // Attempt SSE connection
+    try {
+      const token = localStorage.getItem('eam_access_token');
+      // SSE with auth via query param (EventSource doesn't support headers)
+      const url = `${API_URL}/notifications/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      const es = new EventSource(url);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        sseConnected = true;
+        stopPolling(); // SSE is working, don't need polling
+      };
+
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data) as { type: string; count?: number };
+          if (data.type === 'unread_count') {
+            // Refresh full list when we know something changed
+            load();
+          }
+        } catch { /* ignore parse errors */ }
+      };
+
+      es.onerror = () => {
+        sseConnected = false;
+        es.close();
+        startPolling(); // SSE failed — fall back to polling
+      };
+    } catch {
+      // EventSource not available (unlikely in modern browsers) — use polling
+      startPolling();
+    }
+
+    // Adjust poll frequency on visibility change
+    const onVisibility = () => {
+      if (!sseConnected) {
+        stopPolling();
+        startPolling(); // restarts with correct interval for current visibility
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      eventSourceRef.current?.close();
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
+  // Close panel on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
@@ -34,14 +118,41 @@ export function NotificationBell() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  async function handleNotificationClick(n: Notification) {
+    // Mark as read first
+    if (!n.isRead) await markRead(n.id);
+
+    // Navigate to the entity
+    if (n.entityType && n.entityId) {
+      const basePath = ENTITY_ROUTES[n.entityType];
+      if (basePath) {
+        setOpen(false);
+        if (n.entityType === 'ChatMessage') {
+          // For chat messages, navigate to chat with the sender
+          navigate('/chat');
+        } else {
+          navigate(`${basePath}/${n.entityId}`);
+        }
+        return;
+      }
+    }
+    // No entity — just mark read
+  }
+
   async function markRead(id: string) {
     await api(`/notifications/${id}/read`, { method: 'POST' });
     setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, isRead: true } : n));
   }
-
   async function markAllRead() {
-    await Promise.all(notifications.filter((n) => !n.isRead).map((n) => api(`/notifications/${n.id}/read`, { method: 'POST' })));
+    await api('/notifications/read-all', { method: 'POST' });
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  }
+
+  // P0-8: delete a single notification
+  async function deleteNotification(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    await api(`/notifications/${id}`, { method: 'DELETE' }).catch(() => {});
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
   }
 
   const unread = notifications.filter((n) => !n.isRead).length;
@@ -98,6 +209,7 @@ export function NotificationBell() {
             <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)' }}>
               Notifications {unread > 0 && <span style={{ color: 'var(--color-text-secondary)', fontWeight: 400 }}>({unread} unread)</span>}
             </span>
+            {/* P0-8: mark all read button */}
             {unread > 0 && (
               <button type="button" onClick={markAllRead} style={{ fontSize: 12, color: 'var(--color-text-info)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                 Mark all read
@@ -114,17 +226,17 @@ export function NotificationBell() {
               notifications.slice(0, 20).map((n) => (
                 <div
                   key={n.id}
-                  onClick={() => !n.isRead && markRead(n.id)}
+                  onClick={() => handleNotificationClick(n)}
                   style={{
                     padding: '12px 16px',
                     borderBottom: '0.5px solid var(--color-border-tertiary)',
-                    cursor: n.isRead ? 'default' : 'pointer',
+                    cursor: 'pointer',
                     background: n.isRead ? 'transparent' : 'var(--color-background-info)',
                     display: 'flex', gap: 10, alignItems: 'flex-start',
                   }}
                 >
                   <div style={{
-                    width: 8, height: 8, borderRadius: '50',
+                    width: 8, height: 8, borderRadius: '50%',
                     background: n.isRead ? 'transparent' : '#378ADD',
                     flexShrink: 0, marginTop: 5,
                   }} />
@@ -135,6 +247,20 @@ export function NotificationBell() {
                       {new Date(n.createdAt).toLocaleString()}
                     </p>
                   </div>
+                  {/* P0-8: delete button */}
+                  <button
+                    type="button"
+                    title="Dismiss"
+                    onClick={(e) => deleteNotification(n.id, e)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--color-text-secondary)', fontSize: 14,
+                      padding: '0 2px', lineHeight: 1, flexShrink: 0,
+                      opacity: 0.6,
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
               ))
             )}

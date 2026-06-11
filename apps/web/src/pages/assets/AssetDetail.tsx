@@ -3,8 +3,9 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
+import { AttachmentPanel } from '../../components/AttachmentPanel.js';
 
-type Tab = 'overview' | 'meters' | 'workorders' | 'kpis' | 'history';
+type Tab = 'overview' | 'meters' | 'workorders' | 'kpis' | 'history' | 'attachments';
 
 interface Asset {
   id: string; assetNum: string; description: string; status: string;
@@ -18,7 +19,15 @@ interface Asset {
 
 interface Meter { id: string; meterName: string; meterType: string; uom: string; currentReading: string | null }
 interface WorkOrder { id: string; woNum: string; description: string; status: string; priority: string; targetFinishDate: string | null }
-interface Kpis { mtbf: number; mttr: number; availabilityPct: number; totalDowntimeHours: number; totalCost: number; ageYears: number }
+interface Kpis {
+  mtbfHours: number | null;
+  mttrHours: number | null;
+  availabilityPct: number | null;
+  totalDowntimeHours: number;
+  totalMaintenanceCost: number;
+  ageDays: number | null;
+  cmCount: number;
+}
 interface MoveHistory { id: string; fromLocation: string | null; toLocation: string | null; movedAt: string; notes: string | null }
 
 const STATUS_PILL: Record<string, string> = {
@@ -47,6 +56,8 @@ export function AssetDetailPage() {
   const [readingValue, setReadingValue] = useState('');
   const [readingDate, setReadingDate] = useState(new Date().toISOString().slice(0, 10));
   const [savingReading, setSavingReading] = useState(false);
+  const [showMeterForm, setShowMeterForm] = useState(false);
+  const [meterForm, setMeterForm] = useState({ meterName: '', meterType: 'CONTINUOUS', uom: '' });
 
   useEffect(() => {
     if (!id) return;
@@ -54,7 +65,9 @@ export function AssetDetailPage() {
       .then((a) => { setAsset(a); setCustomData((a.customData as Record<string, unknown>) ?? {}); })
       .catch((e) => { setError(String(e)); setLoadFailed(true); });
     api<Meter[]>(`/assets/${id}/meters`).then(setMeters).catch(() => {});
-    api<WorkOrder[]>(`/work-orders?assetId=${id}`).then(setWorkOrders).catch(() => {});
+    api<{ data: WorkOrder[] } | WorkOrder[]>(`/work-orders?assetId=${id}`)
+      .then((r) => setWorkOrders(Array.isArray(r) ? r : r.data ?? []))
+      .catch(() => {});
     api<Kpis>(`/assets/${id}/kpis`).then(setKpis).catch(() => {});
     api<MoveHistory[]>(`/assets/${id}/move-history`).then(setHistory).catch(() => {});
     api<{ dataUrl: string }>(`/assets/${id}/qrcode`).then((r) => setQrData(r.dataUrl)).catch(() => {});
@@ -107,6 +120,7 @@ export function AssetDetailPage() {
     { id: 'workorders', label: `Work Orders (${workOrders.length})` },
     { id: 'kpis', label: 'KPIs' },
     { id: 'history', label: 'Move History' },
+    { id: 'attachments', label: 'Attachments' },
   ];
 
   return (
@@ -126,6 +140,7 @@ export function AssetDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Link to={`/chat?context=Asset&contextId=${id}&contextLabel=${encodeURIComponent(`Asset: ${asset.assetNum}`)}`} className="btn-outline !w-auto px-4 text-sm">💬 Chat</Link>
           <Link to={`/assets/${id}/edit`} className="btn-primary !w-auto px-4 text-sm">Edit</Link>
           {qrData && (
             <a href={qrData} download={`${asset.assetNum}-qr.png`} className="btn-link text-sm">QR Code</a>
@@ -181,11 +196,33 @@ export function AssetDetailPage() {
             <button
               type="button"
               className="btn-primary !w-auto px-4 text-sm"
-              onClick={() => navigate(`/assets/${id}/meters/new`)}
+              onClick={() => setShowMeterForm((v) => !v)}
             >
               + Add meter
             </button>
           </div>
+
+          {showMeterForm && (
+            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3 mb-4">
+              <h3 className="text-sm font-semibold">New meter</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <div><label className="form-label text-xs">Name</label>
+                  <input className="form-input text-sm" value={meterForm.meterName} onChange={(e) => setMeterForm({...meterForm, meterName: e.target.value})} placeholder="Running Hours" /></div>
+                <div><label className="form-label text-xs">Type</label>
+                  <select className="form-select text-sm" value={meterForm.meterType} onChange={(e) => setMeterForm({...meterForm, meterType: e.target.value})}>
+                    <option value="CONTINUOUS">Continuous</option><option value="GAUGE">Gauge</option></select></div>
+                <div><label className="form-label text-xs">UOM</label>
+                  <input className="form-input text-sm" value={meterForm.uom} onChange={(e) => setMeterForm({...meterForm, uom: e.target.value})} placeholder="hours" /></div>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="btn-primary !w-auto px-4 text-sm" onClick={async () => {
+                  try { await api(`/assets/${id}/meters`, {method:'POST',body:JSON.stringify(meterForm)});
+                    api<Meter[]>(`/assets/${id}/meters`).then(setMeters); setShowMeterForm(false); } catch(e){setError(String(e));} }}>Save</button>
+                <button type="button" className="btn-outline text-sm" onClick={() => setShowMeterForm(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
           {meters.length === 0 ? (
             <p className="text-slate-400 text-sm">No meters defined.</p>
           ) : (
@@ -281,15 +318,20 @@ export function AssetDetailPage() {
       )}
 
       {/* KPIs tab */}
-      {tab === 'kpis' && kpis && (
-        <div className="admin-section grid grid-cols-3 gap-4">
-          {[
-            { label: 'MTBF', value: `${kpis.mtbf.toFixed(0)} hrs`, hint: 'Mean time between failures' },
-            { label: 'MTTR', value: `${kpis.mttr.toFixed(1)} hrs`, hint: 'Mean time to repair' },
-            { label: 'Availability', value: `${kpis.availabilityPct.toFixed(1)}%` },
+      {tab === 'kpis' && (
+        <div className="admin-section">
+          {!kpis ? (
+            <p className="text-slate-400 text-sm">No KPI data yet — calculated from closed Work Orders on this asset.</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-4">
+            {[
+            { label: 'MTBF', value: kpis.mtbfHours != null ? `${kpis.mtbfHours.toFixed(0)} hrs` : '—', hint: 'Mean time between failures' },
+            { label: 'MTTR', value: kpis.mttrHours != null ? `${kpis.mttrHours.toFixed(1)} hrs` : '—', hint: 'Mean time to repair' },
+            { label: 'Availability', value: kpis.availabilityPct != null ? `${kpis.availabilityPct.toFixed(1)}%` : '—' },
             { label: 'Total downtime', value: `${kpis.totalDowntimeHours.toFixed(0)} hrs` },
-            { label: 'Total maintenance cost', value: `$${kpis.totalCost.toLocaleString()}` },
-            { label: 'Asset age', value: `${kpis.ageYears.toFixed(1)} yrs` },
+            { label: 'Total maintenance cost', value: `$${kpis.totalMaintenanceCost.toLocaleString()}` },
+            { label: 'Asset age', value: kpis.ageDays != null ? `${(kpis.ageDays / 365).toFixed(1)} yrs` : '—' },
+            { label: 'CM work orders', value: `${kpis.cmCount}` },
           ].map((k) => (
             <div key={k.label} className="bg-slate-50 rounded p-4">
               <p className="text-xs text-slate-500 mb-1">{k.label}</p>
@@ -297,6 +339,8 @@ export function AssetDetailPage() {
               {k.hint && <p className="text-xs text-slate-400 mt-1">{k.hint}</p>}
             </div>
           ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -328,6 +372,13 @@ export function AssetDetailPage() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+    
+      {/* Attachments */}
+      {tab === 'attachments' && asset && (
+        <div className="admin-section">
+          <AttachmentPanel entityType="Asset" entityId={asset.id} />
         </div>
       )}
     </IdentityPageLayout>

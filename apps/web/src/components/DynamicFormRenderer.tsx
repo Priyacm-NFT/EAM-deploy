@@ -101,15 +101,17 @@ export function DynamicFormRenderer({ entityName, record, values, onChange, read
       // Load picklist values for PICKLIST fields
       const picklistFields = activeFields.filter((f) => f.fieldType === 'PICKLIST' || f.fieldType === 'MULTI_SELECT');
       if (picklistFields.length > 0) {
-        const allPicklists = await api<Array<{ id: string; name: string }>>('/admin/config/picklists');
+        const allPicklists = await api<Array<{ id: string; name: string; label: string }>>('/admin/config/picklists');
           const entries = await Promise.all(
             picklistFields.map(async (f) => {
-              // Use lookupEntity (picklist name) stored on field, fallback to name matching
-              const picklistName = f.lookupEntity ?? f.fieldKey;
+              // Case-insensitive match: lookupEntity → name, label, fieldKey
+              const lookup = (f.lookupEntity ?? f.fieldKey).toLowerCase().trim();
               const pl = allPicklists.find((p) =>
-                p.name === picklistName ||
-                p.name === f.fieldKey ||
-                p.name.endsWith(`_${f.fieldKey}`)
+                p.name.toLowerCase() === lookup ||
+                p.name.toLowerCase() === f.fieldKey.toLowerCase() ||
+                p.label.toLowerCase() === lookup ||
+                p.label.toLowerCase().replace(/\s+/g, '_') === lookup ||
+                p.name.toLowerCase().endsWith(`_${f.fieldKey.toLowerCase()}`)
               );
               if (!pl) return [f.fieldKey, []] as [string, PicklistValue[]];
               const vals = await api<PicklistValue[]>(`/admin/config/picklists/${pl.id}/values`);
@@ -265,7 +267,96 @@ export function DynamicFormRenderer({ entityName, record, values, onChange, read
           />
         );
 
-      default: // TEXT, PHONE, FORMULA, etc.
+      case 'TEXTAREA':
+        return (
+          <textarea
+            className={baseClass}
+            rows={3}
+            value={String(value)}
+            placeholder={field.placeholder ?? ''}
+            onChange={(e) => onChange(field.fieldKey, e.target.value)}
+          />
+        );
+
+      case 'INTEGER':
+        return (
+          <input
+            type="number"
+            step="1"
+            className={baseClass}
+            value={String(value)}
+            placeholder={field.placeholder ?? ''}
+            onChange={(e) => onChange(field.fieldKey, e.target.value)}
+          />
+        );
+
+      case 'DECIMAL':
+        return (
+          <input
+            type="number"
+            step="0.01"
+            className={baseClass}
+            value={String(value)}
+            placeholder={field.placeholder ?? ''}
+            onChange={(e) => onChange(field.fieldKey, e.target.value)}
+          />
+        );
+
+      case 'FORMULA':
+      case 'CALCULATED':
+        // Formula fields are always read-only — display computed value
+        return (
+          <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono">
+            {String(value || '—')}
+            <span className="ml-2 text-[10px] text-slate-400 font-sans">computed</span>
+          </p>
+        );
+
+      case 'LOOKUP': {
+        // Lookup renders as a search-select against another entity
+        const options = picklists[field.fieldKey] ?? [];
+        return options.length > 0 ? (
+          <select
+            className="form-select"
+            value={String(value)}
+            onChange={(e) => onChange(field.fieldKey, e.target.value)}
+          >
+            <option value="">— Select {field.label} —</option>
+            {options.map((o) => (
+              <option key={o.id} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            className={baseClass}
+            value={String(value)}
+            placeholder={field.placeholder ?? `Search ${field.lookupEntity ?? 'record'}…`}
+            onChange={(e) => onChange(field.fieldKey, e.target.value)}
+          />
+        );
+      }
+
+      case 'ATTACHMENT':
+        return (
+          <div className="space-y-1">
+            {value && String(value) && (
+              <p className="text-xs text-slate-500">
+                Current: <span className="font-medium">{String(value)}</span>
+              </p>
+            )}
+            <input
+              type="file"
+              className="block text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-accent/10 file:text-accent hover:file:bg-accent/20 cursor-pointer"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onChange(field.fieldKey, file.name);
+              }}
+            />
+          </div>
+        );
+
+      default: // TEXT, PHONE, etc.
         return (
           <input
             type="text"
@@ -343,3 +434,4 @@ export function DynamicFormRenderer({ entityName, record, values, onChange, read
     </div>
   );
 }
+

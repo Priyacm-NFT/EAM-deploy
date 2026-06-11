@@ -7,3 +7,5 @@ export * from './digest.js';
 export * from './rate-limit.js';
 export * from './event-bridge.js';
 export * from './trigger.js';
+export * from './smtp-crypto.js';
+export * from './smtp-transport.js';
