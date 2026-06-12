@@ -27,6 +27,12 @@ interface RetentionSummary {
   storageBytesRecoverable: number;
 }
 
+interface DocumentTypeOption {
+  id: string;
+  name: string;
+  label: string;
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -35,6 +41,7 @@ function formatBytes(bytes: number) {
 export function RetentionPoliciesPage() {
   const [candidates, setCandidates] = useState<RetentionCandidate[]>([]);
   const [summary, setSummary] = useState<RetentionSummary | null>(null);
+  const [docTypeOptions, setDocTypeOptions] = useState<DocumentTypeOption[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState('');
   const [error, setError] = useState('');
@@ -44,11 +51,13 @@ export function RetentionPoliciesPage() {
   function load() {
     api<RetentionCandidate[]>('/admin/attachments/retention/candidates').then(setCandidates).catch(() => setCandidates([]));
     api<RetentionSummary>('/admin/attachments/retention/summary').then(setSummary).catch(() => setSummary(null));
+    // Load all document types from API — not derived from candidates
+    // This ensures dropdown is always populated even when no expired files exist
+    api<DocumentTypeOption[]>('/admin/attachments/document-types').then(setDocTypeOptions).catch(() => setDocTypeOptions([]));
   }
 
   useEffect(() => { load(); }, []);
 
-  const docTypes = [...new Set(candidates.map((c) => c.documentType))].sort();
   const filtered = typeFilter ? candidates.filter((c) => c.documentType === typeFilter) : candidates;
 
   function toggleSelect(id: string) {
@@ -160,9 +169,18 @@ export function RetentionPoliciesPage() {
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
-          <select className="form-select w-48" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          {/* Dropdown loaded from /admin/attachments/document-types — always populated */}
+          <select
+            className="form-select w-56"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+          >
             <option value="">All document types</option>
-            {docTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+            {docTypeOptions.map((dt) => (
+              <option key={dt.id} value={dt.label || dt.name}>
+                {dt.label || dt.name}
+              </option>
+            ))}
           </select>
           <button type="button" className="btn-link text-sm" onClick={selectAll}>Select all visible</button>
           <button type="button" className="btn-link text-sm text-slate-500" onClick={clearSelection}>Clear selection</button>

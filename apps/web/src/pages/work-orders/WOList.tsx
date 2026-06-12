@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface WO {
   id: string; woNum: string; description: string; status: string;
@@ -55,6 +57,8 @@ export function WOListPage() {
   .catch((e) => setError(String(e)));
   }, [status, type, priority]);
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(wos, 10);
+
   return (
     <IdentityPageLayout title="Work Orders" subtitle="Corrective and preventive maintenance work">
       {error && <MessageBanner type="error" text={error} />}
@@ -104,7 +108,7 @@ export function WOListPage() {
               {wos.length === 0 ? (
                 <tr><td colSpan={8} className="py-6 text-center text-slate-400">No work orders found.</td></tr>
               ) : (
-                wos.map((wo) => (
+                paged.map((wo) => (
                   <tr key={wo.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="py-2 pr-4 font-mono text-xs"><Link to={`/work-orders/${wo.id}`} className="text-blue-600">{wo.woNum}</Link></td>
                     <td className="py-2 pr-4">{wo.description}</td>
@@ -121,6 +125,8 @@ export function WOListPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

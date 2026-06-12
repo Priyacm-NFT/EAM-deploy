@@ -6,6 +6,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface Entity {
   id: string;
@@ -30,6 +32,8 @@ export function ConfigEntityListPage() {
       e.label.toLowerCase().includes(filter.toLowerCase()) ||
       e.name.toLowerCase().includes(filter.toLowerCase()),
   );
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -60,7 +64,7 @@ export function ConfigEntityListPage() {
           </p>
         ) : (
           <ul className="divide-y divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
-            {filtered.map((e) => (
+            {paged.map((e) => (
               <li
                 key={e.id}
                 className="px-4 py-4 flex flex-wrap justify-between items-center gap-3 bg-white hover:bg-slate-50"
@@ -89,6 +93,8 @@ export function ConfigEntityListPage() {
           </ul>
         )}
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

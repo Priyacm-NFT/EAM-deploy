@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../components/identity/IdentityLayout.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { Pagination } from '../components/Pagination.js';
 
 interface ReportSubject {
   id: string;
@@ -59,6 +61,8 @@ export function StandardReportsPage() {
     filtered.filter((s) => (s.category ?? 'Work Orders') === cat),
   );
   const uncategorised = filtered.filter((s) => !allCategorised.includes(s));
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -200,6 +204,8 @@ export function StandardReportsPage() {
           </div>
         </div>
       )}
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

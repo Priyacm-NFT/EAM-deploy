@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface Storeroom {
   id: string; code: string; name: string; isActive: boolean; createdAt: string;
@@ -47,6 +49,8 @@ export function StoreroomListPage() {
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
   };
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(storerooms, 10);
 
   return (
     <IdentityPageLayout title="Storerooms" subtitle="Manage storeroom locations and inventory stores"
@@ -93,7 +97,7 @@ export function StoreroomListPage() {
           <tbody>
             {storerooms.length === 0 ? (
               <tr><td colSpan={5} className="py-8 text-center text-slate-400">No storerooms found. Create one above.</td></tr>
-            ) : storerooms.map((s) => (
+            ) : paged.map((s) => (
               <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="py-2 pr-4 font-mono text-xs text-blue-600">{s.code}</td>
                 <td className="py-2 pr-4 font-medium">{s.name}</td>
@@ -111,6 +115,8 @@ export function StoreroomListPage() {
           </tbody>
         </table>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

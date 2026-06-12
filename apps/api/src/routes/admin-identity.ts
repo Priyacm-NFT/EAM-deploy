@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray, desc } from 'drizzle-orm';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   hashPassword,
@@ -21,6 +21,7 @@ import {
   sessions,
   tenants,
   audit,
+  auditLogs,
 } from '@eam/db';
 import { requirePermission } from '../plugins/auth.js';
 import { sendEmail } from '../lib/email.js';
@@ -614,5 +615,89 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
       errors,
       skippedEmails: skipped,
     };
+  });
+
+  // ── 1. Schedule deactivation ────────────────────────────────────────────────
+  app.post('/admin/users/:id/schedule-deactivation', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { deactivateAt: string };
+    if (!body.deactivateAt) return reply.status(400).send({ error: 'deactivateAt date is required' });
+    const deactivateAt = new Date(body.deactivateAt);
+    if (isNaN(deactivateAt.getTime())) return reply.status(400).send({ error: 'Invalid date format' });
+    if (deactivateAt <= new Date()) return reply.status(400).send({ error: 'deactivateAt must be a future date' });
+    const [user] = await db.select().from(users).where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId))).limit(1);
+    if (!user) return reply.status(404).send({ error: 'User not found' });
+    if (!user.isActive) return reply.status(400).send({ error: 'User is already inactive' });
+    await (db as any).$client`UPDATE users SET deactivate_at = ${deactivateAt} WHERE id = ${id}`;
+    await audit(db, { tenantId: request.user!.tenantId, userId: request.user!.id, action: 'USER_DEACTIVATION_SCHEDULED', resource: 'users', resourceId: id, metadata: { deactivateAt: deactivateAt.toISOString() } });
+    return reply.send({ ok: true, message: `User will be deactivated on ${deactivateAt.toLocaleDateString()}`, deactivateAt: deactivateAt.toISOString() });
+  });
+
+  app.delete('/admin/users/:id/schedule-deactivation', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [user] = await db.select().from(users).where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId))).limit(1);
+    if (!user) return reply.status(404).send({ error: 'User not found' });
+    await (db as any).$client`UPDATE users SET deactivate_at = NULL WHERE id = ${id}`;
+    await audit(db, { tenantId: request.user!.tenantId, userId: request.user!.id, action: 'USER_DEACTIVATION_CANCELLED', resource: 'users', resourceId: id });
+    return reply.send({ ok: true, message: 'Scheduled deactivation cancelled' });
+  });
+
+  // ── 2. Reactivate user ───────────────────────────────────────────────────────
+  app.post('/admin/users/:id/reactivate', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [user] = await db.select().from(users).where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId))).limit(1);
+    if (!user) return reply.status(404).send({ error: 'User not found' });
+    if (user.isActive) return reply.status(400).send({ error: 'User is already active' });
+    await db.update(users).set({ isActive: true }).where(eq(users.id, id));
+    await (db as any).$client`UPDATE users SET deactivate_at = NULL WHERE id = ${id}`;
+    await audit(db, { tenantId: request.user!.tenantId, userId: request.user!.id, action: 'USER_REACTIVATED', resource: 'users', resourceId: id });
+    return reply.send({ ok: true, message: 'User reactivated successfully' });
+  });
+
+  // ── 3. GDPR delete ───────────────────────────────────────────────────────────
+  app.post('/admin/users/:id/gdpr-delete', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (id === request.user!.id) return reply.status(400).send({ error: 'You cannot delete your own account' });
+    const [user] = await db.select().from(users).where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId))).limit(1);
+    if (!user) return reply.status(404).send({ error: 'User not found' });
+    await db.update(users).set({
+      email: `deleted-${id}@gdpr.removed`,
+      username: `deleted-${id.slice(0, 8)}`,
+      displayName: 'Deleted User',
+      phone: null, department: null, employeeId: null,
+      externalId: null, mfaSecret: null, passwordHash: null, isActive: false,
+    }).where(eq(users.id, id));
+    await (db as any).$client`UPDATE users SET deleted_at = NOW() WHERE id = ${id}`;
+    await revokeAllSessions(db, id);
+    await audit(db, { tenantId: request.user!.tenantId, userId: request.user!.id, action: 'USER_GDPR_DELETED', resource: 'users', resourceId: id, metadata: { originalEmail: user.email } });
+    return reply.send({ ok: true, message: 'User data anonymised and all sessions revoked.' });
+  });
+
+  // ── Login history per user ────────────────────────────────────────────────────
+  app.get('/admin/users/:id/login-history', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { limit = '50' } = request.query as { limit?: string };
+
+    const [user] = await db
+      .select({ id: users.id, tenantId: users.tenantId })
+      .from(users)
+      .where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId)))
+      .limit(1);
+    if (!user) return reply.status(404).send({ error: 'User not found' });
+
+    // Get audit log entries for login events
+    const logs = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.resourceId, id),
+          inArray(auditLogs.action, ['LOGIN_SUCCESS', 'LOGIN_FAILED', 'LOGOUT', 'FORCE_LOGOUT', 'MFA_SUCCESS', 'MFA_FAILED'])
+        )
+      )
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(Number(limit));
+
+    return reply.send(logs);
   });
 }

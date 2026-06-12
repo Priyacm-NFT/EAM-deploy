@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface Picklist {
   id: string;
@@ -162,6 +164,8 @@ export function PicklistManagerPage() {
     setShowValueForm(true);
   }
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(picklists, 10);
+
   return (
     <IdentityPageLayout
       title="Picklist manager"
@@ -193,7 +197,7 @@ export function PicklistManagerPage() {
           )}
 
           <div className="space-y-1">
-            {picklists.map((pl) => (
+            {paged.map((pl) => (
               <div
                 key={pl.id}
                 onClick={() => setSelected(pl)}
@@ -340,6 +344,8 @@ export function PicklistManagerPage() {
           )}
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

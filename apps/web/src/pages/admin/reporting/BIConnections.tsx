@@ -8,6 +8,8 @@ import {
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
 import type { BiConnectionRow } from './report-types.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 const ADAPTERS = ['POWERBI', 'QLIK', 'TABLEAU', 'COGNOS', 'BIRT'] as const;
 
@@ -76,6 +78,8 @@ export function BIConnectionsPage() {
       setTesting(null);
     }
   };
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(connections, 10);
 
   return (
     <IdentityPageLayout
@@ -162,7 +166,7 @@ export function BIConnectionsPage() {
                   </td>
                 </tr>
               )}
-              {connections.map((c) => (
+              {paged.map((c) => (
                 <tr key={c.id}>
                   <td className="font-medium">{c.name}</td>
                   <td>{c.adapterType}</td>
@@ -218,6 +222,8 @@ export function BIConnectionsPage() {
           <BiPermissionMappingsPanel connections={connections} />
         )}
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }
@@ -277,7 +283,7 @@ function BiPermissionMappingsPanel({ connections }: { connections: Array<{ id: s
         <label className="form-label text-xs">Select connection</label>
         <select className="form-select max-w-xs text-sm" value={connId}
           onChange={(e) => { setConnId(e.target.value); }}>
-          {connections.map((c) => (
+          {paged.map((c) => (
             <option key={c.id} value={c.id}>{c.name} ({c.adapterType})</option>
           ))}
         </select>

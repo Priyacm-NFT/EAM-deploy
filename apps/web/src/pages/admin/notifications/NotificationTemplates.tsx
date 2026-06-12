@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface NotificationTemplate {
   id: string;
@@ -101,6 +103,8 @@ export function NotificationTemplatesPage() {
     setPreview(null);
     setShowCreate(true);
   }
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(templates, 10);
 
   return (
     <IdentityPageLayout
@@ -200,7 +204,7 @@ export function NotificationTemplatesPage() {
               {templates.length === 0 && (
                 <tr><td colSpan={4} className="text-center text-slate-400 py-10">No templates yet. Create one above.</td></tr>
               )}
-              {templates.map((t) => (
+              {paged.map((t) => (
                 <tr key={t.id}>
                   <td className="font-medium text-primary">{t.name}</td>
                   <td className="text-sm text-slate-600 max-w-xs truncate">{t.subjectTemplate}</td>
@@ -217,6 +221,8 @@ export function NotificationTemplatesPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

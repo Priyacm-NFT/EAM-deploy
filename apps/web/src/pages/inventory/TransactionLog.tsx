@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface Tx {
   id: string; txType: string; qty: string; totalCost: string | null;
@@ -13,13 +15,14 @@ export function TransactionLogPage() {
   const [txs, setTxs] = useState<Tx[]>([]);
   const [error, setError] = useState('');
   const [txType, setTxType] = useState('');
-  const [page] = useState(1);
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(txs, 10);
 
   useEffect(() => {
-    const params = new URLSearchParams({ page: String(page), limit: '50' });
+    const params = new URLSearchParams({ limit: '200' });
     if (txType) params.set('txType', txType);
     api<{ data: Tx[] }>(`/inventory/transactions?${params}`).then((r) => setTxs(r.data)).catch((e) => setError(String(e)));
-  }, [txType, page]);
+  }, [txType]);
 
   const TX_COLORS: Record<string, string> = {
     ISSUE: 'bg-red-50 text-red-700', RETURN: 'bg-green-50 text-green-700',
@@ -56,7 +59,7 @@ export function TransactionLogPage() {
             {txs.length === 0 ? (
               <tr><td colSpan={7} className="py-6 text-center text-slate-400">No transactions.</td></tr>
             ) : (
-              txs.map((tx) => (
+              paged.map((tx) => (
                 <tr key={tx.id} className="border-b border-slate-100">
                   <td className="py-2 pr-4 text-slate-500">{new Date(tx.txDate).toLocaleString()}</td>
                   <td className="py-2 pr-4">
@@ -73,6 +76,8 @@ export function TransactionLogPage() {
           </tbody>
         </table>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

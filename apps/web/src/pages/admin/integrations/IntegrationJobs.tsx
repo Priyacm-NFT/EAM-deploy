@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface Connection { id: string; name: string; adapterType: string; }
 
@@ -185,6 +187,8 @@ export function IntegrationJobsPage() {
   // Job type options that match the currently-selected connection
   const jobTypeOptions = getJobTypesForConnection(form.connectionId, connections);
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(connections, 10);
+
   return (
     <IdentityPageLayout
       title="Integration jobs"
@@ -221,7 +225,7 @@ export function IntegrationJobsPage() {
                   onChange={(e) => handleConnectionChange(e.target.value)}
                 >
                   <option value="">Select connection…</option>
-                  {connections.map((c) => (
+                  {paged.map((c) => (
                     <option key={c.id} value={c.id}>{c.name} ({c.adapterType})</option>
                   ))}
                 </select>
@@ -345,6 +349,8 @@ export function IntegrationJobsPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

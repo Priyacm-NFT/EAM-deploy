@@ -4,65 +4,133 @@
 
 @layer base {
   body {
-    @apply m-0 text-slate-100 font-sans antialiased;
-    background-color: #061528;
+    @apply m-0 font-sans antialiased;
+    background-color: #0a1528;
     background-image:
-      radial-gradient(ellipse 90% 60% at 50% -15%, rgba(232, 101, 10, 0.2), transparent),
-      linear-gradient(160deg, #061528 0%, #0a1f42 35%, #0f2d5e 70%, #123a72 100%);
+      radial-gradient(ellipse 80% 65% at 50% 25%, rgba(28, 58, 108, 0.42), transparent),
+      radial-gradient(ellipse 60% 50% at 8% 55%, rgba(22, 48, 92, 0.36), transparent),
+      radial-gradient(ellipse 55% 45% at 92% 65%, rgba(32, 62, 112, 0.30), transparent),
+      radial-gradient(ellipse 50% 40% at 50% 100%, rgba(18, 38, 72, 0.48), transparent),
+      radial-gradient(ellipse 35% 30% at 72% 18%, rgba(200, 110, 40, 0.07), transparent),
+      linear-gradient(165deg, #071220 0%, #0c1e38 28%, #122a4c 52%, #0e2240 78%, #081428 100%);
     background-attachment: fixed;
     min-height: 100vh;
+    color: rgba(255, 255, 255, 0.88);
   }
 
   a {
-    @apply text-accent-light hover:text-accent transition-colors;
+    color: #6aacf5;
+    transition: color 0.15s;
+  }
+  a:hover { color: #93c4f8; }
+
+  /* Inside white cards, links should be orange */
+  .auth-card a,
+  .admin-section a,
+  .content-card a {
+    color: #E8650A;
+  }
+  .auth-card a:hover,
+  .admin-section a:hover,
+  .content-card a:hover {
+    color: #c45608;
   }
 
-  input,
-  textarea,
-  select {
+  input, textarea, select {
     @apply text-slate-900 bg-white placeholder:text-slate-400;
   }
 
   input:not([type='checkbox']):not([type='radio']),
   textarea,
   select {
-    @apply border-slate-300 focus:border-accent focus:ring-accent;
+    @apply border-slate-300 focus:border-blue-500 focus:ring-blue-500;
   }
 }
 
 @layer components {
+  /* ── Auth cards ── */
   .auth-card {
-    @apply bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 p-8 w-full max-w-md;
+    @apply backdrop-blur-sm rounded-2xl shadow-2xl border border-slate-200 p-8 w-full max-w-md;
+    background: #ffffff;
   }
 
+  /* ── Content cards ── */
   .content-card {
-    @apply bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-white/15 p-6 text-primary;
+    background: rgba(255, 255, 255, 0.97);
+    @apply backdrop-blur-sm rounded-xl shadow-lg border border-white/15 p-6 text-slate-800;
   }
 
   .content-panel {
-    @apply bg-white/90 backdrop-blur-sm rounded-lg border border-white/10;
+    background: rgba(255, 255, 255, 0.95);
+    @apply backdrop-blur-sm rounded-xl border border-white/10;
   }
 
+  /* ── Buttons ── */
   .btn-primary {
-    @apply w-full bg-accent hover:bg-accent-dark text-white font-medium py-2.5 px-4 rounded-md transition-colors disabled:opacity-50 shadow-md shadow-accent/20;
+    @apply w-full text-white font-semibold py-2.5 px-4 rounded-xl transition-all disabled:opacity-50;
+    background: linear-gradient(135deg, #c45608, #E8650A);
+    box-shadow: 0 2px 12px rgba(232, 101, 10, 0.35);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #d45e0a, #f07828);
+    box-shadow: 0 4px 18px rgba(232, 101, 10, 0.45);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center border border-white/30 text-white hover:bg-white/10 font-medium py-2.5 px-4 rounded-md transition-colors;
+    @apply inline-flex items-center justify-center font-medium py-2.5 px-4 rounded-xl transition-all;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.90);
+  }
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.20);
+    color: rgba(255, 255, 255, 0.95);
   }
 
+  .btn-outline {
+    @apply inline-flex items-center justify-center font-medium py-2 px-4 rounded-xl text-sm transition-all;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.72);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .btn-outline:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: rgba(255, 255, 255, 0.90);
+  }
+
+  /* Light surface btn-outline (for white panels) */
+  .btn-outline-light {
+    @apply inline-flex items-center justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 font-medium py-2 px-4 rounded-xl text-sm transition-all shadow-sm;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center text-red-400 hover:text-red-300 font-medium py-1.5 px-3 rounded-lg text-sm transition-colors;
+  }
+  .btn-danger:hover { background: rgba(220, 38, 38, 0.1); }
+
+  .btn-link {
+    color: #E8650A;
+    @apply font-medium text-sm transition-colors;
+  }
+  .btn-link:hover { color: #c45608; }
+
+  /* ── Forms ── */
   .form-label {
-    @apply block text-sm font-medium text-slate-700 mb-1;
+    @apply block text-sm font-medium mb-1;
+    color: rgba(255, 255, 255, 0.55);
   }
 
   .form-input {
-    @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent;
+    @apply w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500;
+    border-color: #d1d5db;
   }
 
   .form-select {
     @apply form-input cursor-pointer;
   }
 
+  /* ── Admin / content pages ── */
   .admin-page {
     @apply w-full space-y-5;
   }
@@ -80,115 +148,266 @@
   }
 
   .admin-table th {
-    @apply text-left text-slate-400 font-semibold text-[0.7rem] uppercase tracking-wider py-3 px-3 border-b border-slate-100;
+    @apply text-left font-semibold text-[0.68rem] uppercase tracking-wider py-3 px-3 border-b border-slate-100;
+    color: rgba(100, 116, 139, 0.9);
   }
 
   .admin-table td {
     @apply py-3 px-3 border-b border-slate-50 text-slate-700 align-middle;
   }
 
-  .admin-table tr:last-child td {
-    @apply border-b-0;
-  }
+  .admin-table tr:last-child td { @apply border-b-0; }
+  .admin-table tr:hover td { @apply bg-blue-50/40; }
 
-  .admin-table tr:hover td {
-    @apply bg-slate-50;
-  }
-
-  .btn-outline {
-    @apply inline-flex items-center justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 font-medium py-2 px-4 rounded-lg text-sm transition-all shadow-sm;
-  }
-
-  .btn-danger {
-    @apply inline-flex items-center justify-center text-red-500 hover:text-red-600 hover:bg-red-50 font-medium py-1.5 px-3 rounded-lg text-sm transition-colors;
-  }
-
-  .btn-link {
-    @apply text-accent hover:text-accent-dark font-medium text-sm transition-colors;
-  }
-
+  /* ── Page typography ── */
   .page-title {
-    @apply text-2xl font-bold text-white mb-1;
+    @apply text-2xl font-bold mb-1;
+    color: rgba(255, 255, 255, 0.97);
   }
 
   .page-subtitle {
-    @apply text-sm text-white/55 mb-0;
+    @apply text-sm mb-0;
+    color: rgba(255, 255, 255, 0.38);
   }
 
+  /* ── Logout / auth nav button ── */
   .app-btn-logout {
-    @apply text-sm font-medium text-white/80 hover:text-white border border-white/20 hover:border-white/40 rounded-lg px-4 py-2 transition-all bg-transparent cursor-pointer no-underline inline-flex items-center;
+    @apply text-sm font-medium rounded-xl px-4 py-2 transition-all inline-flex items-center no-underline cursor-pointer;
+    color: rgba(255, 255, 255, 0.70);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+  }
+  .app-btn-logout:hover {
+    color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.07);
   }
 }
 
-  .app-shell {
-    @apply min-h-screen flex;
-  }
+/* ── App shell layout ── */
+.app-shell {
+  @apply min-h-screen flex;
+}
 
-  .app-sidebar {
-    @apply w-[14rem] shrink-0 bg-primary-dark/95 border-r border-white/10 flex flex-col py-5 px-3 gap-4 sticky top-0 h-screen overflow-y-auto;
-  }
+/* ── Sidebar ── */
+.app-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(5, 11, 22, 0.97) 0%, rgba(7, 14, 28, 0.95) 45%, rgba(9, 17, 34, 0.93) 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
 
-  .app-sidebar-logo {
-    @apply text-white font-bold flex items-start gap-2 no-underline hover:text-white px-2;
-  }
+.app-sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-decoration: none;
+  color: #fff;
+  flex-shrink: 0;
+}
+.app-sidebar-logo:hover { color: #fff; }
 
-  .app-sidebar-logo-text {
-    @apply text-xs font-bold leading-snug tracking-wide uppercase;
-  }
+.app-sidebar-logo-text {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  color: #fff;
+}
 
-  .app-logo-mark {
-    @apply inline-block w-2 h-2 rounded-full bg-accent shadow shadow-accent/40;
-  }
+.app-sidebar-logo-sub {
+  font-size: 10px;
+  color: rgba(106, 172, 245, 0.55);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 
-  .app-sidebar-nav {
-    @apply flex flex-col gap-1;
-  }
+.app-logo-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #c45608, #E8650A);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(232, 101, 10, 0.45);
+}
 
-  .app-sidebar-link {
-    @apply text-white/75 hover:text-white text-sm font-medium py-2.5 px-3 rounded-md transition-colors no-underline border-l-[3px] border-transparent;
-  }
+.app-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 10px 0;
+}
 
-  .app-sidebar-link-active {
-    @apply text-white border-accent bg-white/10;
-  }
+.app-sidebar-section-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.30);
+  padding: 10px 10px 4px;
+}
 
-  .app-sidebar-divider {
-    @apply border-t border-white/10 mx-2;
-  }
+.app-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.58);
+  text-decoration: none;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.app-sidebar-link:hover {
+  background: rgba(15, 110, 69, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
 
-  .app-sidebar-section {
-    @apply text-[0.65rem] font-semibold uppercase tracking-wider text-white/45 px-3 pt-1 mb-0;
-  }
+.app-sidebar-link-active {
+  background: rgba(232, 101, 10, 0.20) !important;
+  color: #f5a855 !important;
+  border-color: rgba(232, 101, 10, 0.30) !important;
+}
 
-  .app-main {
-    @apply flex-1 flex flex-col min-w-0 min-h-screen;
-  }
+.app-sidebar-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: 8px 12px;
+}
 
-  .app-topbar {
-    @apply sticky top-0 z-20 bg-primary-dark/95 backdrop-blur-md border-b border-white/10 px-6 flex items-center justify-between gap-4 min-h-[3.75rem] shadow-lg;
-  }
+/* ── Collapsible section group button ── */
+.app-sidebar-group-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.app-sidebar-group-btn:hover { color: rgba(255, 255, 255, 0.85); }
+.app-sidebar-group-btn-active { color: rgba(255, 255, 255, 0.95) !important; }
 
-  .app-topbar-title {
-    @apply text-sm font-bold tracking-wide uppercase text-white m-0;
-  }
+.app-sidebar-sub-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 16px;
+  padding-top: 2px;
+  padding-bottom: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  margin-left: 18px;
+}
 
-  .app-topbar-minimal {
-    @apply justify-end;
-  }
+/* ── Main area ── */
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
 
-  .app-topbar-actions {
-    @apply flex items-center gap-3 shrink-0;
-  }
+/* ── Topbar ── */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: linear-gradient(90deg, rgba(10, 20, 40, 0.91) 0%, rgba(13, 26, 48, 0.89) 50%, rgba(10, 20, 40, 0.91) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+}
 
-  .app-topbar-actions-only {
-    @apply w-full justify-end;
-  }
+.app-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
-  .app-content {
-    @apply flex-1 p-6 w-full;
-  }
+/* ── Content area ── */
+.app-content {
+  flex: 1;
+  padding: 24px;
+  width: 100%;
+}
 
+/* ── Notification bell wrapper ── */
+.notification-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.75);
+  transition: all 0.15s;
+  position: relative;
+}
+.notification-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.92);
+}
 
+/* ── Status pills ── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
 
-
-
+/* ── Dashboard stat cards ── */
+.stat-card {
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: 14px 14px 0 0;
+}

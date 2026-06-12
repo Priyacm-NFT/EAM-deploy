@@ -32,6 +32,7 @@ import { globalEventBus } from '@eam/shared';
 import { smtpConfigurations } from '@eam/db';
 import { and, eq } from 'drizzle-orm';
 import { WorkflowEngine } from '@eam/workflow-engine';
+import { startDeactivationScheduler } from './lib/deactivation-scheduler.js';
 
 export { setupSocketIO };
 
@@ -133,6 +134,7 @@ export async function buildApp() {
       console.error('[job-cron] Error:', err instanceof Error ? err.message : err);
     }
   }, JOB_CRON_INTERVAL_MS);
+  startDeactivationScheduler();
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 

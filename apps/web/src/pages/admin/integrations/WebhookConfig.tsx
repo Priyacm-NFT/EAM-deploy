@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 // ── These match the actual DB columns ──────────────────────────────────────────
 interface Webhook {
@@ -160,6 +162,8 @@ export function WebhookConfigPage() {
     RETRYING: 'bg-amber-100 text-amber-700',
   };
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(webhooks, 10);
+
   return (
     <IdentityPageLayout
       title="Webhook subscriptions"
@@ -235,7 +239,7 @@ export function WebhookConfigPage() {
               {webhooks.length === 0 && (
                 <tr><td colSpan={5} className="text-center text-slate-400 py-10">No webhook subscriptions yet.</td></tr>
               )}
-              {webhooks.map((wh) => (
+              {paged.map((wh) => (
                 <>
                   <tr key={wh.id}>
                     <td className="font-mono text-xs text-slate-600 max-w-[220px] truncate" title={wh.url}>{wh.url}</td>
@@ -338,6 +342,8 @@ export function WebhookConfigPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

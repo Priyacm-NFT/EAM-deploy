@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-sns": "^3.1066.0",
     "@eam/attachment-service": "workspace:*",
     "@eam/auth": "workspace:*",
     "@eam/config-engine": "workspace:*",
@@ -30,20 +31,21 @@
     "drizzle-orm": "^0.38.3",
     "fastify": "^5.2.0",
     "ioredis": "^5.4.2",
+    "ldapjs": "^3.0.7",
     "nodemailer": "^6.9.16",
     "openid-client": "^6.3.4",
-    "samlify": "^2.8.11",
-    "ldapjs": "^3.0.7",
     "qrcode": "^1.5.4",
+    "samlify": "^2.8.11",
     "socket.io": "^4.8.1",
+    "twilio": "^6.0.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "otplib": "^12.0.1",
+    "@types/ldapjs": "^3.0.6",
     "@types/node": "^22.10.2",
     "@types/nodemailer": "^6.4.17",
     "@types/qrcode": "^1.5.5",
-    "@types/ldapjs": "^3.0.6",
+    "otplib": "^12.0.1",
     "socket.io-client": "^4.8.1",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",

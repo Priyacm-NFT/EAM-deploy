@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface NotificationTemplate { id: string; name: string; }
 
@@ -174,6 +176,8 @@ export function NotificationTriggersPage() {
 
   const ruleTypeInfo = (type: string) => RULE_TYPES.find((r) => r.value === type);
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(templates, 10);
+
   return (
     <IdentityPageLayout
       title="Notification triggers"
@@ -207,7 +211,7 @@ export function NotificationTriggersPage() {
                 <select id="trig-tpl" className="form-select" value={form.templateId}
                   onChange={(e) => setForm({ ...form, templateId: e.target.value })}>
                   <option value="">No email (in-app only)</option>
-                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  {paged.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </FormField>
 
@@ -366,6 +370,8 @@ export function NotificationTriggersPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

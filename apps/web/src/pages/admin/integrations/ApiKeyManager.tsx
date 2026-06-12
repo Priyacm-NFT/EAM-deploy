@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface ApiKey {
   id: string;
@@ -96,6 +98,8 @@ export function ApiKeyManagerPage() {
 
   const isExpired = (key: ApiKey) =>
     key.expiresAt ? new Date(key.expiresAt) < new Date() : false;
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(keys, 10);
 
   return (
     <IdentityPageLayout
@@ -195,7 +199,7 @@ export function ApiKeyManagerPage() {
               {keys.length === 0 && (
                 <tr><td colSpan={7} className="text-center text-slate-400 py-10">No API keys yet.</td></tr>
               )}
-              {keys.map((key) => {
+              {paged.map((key) => {
                 const expired = isExpired(key);
                 return (
                   <tr key={key.id} className={expired ? 'opacity-60' : ''}>
@@ -259,6 +263,8 @@ export function ApiKeyManagerPage() {
           <p>Keys are hashed — if you lose a key, revoke it and create a new one.</p>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

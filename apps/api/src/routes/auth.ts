@@ -15,6 +15,7 @@ import {
   validateStoredSession,
   touchSession,
   revokeSessionById,
+  enforceConcurrentLimit,
 } from '@eam/auth';
 import { parseSessionPolicy } from '@eam/shared';
 import { db, users, tenants, audit, groups, userGroups } from '@eam/db';
@@ -203,6 +204,10 @@ export async function authRoutes(app: FastifyInstance) {
 
     await clearLoginLockout(user.id);
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
+
+    // Enforce concurrent session limit (default 5, configurable per tenant)
+    const sessionPolicy = parseSessionPolicy((tenant.settings ?? {}) as Record<string, unknown>);
+    await enforceConcurrentLimit(db, user.id, sessionPolicy.maxConcurrentSessions);
 
     await audit(db, {
       tenantId: tenant.id,

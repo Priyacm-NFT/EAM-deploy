@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface JP { id: string; jpNum: string; description: string; estimatedDurationHours: string | null; updatedAt: string }
 
@@ -28,6 +30,8 @@ export function JobPlanListPage() {
     api<JP[]>('/job-plans').then(setJps).catch((e) => setError(String(e)));
   }, []);
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(jps, 10);
+
   return (
     <IdentityPageLayout title="Job Plans" subtitle="Standardised task sequences, labour, and materials">
       {error && <MessageBanner type="error" text={error} />}
@@ -49,7 +53,7 @@ export function JobPlanListPage() {
             {jps.length === 0 ? (
               <tr><td colSpan={5} className="py-6 text-center text-slate-400">No job plans.</td></tr>
             ) : (
-              jps.map((jp) => (
+              paged.map((jp) => (
                 <tr key={jp.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="py-2 pr-4 font-mono text-xs"><Link to={`/job-plans/${jp.id}`} className="text-blue-600">{jp.jpNum}</Link></td>
                   <td className="py-2 pr-4">{jp.description}</td>
@@ -62,6 +66,8 @@ export function JobPlanListPage() {
           </tbody>
         </table>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

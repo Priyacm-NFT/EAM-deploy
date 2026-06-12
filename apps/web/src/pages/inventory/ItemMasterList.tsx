@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface Item {
   id: string; itemNum: string; description: string; itemType: string;
@@ -75,6 +77,8 @@ export function ItemMasterListPage() {
     } catch (e) { setError(String(e)); }
     finally { setNewBusy(false); }
   };
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(storerooms, 10);
 
   return (
     <IdentityPageLayout title="Item Master" subtitle="Storeroom items, parts and consumables">
@@ -177,7 +181,7 @@ export function ItemMasterListPage() {
                 <select id="txStore" className="form-input" value={txForm.storeroomId}
                   onChange={(e) => setTxForm((f) => ({ ...f, storeroomId: e.target.value }))}>
                   <option value="">Select storeroom…</option>
-                  {storerooms.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+                  {paged.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
                 </select>
               </FormField>
               <FormField label="Quantity" htmlFor="txQty">
@@ -199,6 +203,8 @@ export function ItemMasterListPage() {
           </div>
         </div>
       )}
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

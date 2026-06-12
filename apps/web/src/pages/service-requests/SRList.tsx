@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface SR {
   id: string; srNum: string; description: string; status: string; priority: string;
@@ -52,6 +54,8 @@ export function SRListPage() {
       .catch((e) => setError(String(e)));
   }, [status, priority]);
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(srs, 10);
+
   return (
     <IdentityPageLayout title="Service Requests" subtitle="Fault reports and service calls">
       {error && <MessageBanner type="error" text={error} />}
@@ -94,7 +98,7 @@ export function SRListPage() {
             <tbody>
               {srs.length === 0 ? (
                 <tr><td colSpan={7} className="py-8 text-center text-slate-400">No service requests found.</td></tr>
-              ) : srs.map((sr) => (
+              ) : paged.map((sr) => (
                 <tr key={sr.id} className={`border-b border-slate-100 hover:bg-slate-50 ${sr.slaBreached ? 'bg-red-50' : ''}`}>
                   <td className="py-2 pr-4 font-mono text-xs text-blue-600">
                     <Link to={`/service-requests/${sr.id}`}>{sr.srNum}</Link>
@@ -128,6 +132,8 @@ export function SRListPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

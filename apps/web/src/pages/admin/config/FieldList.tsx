@@ -7,6 +7,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface Entity {
   id: string;
@@ -223,6 +225,8 @@ export function ConfigFieldListPage() {
   }
 
   const entityTitle = entity?.label ?? 'Entity';
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -505,7 +509,7 @@ export function ConfigFieldListPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((f) => (
+              {paged.map((f) => (
                 <tr key={f.id}>
                   <td>
                     <code className="text-xs bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded">
@@ -694,6 +698,8 @@ export function ConfigFieldListPage() {
           </div>
         </div>
       )}
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface Permit { id: string; permitNum: string; type: string; status: string; validFrom: string | null; validTo: string | null; createdAt: string }
 
@@ -39,6 +41,8 @@ export function PermitListPage() {
     if (type) params.set('type', type);
     api<Permit[]>(`/permits?${params}`).then(setPermits).catch((e) => setError(String(e)));
   }, [status, type]);
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(permits, 10);
 
   return (
     <IdentityPageLayout title="Permits to Work" subtitle="PTW requests, approvals and active permits">
@@ -77,7 +81,7 @@ export function PermitListPage() {
             {permits.length === 0 ? (
               <tr><td colSpan={6} className="py-6 text-center text-slate-400">No permits found.</td></tr>
             ) : (
-              permits.map((p) => (
+              paged.map((p) => (
                 <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="py-2 pr-4 font-mono text-xs"><Link to={`/permits/${p.id}`} className="text-blue-600">{p.permitNum}</Link></td>
                   <td className="py-2 pr-4">{p.type.replace('_', ' ')}</td>
@@ -91,6 +95,8 @@ export function PermitListPage() {
           </tbody>
         </table>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

@@ -4,6 +4,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface MigrationRow {
   id: string;
@@ -78,6 +80,8 @@ export function SchemaMigrationLogPage() {
     DROP_INDEX: 'Drop index',
   };
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
+
   return (
     <IdentityPageLayout
       title="Schema migration log"
@@ -143,7 +147,7 @@ export function SchemaMigrationLogPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((m) => (
+              {paged.map((m) => (
                 <tr key={m.id}>
                   <td className="font-mono text-xs font-medium text-primary">{m.tableName}</td>
                   <td className="font-mono text-xs">{m.columnName}</td>
@@ -183,6 +187,8 @@ export function SchemaMigrationLogPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

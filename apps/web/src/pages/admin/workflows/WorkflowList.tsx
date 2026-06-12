@@ -6,6 +6,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface WorkflowRow {
   id: string;
@@ -87,6 +89,8 @@ export function WorkflowListPage() {
       setError(e instanceof Error ? e.message : 'Delete failed');
     }
   }
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -192,7 +196,7 @@ export function WorkflowListPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((w) => (
+              {paged.map((w) => (
                 <tr key={w.id}>
                   <td className="font-medium text-primary">{w.name}</td>
                   <td>
@@ -239,6 +243,8 @@ export function WorkflowListPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

@@ -4,6 +4,8 @@ import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { useTableView } from '../../hooks/useTableView.js';
 import { TableViewBar } from '../../components/TableViewBar.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface Asset {
   id: string; assetNum: string; description: string; status: string;
@@ -62,6 +64,8 @@ export function AssetListPage() {
       .catch((e) => setError(String(e)));
   }, [search, status]);
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(assets, 10);
+
   return (
     <IdentityPageLayout title="Assets" subtitle="Equipment, machinery and infrastructure register">
       {error && <MessageBanner type="error" text={error} />}
@@ -102,7 +106,7 @@ export function AssetListPage() {
             <tbody>
               {assets.length === 0 ? (
                 <tr><td colSpan={columns.length + 1} className="py-8 text-center text-slate-400">No assets found.</td></tr>
-              ) : assets.map((a) => (
+              ) : paged.map((a) => (
                 <tr key={a.id} className="border-b border-slate-100 hover:bg-slate-50">
                   {columns.map((col, i) => (
                     <td key={col.fieldKey} className="py-2 pr-4" style={{ minWidth: col.width ?? 120 }}>
@@ -128,6 +132,8 @@ export function AssetListPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

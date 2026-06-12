@@ -308,4 +308,37 @@ export async function mfaRoutes(app: FastifyInstance) {
       .where(eq(users.id, request.user!.id));
     return reply.send({ ok: true });
   });
+
+  // ── SMS OTP enroll verify (for already-logged-in users on Account page) ──────
+  // Different from /auth/mfa/sms/verify which requires mfa_session_token (pre-login)
+  // This is for users who are already authenticated and want to enroll SMS OTP
+  app.post('/auth/mfa/sms/send-enrolled', async (request, reply) => {
+    try { await authenticate(request); } catch (e) { return reply.status(401).send(e); }
+    const body = request.body as { phone: string };
+    if (!body.phone) return reply.status(400).send({ error: 'Phone number is required' });
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    await redisSetex(`mfa:enroll:otp:${request.user!.id}`, SMS_OTP_TTL, otp);
+    await sendSms(body.phone, `Your EAM enrollment code is ${otp}`);
+    return reply.send({ sent: true });
+  });
+
+  app.post('/auth/mfa/sms/verify-enrolled', async (request, reply) => {
+    try { await authenticate(request); } catch (e) { return reply.status(401).send(e); }
+    const body = request.body as { phone: string; code: string };
+
+    const stored = await redisGet(`mfa:enroll:otp:${request.user!.id}`);
+    if (!stored || stored !== body.code) {
+      return reply.status(401).send({ error: 'Invalid or expired OTP code' });
+    }
+    await redisDel(`mfa:enroll:otp:${request.user!.id}`);
+
+    await storeMfaPhone(request.user!.id, body.phone);
+    await db
+      .update(users)
+      .set({ mfaEnabled: true, phone: body.phone })
+      .where(eq(users.id, request.user!.id));
+
+    return reply.send({ ok: true, message: 'SMS OTP enrolled successfully' });
+  });
 }

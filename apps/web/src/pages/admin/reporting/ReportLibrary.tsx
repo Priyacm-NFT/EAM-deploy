@@ -7,6 +7,8 @@ import {
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
 import type { ReportDefinitionRow, ReportSubject } from './report-types.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface Permission {
   id: string;
@@ -187,6 +189,8 @@ export function ReportLibraryPage() {
     setMsg('Permission revoked.');
   }
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
+
   return (
     <IdentityPageLayout
       title="Reports"
@@ -211,9 +215,18 @@ export function ReportLibraryPage() {
       {/* Tools */}
       <div className="admin-section">
         <div className="flex flex-wrap gap-3 items-center">
-          <Link to="/admin/reporting/designer" className="btn-primary !w-auto px-4">+ New report</Link>
-          <Link to="/admin/reporting/schedules" className="btn-outline !w-auto px-4">Scheduled reports</Link>
-          <Link to="/admin/reporting/bi" className="btn-outline !w-auto px-4">BI connections</Link>
+          <Link to="/admin/reporting/designer"
+            style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff', borderRadius: '10px', padding: '8px 20px', fontSize: '13px', fontWeight: 600, textDecoration: 'none', boxShadow: '0 4px 14px rgba(249,115,22,0.35)', display: 'inline-block' }}>
+            + New report
+          </Link>
+          <Link to="/admin/reporting/schedules"
+            style={{ background: '#fff', color: '#374151', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '7px 18px', fontSize: '13px', fontWeight: 600, textDecoration: 'none', display: 'inline-block' }}>
+            Scheduled reports
+          </Link>
+          <Link to="/admin/reporting/bi"
+            style={{ background: '#fff', color: '#374151', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '7px 18px', fontSize: '13px', fontWeight: 600, textDecoration: 'none', display: 'inline-block' }}>
+            BI connections
+          </Link>
           <Link to="/admin/reporting/bi-rls" className="btn-outline !w-auto px-4">BI RLS views</Link>
         </div>
       </div>
@@ -243,7 +256,7 @@ export function ReportLibraryPage() {
                   No reports yet. <Link to="/admin/reporting/designer" className="text-accent hover:underline">Create one →</Link>
                 </td></tr>
               )}
-              {filtered.map((r) => {
+              {paged.map((r) => {
                 const isSqlMode = (r.definition as Record<string, unknown>)?.sqlMode === true;
                 return (
                   <>
@@ -431,6 +444,8 @@ export function ReportLibraryPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

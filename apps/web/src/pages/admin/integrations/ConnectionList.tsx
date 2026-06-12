@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface Connection {
   id: string;
@@ -125,6 +127,8 @@ export function ConnectionListPage() {
     setShowCreate(true);
   }
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
+
   return (
     <IdentityPageLayout
       title="Integration connections"
@@ -205,7 +209,7 @@ export function ConnectionListPage() {
               {filtered.length === 0 && (
                 <tr><td colSpan={5} className="text-center text-slate-400 py-10">No connections configured. Create one above.</td></tr>
               )}
-              {filtered.map((c) => (
+              {paged.map((c) => (
                 <tr key={c.id}>
                   <td className="font-medium text-primary">{c.name}</td>
                   <td>
@@ -239,6 +243,8 @@ export function ConnectionListPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

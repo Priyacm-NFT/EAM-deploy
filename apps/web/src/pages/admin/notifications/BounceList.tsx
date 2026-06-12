@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface BounceEntry {
   id: string;
@@ -37,6 +39,8 @@ export function BounceListPage() {
   const hard = entries.filter((e) => e.bounceType === 'hard').length;
   const soft = entries.filter((e) => e.bounceType === 'soft').length;
   const active = entries.filter((e) => !e.suppressUntil || new Date(e.suppressUntil) > new Date()).length;
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -102,7 +106,7 @@ export function BounceListPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((e) => {
+                {paged.map((e) => {
                   const expired = e.suppressUntil && new Date(e.suppressUntil) < new Date();
                   return (
                     <tr key={e.id} className={expired ? 'opacity-50' : ''}>
@@ -136,6 +140,8 @@ export function BounceListPage() {
           </div>
         )}
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

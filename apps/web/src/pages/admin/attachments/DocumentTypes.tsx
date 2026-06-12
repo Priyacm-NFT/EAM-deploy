@@ -5,6 +5,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface DocumentType {
   id: string;
@@ -117,6 +119,8 @@ export function DocumentTypesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(types, 10);
 
   return (
     <IdentityPageLayout
@@ -264,7 +268,7 @@ export function DocumentTypesPage() {
                   </td>
                 </tr>
               )}
-              {types.map((dt) => (
+              {paged.map((dt) => (
                 <tr key={dt.id}>
                   <td>
                     <p className="font-medium text-primary">{dt.label || dt.name}</p>
@@ -339,6 +343,8 @@ export function DocumentTypesPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

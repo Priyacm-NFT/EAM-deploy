@@ -4,6 +4,8 @@ import {
   IdentityPageLayout,
   MessageBanner,
 } from '../../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 interface ConfigVersion {
   id: string;
@@ -94,6 +96,8 @@ export function ConfigVersionsPage() {
       a.click();
     }).catch((e) => setError(String(e)));
   }
+
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -192,7 +196,7 @@ export function ConfigVersionsPage() {
               {filtered.length === 0 && (
                 <tr><td colSpan={7} className="text-center text-slate-400 py-10">No config versions found.</td></tr>
               )}
-              {filtered.map((v) => (
+              {paged.map((v) => (
                 <>
                   <tr key={v.id} className={`${compareA === v.id || compareB === v.id ? 'bg-accent/5' : ''}`}>
                     <td>
@@ -252,6 +256,8 @@ export function ConfigVersionsPage() {
         <p className="text-sm text-slate-600 mb-3">Upload a previously exported config JSON file. Use <strong>merge</strong> to skip existing items, or <strong>replace</strong> to overwrite.</p>
         <ImportConfig onDone={() => { setMsg('Import complete.'); load(); }} onError={setError} />
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

@@ -12,6 +12,8 @@ import type {
   ReportRunRow,
   ReportScheduleRow,
 } from './report-types.js';
+import { usePagination } from '../../../hooks/usePagination.js';
+import { Pagination } from '../../../components/Pagination.js';
 
 export function ScheduledReportsPage() {
   const [schedules, setSchedules] = useState<ReportScheduleRow[]>([]);
@@ -73,6 +75,8 @@ export function ScheduledReportsPage() {
     }
   };
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(reports, 10);
+
   return (
     <IdentityPageLayout
       title="Scheduled reports"
@@ -105,7 +109,7 @@ export function ScheduledReportsPage() {
                   required
                 >
                   <option value="">Select report…</option>
-                  {reports.map((r) => (
+                  {paged.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.name}
                     </option>
@@ -213,6 +217,8 @@ export function ScheduledReportsPage() {
           </table>
         </div>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

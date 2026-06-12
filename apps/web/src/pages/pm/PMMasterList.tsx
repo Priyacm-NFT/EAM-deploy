@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { usePagination } from '../../hooks/usePagination.js';
+import { Pagination } from '../../components/Pagination.js';
 
 interface PM {
   id: string; pmNum: string; description: string; status: string;
@@ -44,6 +46,8 @@ export function PMMasterListPage() {
     } catch (e) { setError(String(e)); }
   };
 
+  const { page, setPage, paged, totalPages, totalItems } = usePagination(pms, 10);
+
   return (
     <IdentityPageLayout title="Preventive Maintenance" subtitle="PM masters, schedules and forecast calendar">
       {error && <MessageBanner type="error" text={error} />}
@@ -75,7 +79,7 @@ export function PMMasterListPage() {
             {pms.length === 0 ? (
               <tr><td colSpan={7} className="py-6 text-center text-slate-400">No PM masters.</td></tr>
             ) : (
-              pms.map((pm) => {
+              paged.map((pm) => {
                 const isOverdue = pm.nextDueDate && new Date(pm.nextDueDate) < new Date();
                 return (
                   <tr key={pm.id} className={`border-b border-slate-100 hover:bg-slate-50 ${isOverdue ? 'bg-red-50' : ''}`}>
@@ -98,6 +102,8 @@ export function PMMasterListPage() {
           </tbody>
         </table>
       </div>
+    
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }
