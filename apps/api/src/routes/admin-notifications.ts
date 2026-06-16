@@ -502,4 +502,35 @@ export async function adminNotificationRoutes(app: FastifyInstance) {
     // Re-fire the event by emitting the trigger again (simplified resend)
     return { ok: true, message: 'Resend queued', logId: id };
   });
+  // ── Sync BOUNCED delivery logs → bounce suppression list ─────────────────
+  app.post('/admin/notifications/bounce-list/sync', adminGuard, async (request, reply) => {
+    const tenantId = request.user!.tenantId;
+
+    // Find all BOUNCED delivery log entries not yet in bounce list
+    const bounced = await db
+      .select()
+      .from(notificationDeliveryLog)
+      .where(eq(notificationDeliveryLog.status, 'BOUNCED'));
+
+    let synced = 0;
+    for (const row of bounced) {
+      if (!row.recipientEmail) continue;
+      const bType = (row.bounceType as 'hard' | 'soft') ?? 'hard';
+      const suppressUntil = bType === 'soft'
+        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        : null;
+      await db.insert(emailBounceList).values({
+        tenantId,
+        email: row.recipientEmail,
+        bounceType: bType,
+        bounceCode: row.bounceCode ?? undefined,
+        bounceMessage: row.bounceMessage ?? undefined,
+        suppressUntil,
+      }).onConflictDoNothing();
+      synced++;
+    }
+
+    return reply.send({ ok: true, synced });
+  });
+
 }

@@ -34,7 +34,7 @@ export async function signAccessToken(payload: Omit<JwtPayload, 'type'>): Promis
   return new SignJWT({ ...payload, type: 'access' })
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuedAt()
-    .setExpirationTime('15m')
+    .setExpirationTime('3h')
     .sign(privateKey!);
 }
 

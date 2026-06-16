@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../../components/identity/IdentityLayout.js';
-import { usePagination } from '../../../hooks/usePagination.js';
-import { Pagination } from '../../../components/Pagination.js';
 
 interface BounceEntry {
   id: string;
@@ -17,9 +15,21 @@ interface BounceEntry {
 export function BounceListPage() {
   const [entries, setEntries] = useState<BounceEntry[]>([]);
   const [filter, setFilter] = useState('');
+  const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
+  async function syncBounces() {
+    setSyncing(true);
+    try {
+      const r = await api<{ synced: number }>('/admin/notifications/bounce-list/sync', { method: 'POST' });
+      setMsg(`Synced ${r.synced} bounce record(s) from delivery log.`);
+      load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Sync failed'); }
+    finally { setSyncing(false); }
+  }
+
+  
   function load() {
     api<BounceEntry[]>('/admin/notifications/bounce-list').then(setEntries).catch(() => setEntries([]));
   }
@@ -39,8 +49,6 @@ export function BounceListPage() {
   const hard = entries.filter((e) => e.bounceType === 'hard').length;
   const soft = entries.filter((e) => e.bounceType === 'soft').length;
   const active = entries.filter((e) => !e.suppressUntil || new Date(e.suppressUntil) > new Date()).length;
-
-  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout
@@ -82,8 +90,16 @@ export function BounceListPage() {
       <div className="admin-section">
         <div className="flex items-center justify-between mb-4">
           <h2 className="admin-section-title !border-0 !pb-0 !mb-0">Suppressed addresses ({filtered.length})</h2>
-          <input type="search" className="form-input w-64 text-sm" placeholder="Filter by email…"
-            value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button
+              onClick={syncBounces}
+              disabled={syncing}
+              style={{ background: '#fff7ed', color: '#ea580c', border: '1.5px solid #fed7aa', borderRadius: '8px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+              {syncing ? '⏳ Syncing…' : '↻ Sync from delivery log'}
+            </button>
+            <input type="search" className="form-input w-64 text-sm" placeholder="Filter by email…"
+              value={filter} onChange={(e) => setFilter(e.target.value)} />
+          </div>
         </div>
 
         {entries.length === 0 ? (
@@ -106,7 +122,7 @@ export function BounceListPage() {
                 </tr>
               </thead>
               <tbody>
-                {paged.map((e) => {
+                {filtered.map((e) => {
                   const expired = e.suppressUntil && new Date(e.suppressUntil) < new Date();
                   return (
                     <tr key={e.id} className={expired ? 'opacity-50' : ''}>
@@ -140,8 +156,6 @@ export function BounceListPage() {
           </div>
         )}
       </div>
-    
-      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={10} onChange={setPage} />
     </IdentityPageLayout>
   );
 }

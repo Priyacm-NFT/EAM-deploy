@@ -1,12 +1,5 @@
-
-
-/**
- * PermitForm.tsx
- * NEW file — handles /permits/new
- * Creates a permit then redirects to its detail page.
- */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
@@ -15,6 +8,9 @@ const PERMIT_TYPES = ['HOT_WORK','CONFINED_SPACE','ELECTRICAL','HEIGHT','EXCAVAT
 
 export function PermitFormPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const woId = searchParams.get('woId') ?? '';
+
   const [form, setForm] = useState({
     type: 'GENERAL' as typeof PERMIT_TYPES[number],
     description: '',
@@ -43,9 +39,15 @@ export function PermitFormPage() {
           validFrom: form.validFrom || undefined,
           validTo: form.validTo || undefined,
           notes: form.notes || undefined,
+          woId: woId || undefined,
         }),
       });
-      navigate(`/permits/${created.id}`);
+      // Navigate back to WO if came from WO, else to permit detail
+      if (woId) {
+        navigate(`/work-orders/${woId}`);
+      } else {
+        navigate(`/permits/${created.id}`);
+      }
     } catch (e) {
       setError(String(e));
       setSaving(false);
@@ -53,8 +55,9 @@ export function PermitFormPage() {
   };
 
   return (
-    <IdentityPageLayout title="New Permit to Work" backTo="/permits" backLabel="Back to permits">
+    <IdentityPageLayout title="New Permit to Work" backTo={woId ? `/work-orders/${woId}` : '/permits'} backLabel={woId ? 'Back to work order' : 'Back to permits'}>
       {error && <MessageBanner type="error" text={error} />}
+      {woId && <p className="text-sm text-blue-600 mb-4">This permit will be linked to Work Order.</p>}
       <form onSubmit={handleSubmit}>
         <div className="admin-section space-y-4 max-w-2xl">
           <FormField label="Permit type *" htmlFor="ptype">
@@ -88,9 +91,16 @@ export function PermitFormPage() {
               value={form.notes} onChange={set('notes')} />
           </FormField>
 
+          <DynamicFormRenderer
+            entityName="Permit"
+            record={{}}
+            values={customData}
+            onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
+          />
+
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
             <button type="button" className="btn-outline !w-auto px-6"
-              onClick={() => navigate('/permits')}>Cancel</button>
+              onClick={() => woId ? navigate(`/work-orders/${woId}`) : navigate('/permits')}>Cancel</button>
             <button type="submit" className="btn-primary !w-auto px-6" disabled={saving}>
               {saving ? 'Creating…' : 'Create Permit'}
             </button>
@@ -100,6 +110,3 @@ export function PermitFormPage() {
     </IdentityPageLayout>
   );
 }
-
-
-

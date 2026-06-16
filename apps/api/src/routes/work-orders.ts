@@ -32,14 +32,14 @@ import { globalEventBus } from '@eam/shared';
 import { WorkflowEngine } from '@eam/workflow-engine';
 import { checkMandatoryAttachments } from './admin-attachments.js';
 import { FieldRulesService } from '@eam/config-engine';
-
+ 
 const readGuard = { preHandler: requirePermission('work_orders:read') };
 const writeGuard = { preHandler: requirePermission('work_orders:write') };
 const approveGuard = { preHandler: requirePermission('work_orders:approve') };
-
+ 
 export async function workOrderRoutes(app: FastifyInstance) {
   // ─── List ─────────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders', readGuard, async (request) => {
     const { status, type, priority, siteId, assetId, assignedToUserId, q, page, pageSize } =
       request.query as {
@@ -56,7 +56,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const tid = request.user!.tenantId;
     const limit = Math.min(Number(pageSize ?? 50), 200);
     const offset = (Number(page ?? 1) - 1) * limit;
-
+ 
     const rows = await db
       .select({
         id: workOrders.id,
@@ -99,10 +99,10 @@ export async function workOrderRoutes(app: FastifyInstance) {
       .orderBy(desc(workOrders.updatedAt))
       .limit(limit)
       .offset(offset);
-
+ 
     return { data: rows, page: Number(page ?? 1), pageSize: limit };
   });
-
+ 
   // ─── Custom field validation helper ──────────────────────────────────────────
   async function validateCustomFields(
     tid: string,
@@ -117,19 +117,19 @@ export async function workOrderRoutes(app: FastifyInstance) {
       .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
       .limit(1);
     if (!entity) return { valid: true, errors: [] };
-
+ 
     const fields = await db
       .select()
       .from(fieldDefinitions)
       .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
-
+ 
     const svc = new FieldRulesService(db);
     const rules = await svc.loadRules(tid, entity.id, currentStatus);
     return svc.validateWrite(fields, rules, data, userRoleIds);
   }
-
+ 
   // ─── Create ───────────────────────────────────────────────────────────────────
-
+ 
   app.post('/work-orders', writeGuard, async (request, reply) => {
     const body = request.body as {
       description: string;
@@ -147,7 +147,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
       customData?: Record<string, unknown>;
     };
     const tid = request.user!.tenantId;
-
+ 
     // Validate custom fields against field rules
     const customData = body.customData ?? {};
     const validation = await validateCustomFields(
@@ -157,10 +157,10 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!validation.valid) {
       return reply.status(422).send({ error: 'Validation failed', errors: validation.errors });
     }
-
+ 
     const count = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.tenantId, tid));
     const woNum = `WO-${String(count.length + 1).padStart(6, '0')}`;
-
+ 
     const [row] = await db.insert(workOrders).values({
       tenantId: tid,
       woNum,
@@ -178,12 +178,12 @@ export async function workOrderRoutes(app: FastifyInstance) {
       targetFinishDate: body.targetFinishDate ? new Date(body.targetFinishDate) : undefined,
       customData: body.customData ?? {},
     }).returning();
-
+ 
     // If job plan specified, copy its content
     if (body.jobPlanId) {
       await applyJobPlanToWo(body.jobPlanId, row!.id, tid);
     }
-
+ 
     await audit(db, { tenantId: tid, userId: request.user!.id, action: 'CREATE', resource: 'WorkOrder', resourceId: row!.id });
     void dispatchWebhookEvent(tid, 'WO_CREATED', { woId: row!.id, woNum: row!.woNum });
     // Fire notification dispatcher
@@ -199,13 +199,13 @@ export async function workOrderRoutes(app: FastifyInstance) {
     });
     return reply.code(201).send(row);
   });
-
+ 
   // ─── Get Detail ───────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id', readGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const tid = request.user!.tenantId;
-
+ 
     const [wo] = await db
       .select({
         id: workOrders.id,
@@ -250,32 +250,32 @@ export async function workOrderRoutes(app: FastifyInstance) {
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid)))
       .limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
-
+ 
     // Safe fetch helper — returns [] if table has missing columns
     const safeFetch = async <T>(promise: Promise<T[]>): Promise<T[]> => {
       try { return await promise; } catch { return []; }
     };
-
+ 
     const [tasks, labour, materials, tools, services, safety, activePermits] = await Promise.all([
-      safeFetch(db.select({ id: woTasks.id, woId: woTasks.woId, description: woTasks.description }).from(woTasks).where(eq(woTasks.woId, id))),
-      safeFetch(db.select({ id: woLabour.id, woId: woLabour.woId }).from(woLabour).where(eq(woLabour.woId, id))),
-      safeFetch(db.select({ id: woMaterials.id, woId: woMaterials.woId, description: woMaterials.description }).from(woMaterials).where(eq(woMaterials.woId, id))),
-      safeFetch(db.select({ id: woTools.id, woId: woTools.woId, description: woTools.description }).from(woTools).where(eq(woTools.woId, id))),
-      safeFetch(db.select({ id: woServices.id, woId: woServices.woId, description: woServices.description }).from(woServices).where(eq(woServices.woId, id))),
-      safeFetch(db.select({ id: woSafety.id, woId: woSafety.woId }).from(woSafety).where(eq(woSafety.woId, id))),
+      safeFetch(db.select().from(woTasks).where(eq(woTasks.woId, id)).orderBy(woTasks.sequence)),
+      safeFetch(db.select().from(woLabour).where(eq(woLabour.woId, id))),
+      safeFetch(db.select().from(woMaterials).where(eq(woMaterials.woId, id))),
+      safeFetch(db.select().from(woTools).where(eq(woTools.woId, id))),
+      safeFetch(db.select().from(woServices).where(eq(woServices.woId, id))),
+      safeFetch(db.select().from(woSafety).where(eq(woSafety.woId, id))),
       safeFetch(db.select().from(permits).where(and(eq(permits.woId, id), eq(permits.tenantId, tid)))),
     ]);
-
+ 
     return { ...wo, tasks, labour, materials, tools, services, safety, permits: activePermits };
   });
-
+ 
   // ─── Update ───────────────────────────────────────────────────────────────────
-
+ 
   app.put('/work-orders/:id', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof workOrders.$inferInsert>;
     const tid = request.user!.tenantId;
-
+ 
     // Validate custom fields
     const customData = (body.customData as Record<string, unknown>) ?? {};
     const [existing] = await db.select({ status: workOrders.status }).from(workOrders)
@@ -288,28 +288,28 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!validation.valid) {
       return reply.status(422).send({ error: 'Validation failed', errors: validation.errors });
     }
-
+ 
     const [row] = await db.update(workOrders)
       .set({ ...body, updatedAt: new Date() })
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid)))
       .returning();
-
+ 
     if (!row) return reply.code(404).send({ error: 'Work order not found' });
     await audit(db, { tenantId: tid, userId: request.user!.id, action: 'UPDATE', resource: 'WorkOrder', resourceId: id });
     return row;
   });
-
+ 
   // ─── Status Transition ────────────────────────────────────────────────────────
-
+ 
   app.post('/work-orders/:id/transition', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { toStatus: string; comment?: string };
     const tid = request.user!.tenantId;
-
+ 
     const [wo] = await db.select().from(workOrders)
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
-
+ 
     // ── Mandatory attachment check ─────────────────────────────────────────
     const mandatoryCheck = await checkMandatoryAttachments(tid, 'WorkOrder', id, body.toStatus);
     if (!mandatoryCheck.valid) {
@@ -319,7 +319,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
         message: `The following documents are required before transitioning to ${body.toStatus}: ${mandatoryCheck.missing.join(', ')}`,
       });
     }
-
+ 
     // Guard: cannot start work (INPRG) without active permit on hot work / hazard WOs
     if (body.toStatus === 'INPRG' && wo.permitId) {
       const [p] = await db.select().from(permits)
@@ -328,14 +328,14 @@ export async function workOrderRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'An active permit is required before starting this work order' });
       }
     }
-
+ 
     // Validate via status set — check both casing conventions
     const [woSet] = await db.select().from(statusSets)
       .where(and(
         or(eq(statusSets.entityType, 'WorkOrder'), eq(statusSets.entityType, 'work_order')),
         eq(statusSets.tenantId, tid)
       )).limit(1);
-
+ 
     if (woSet) {
       const [transition] = await db.select().from(statusTransitions)
         .where(
@@ -345,7 +345,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
             eq(statusTransitions.toStatus, body.toStatus),
           ),
         ).limit(1);
-
+ 
       if (!transition) {
         return reply.code(400).send({ error: `Transition from ${wo.status} to ${body.toStatus} is not allowed` });
       }
@@ -353,17 +353,17 @@ export async function workOrderRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'A comment is required for this transition' });
       }
     }
-
+ 
     const updates: Partial<typeof workOrders.$inferInsert> = {
       status: body.toStatus as typeof workOrders.$inferInsert.status,
       updatedAt: new Date(),
     };
     if (body.toStatus === 'INPRG' && !wo.actualStartDate) updates.actualStartDate = new Date();
     if (['COMP', 'CLOSE'].includes(body.toStatus) && !wo.actualFinishDate) updates.actualFinishDate = new Date();
-
+ 
     const [updated] = await db.update(workOrders).set(updates)
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).returning();
-
+ 
     await audit(db, {
       tenantId: tid,
       userId: request.user!.id,
@@ -372,7 +372,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
       resourceId: id,
       metadata: { fromStatus: wo.status, toStatus: body.toStatus, comment: body.comment ?? null },
     });
-
+ 
     void dispatchWebhookEvent(tid, 'WO_STATUS_CHANGED', { woId: id, fromStatus: wo.status, toStatus: body.toStatus });
     void globalEventBus.emit('WO_STATUS_CHANGED', {
       tenantId: tid,
@@ -393,7 +393,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
         assignedToUserId: wo.assignedToUserId,
       },
     });
-
+ 
     // ── Auto-start matching workflow on status transition ──────────────────
     const engine = new WorkflowEngine(db);
     const triggerEvent = `${wo.status} → ${body.toStatus}`;
@@ -420,12 +420,12 @@ export async function workOrderRoutes(app: FastifyInstance) {
         else console.warn(`[workflow] ❌ Still no match. Check trigger_event in workflow_definitions table.`);
       }
     })().catch((e: unknown) => console.warn('[workflow] trigger failed:', e));
-
+ 
     return updated;
   });
-
+ 
   // ─── Close WO (with failure codes + downtime) ─────────────────────────────────
-
+ 
   app.post('/work-orders/:id/close', approveGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as {
@@ -436,26 +436,26 @@ export async function workOrderRoutes(app: FastifyInstance) {
       downtimeHours?: string;
     };
     const tid = request.user!.tenantId;
-
+ 
     const [wo] = await db.select().from(workOrders)
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
     if (!['COMP', 'INPRG'].includes(wo.status)) {
       return reply.code(400).send({ error: 'Work order must be COMP or INPRG to close' });
     }
-
+ 
     // Roll-up costs from children
     const labourRows = await db.select({ totalCost: woLabour.totalCost }).from(woLabour).where(eq(woLabour.woId, id));
     const materialRows = await db.select({ totalCost: woMaterials.totalCost }).from(woMaterials).where(eq(woMaterials.woId, id));
     const toolRows = await db.select({ totalCost: woTools.totalCost }).from(woTools).where(eq(woTools.woId, id));
     const serviceRows = await db.select({ cost: woServices.cost }).from(woServices).where(eq(woServices.woId, id));
-
+ 
     const laborCost = labourRows.reduce((s, r) => s + parseFloat(String(r.totalCost ?? '0')), 0);
     const materialCost = materialRows.reduce((s, r) => s + parseFloat(String(r.totalCost ?? '0')), 0);
     const toolCost = toolRows.reduce((s, r) => s + parseFloat(String(r.totalCost ?? '0')), 0);
     const serviceCost = serviceRows.reduce((s, r) => s + parseFloat(String(r.cost ?? '0')), 0);
     const totalCost = laborCost + materialCost + toolCost + serviceCost;
-
+ 
     const [updated] = await db.update(workOrders).set({
       status: 'CLOSE',
       closureNotes: body.closureNotes,
@@ -471,46 +471,46 @@ export async function workOrderRoutes(app: FastifyInstance) {
       totalCost: totalCost.toString(),
       updatedAt: new Date(),
     }).where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).returning();
-
+ 
     await audit(db, { tenantId: tid, userId: request.user!.id, action: 'CLOSE', resource: 'WorkOrder', resourceId: id, metadata: { totalCost } });
     return updated;
   });
-
+ 
   // ─── Apply Job Plan ───────────────────────────────────────────────────────────
-
+ 
   app.post('/work-orders/:id/apply-job-plan', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { jobPlanId: string };
     const tid = request.user!.tenantId;
-
+ 
     const [wo] = await db.select().from(workOrders)
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
-
+ 
     await applyJobPlanToWo(body.jobPlanId, id, tid);
     await db.update(workOrders).set({ jobPlanId: body.jobPlanId, updatedAt: new Date() })
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid)));
-
+ 
     return reply.send({ success: true });
   });
-
+ 
   // ─── Costs summary ────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/costs', readGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const tid = request.user!.tenantId;
-
+ 
     const [wo] = await db.select({ laborCost: workOrders.laborCost, materialCost: workOrders.materialCost, toolCost: workOrders.toolCost, serviceCost: workOrders.serviceCost, totalCost: workOrders.totalCost })
       .from(workOrders).where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tid))).limit(1);
     if (!wo) return reply.code(404).send({ error: 'Work order not found' });
-
+ 
     const [labourRows, materialRows, toolRows, serviceRows] = await Promise.all([
       db.select().from(woLabour).where(eq(woLabour.woId, id)),
       db.select().from(woMaterials).where(eq(woMaterials.woId, id)),
       db.select().from(woTools).where(eq(woTools.woId, id)),
       db.select().from(woServices).where(eq(woServices.woId, id)),
     ]);
-
+ 
     return {
       summary: wo,
       labour: labourRows,
@@ -519,16 +519,16 @@ export async function workOrderRoutes(app: FastifyInstance) {
       services: serviceRows,
     };
   });
-
+ 
   // ─── Tasks ────────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/tasks', readGuard, async (request) => {
     const { id } = request.params as { id: string };
     try {
-      return await db.select({ id: woTasks.id, woId: woTasks.woId, description: woTasks.description }).from(woTasks).where(eq(woTasks.woId, id));
+      return await db.select().from(woTasks).where(eq(woTasks.woId, id)).orderBy(woTasks.sequence);
     } catch { return []; }
   });
-
+ 
   app.post('/work-orders/:id/tasks', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof woTasks.$inferInsert>;
@@ -536,7 +536,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const [row] = await db.insert(woTasks).values({ woId: id, tenantId: tid, ...body } as typeof woTasks.$inferInsert).returning();
     return reply.code(201).send(row);
   });
-
+ 
   app.put('/work-orders/:id/tasks/:taskId', writeGuard, async (request, reply) => {
     const { taskId } = request.params as { id: string; taskId: string };
     const body = request.body as Partial<typeof woTasks.$inferInsert>;
@@ -545,33 +545,33 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Task not found' });
     return row;
   });
-
+ 
   app.delete('/work-orders/:id/tasks/:taskId', writeGuard, async (request, reply) => {
     const { taskId } = request.params as { id: string; taskId: string };
     await db.delete(woTasks).where(eq(woTasks.id, taskId));
     return reply.code(204).send();
   });
-
+ 
   // ─── Labour ───────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/labour', readGuard, async (request) => {
     const { id } = request.params as { id: string };
     try {
-      return await db.select({ id: woLabour.id, woId: woLabour.woId }).from(woLabour).where(eq(woLabour.woId, id));
+      return await db.select().from(woLabour).where(eq(woLabour.woId, id));
     } catch { return []; }
   });
-
+ 
   app.post('/work-orders/:id/labour', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof woLabour.$inferInsert>;
     const tid = request.user!.tenantId;
-
+ 
     const regularHours = parseFloat(String(body.regularHours ?? '0'));
     const overtimeHours = parseFloat(String(body.overtimeHours ?? '0'));
     const regularRate = parseFloat(String(body.regularRate ?? '0'));
     const overtimeRate = parseFloat(String(body.overtimeRate ?? regularRate));
     const totalCost = regularHours * regularRate + overtimeHours * overtimeRate;
-
+ 
     const [row] = await db.insert(woLabour).values({
       woId: id,
       tenantId: tid,
@@ -586,10 +586,10 @@ export async function workOrderRoutes(app: FastifyInstance) {
       taskId: body.taskId,
       notes: body.notes,
     }).returning();
-
+ 
     return reply.code(201).send(row);
   });
-
+ 
   app.post('/work-orders/:id/labour/:labourId/approve', approveGuard, async (request, reply) => {
     const { labourId } = request.params as { id: string; labourId: string };
     const [row] = await db.update(woLabour).set({
@@ -600,7 +600,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Labour entry not found' });
     return row;
   });
-
+ 
   app.put('/work-orders/:id/labour/:labourId', writeGuard, async (request, reply) => {
     const { labourId } = request.params as { id: string; labourId: string };
     const body = request.body as Partial<typeof woLabour.$inferInsert>;
@@ -608,22 +608,22 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Labour entry not found' });
     return row;
   });
-
+ 
   app.delete('/work-orders/:id/labour/:labourId', writeGuard, async (request, reply) => {
     const { labourId } = request.params as { id: string; labourId: string };
     await db.delete(woLabour).where(eq(woLabour.id, labourId));
     return reply.code(204).send();
   });
-
+ 
   // ─── Materials ────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/materials', readGuard, async (request) => {
     const { id } = request.params as { id: string };
     try {
-      return await db.select({ id: woMaterials.id, woId: woMaterials.woId, description: woMaterials.description }).from(woMaterials).where(eq(woMaterials.woId, id));
+      return await db.select().from(woMaterials).where(eq(woMaterials.woId, id));
     } catch { return []; }
   });
-
+ 
   app.post('/work-orders/:id/materials', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof woMaterials.$inferInsert>;
@@ -631,7 +631,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const [row] = await db.insert(woMaterials).values({ woId: id, tenantId: tid, ...body } as typeof woMaterials.$inferInsert).returning();
     return reply.code(201).send(row);
   });
-
+ 
   app.put('/work-orders/:id/materials/:matId', writeGuard, async (request, reply) => {
     const { matId } = request.params as { id: string; matId: string };
     const body = request.body as Partial<typeof woMaterials.$inferInsert>;
@@ -640,22 +640,22 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Material entry not found' });
     return row;
   });
-
+ 
   app.delete('/work-orders/:id/materials/:matId', writeGuard, async (request, reply) => {
     const { matId } = request.params as { id: string; matId: string };
     await db.delete(woMaterials).where(eq(woMaterials.id, matId));
     return reply.code(204).send();
   });
-
+ 
   // ─── Tools ────────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/tools', readGuard, async (request) => {
     const { id } = request.params as { id: string };
     try {
-      return await db.select({ id: woTools.id, woId: woTools.woId, description: woTools.description }).from(woTools).where(eq(woTools.woId, id));
+      return await db.select().from(woTools).where(eq(woTools.woId, id));
     } catch { return []; }
   });
-
+ 
   app.post('/work-orders/:id/tools', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof woTools.$inferInsert>;
@@ -663,7 +663,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const [row] = await db.insert(woTools).values({ woId: id, tenantId: tid, ...body } as typeof woTools.$inferInsert).returning();
     return reply.code(201).send(row);
   });
-
+ 
   app.put('/work-orders/:id/tools/:toolId', writeGuard, async (request, reply) => {
     const { toolId } = request.params as { id: string; toolId: string };
     const body = request.body as Partial<typeof woTools.$inferInsert>;
@@ -671,20 +671,20 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Tool entry not found' });
     return row;
   });
-
+ 
   app.delete('/work-orders/:id/tools/:toolId', writeGuard, async (request, reply) => {
     const { toolId } = request.params as { id: string; toolId: string };
     await db.delete(woTools).where(eq(woTools.id, toolId));
     return reply.code(204).send();
   });
-
+ 
   // ─── Services ─────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/services', readGuard, async (request) => {
     const { id } = request.params as { id: string };
     return db.select().from(woServices).where(eq(woServices.woId, id));
   });
-
+ 
   app.post('/work-orders/:id/services', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof woServices.$inferInsert>;
@@ -692,7 +692,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const [row] = await db.insert(woServices).values({ woId: id, tenantId: tid, ...body } as typeof woServices.$inferInsert).returning();
     return reply.code(201).send(row);
   });
-
+ 
   app.put('/work-orders/:id/services/:svcId', writeGuard, async (request, reply) => {
     const { svcId } = request.params as { id: string; svcId: string };
     const body = request.body as Partial<typeof woServices.$inferInsert>;
@@ -700,22 +700,22 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Service entry not found' });
     return row;
   });
-
+ 
   app.delete('/work-orders/:id/services/:svcId', writeGuard, async (request, reply) => {
     const { svcId } = request.params as { id: string; svcId: string };
     await db.delete(woServices).where(eq(woServices.id, svcId));
     return reply.code(204).send();
   });
-
+ 
   // ─── Safety ───────────────────────────────────────────────────────────────────
-
+ 
   app.get('/work-orders/:id/safety', readGuard, async (request) => {
     const { id } = request.params as { id: string };
     try {
-      return await db.select({ id: woSafety.id, woId: woSafety.woId }).from(woSafety).where(eq(woSafety.woId, id));
+      return await db.select().from(woSafety).where(eq(woSafety.woId, id));
     } catch { return []; }
   });
-
+ 
   app.post('/work-orders/:id/safety', writeGuard, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Partial<typeof woSafety.$inferInsert>;
@@ -723,7 +723,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
     const [row] = await db.insert(woSafety).values({ woId: id, tenantId: tid, ...body } as typeof woSafety.$inferInsert).returning();
     return reply.code(201).send(row);
   });
-
+ 
   app.put('/work-orders/:id/safety/:safetyId', writeGuard, async (request, reply) => {
     const { safetyId } = request.params as { id: string; safetyId: string };
     const body = request.body as Partial<typeof woSafety.$inferInsert>;
@@ -731,84 +731,125 @@ export async function workOrderRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Safety item not found' });
     return row;
   });
-
+ 
   app.delete('/work-orders/:id/safety/:safetyId', writeGuard, async (request, reply) => {
     const { safetyId } = request.params as { id: string; safetyId: string };
     await db.delete(woSafety).where(eq(woSafety.id, safetyId));
     return reply.code(204).send();
   });
 }
-
+ 
 /** Copies job plan tasks/labour/materials/tools/safety into a WO */
 async function applyJobPlanToWo(jobPlanId: string, woId: string, tenantId: string): Promise<void> {
-  const [jp] = await db.select().from(jobPlans).where(eq(jobPlans.id, jobPlanId)).limit(1);
-  if (!jp) return;
-
-  const [tasks, labour, materials, tools, safety] = await Promise.all([
-    db.select().from(jobPlanTasks).where(eq(jobPlanTasks.jpId, jobPlanId)).orderBy(jobPlanTasks.sequence),
-    db.select().from(jobPlanLabour).where(eq(jobPlanLabour.jpId, jobPlanId)),
-    db.select().from(jobPlanMaterials).where(eq(jobPlanMaterials.jpId, jobPlanId)),
-    db.select().from(jobPlanTools).where(eq(jobPlanTools.jpId, jobPlanId)),
-    db.select().from(jobPlanSafety).where(eq(jobPlanSafety.jpId, jobPlanId)).orderBy(jobPlanSafety.sequence),
-  ]);
-
-  // Map jp task IDs to newly created wo task IDs
+  const tasks = await db.select({
+    id: jobPlanTasks.id,
+    sequence: jobPlanTasks.sequence,
+    description: jobPlanTasks.description,
+    taskType: jobPlanTasks.taskType,
+    estimatedHours: jobPlanTasks.estimatedHours,
+    instructions: jobPlanTasks.instructions,
+  }).from(jobPlanTasks).where(eq(jobPlanTasks.jpId, jobPlanId)).orderBy(jobPlanTasks.sequence);
+ 
   const taskIdMap = new Map<string, string>();
   for (const t of tasks) {
-    const [woTask] = await db.insert(woTasks).values({
+    // Only pass fields that exist in schema — no undefined values
+    const insertVal: Record<string, unknown> = {
       woId,
       tenantId,
-      sequence: t.sequence,
-      description: t.description,
-      taskType: t.taskType,
-      estimatedHours: t.estimatedHours,
-      instructions: t.instructions,
-    }).returning();
-    taskIdMap.set(t.id, woTask!.id);
+      sequence: t.sequence ?? 0,
+      description: t.description ?? '',
+    };
+    if (t.taskType !== undefined && t.taskType !== null) insertVal.taskType = t.taskType;
+    if (t.estimatedHours !== undefined && t.estimatedHours !== null) insertVal.estimatedHours = t.estimatedHours;
+    if (t.instructions !== undefined && t.instructions !== null) insertVal.instructions = t.instructions;
+ 
+    const [woTask] = await db.insert(woTasks).values(insertVal as typeof woTasks.$inferInsert).returning({ id: woTasks.id });
+    if (woTask) taskIdMap.set(t.id, woTask.id);
   }
-
-  if (labour.length > 0) {
-    await db.insert(woLabour).values(labour.map((l) => ({
+ 
+  const labour = await db.select({
+    id: jobPlanLabour.id,
+    craft: jobPlanLabour.craft,
+    hours: jobPlanLabour.hours,
+    rate: jobPlanLabour.rate,
+    taskId: jobPlanLabour.taskId,
+  }).from(jobPlanLabour).where(eq(jobPlanLabour.jpId, jobPlanId));
+ 
+  for (const l of labour) {
+    const insertVal: Record<string, unknown> = {
       woId,
       tenantId,
-      taskId: l.taskId ? taskIdMap.get(l.taskId) : undefined,
-      craft: l.craft,
+      craft: l.craft ?? 'GEN',
       workDate: new Date(),
-      regularHours: l.hours,
-      regularRate: l.rate,
-    })));
+      regularHours: String(l.hours ?? '0'),
+    };
+    if (l.taskId) insertVal.taskId = taskIdMap.get(l.taskId) ?? null;
+    if (l.rate !== undefined && l.rate !== null) insertVal.regularRate = String(l.rate);
+ 
+    await db.insert(woLabour).values(insertVal as typeof woLabour.$inferInsert);
   }
-
-  if (materials.length > 0) {
-    await db.insert(woMaterials).values(materials.map((m) => ({
+ 
+  const materials = await db.select({
+    id: jobPlanMaterials.id,
+    description: jobPlanMaterials.description,
+    itemNum: jobPlanMaterials.itemNum,
+    quantity: jobPlanMaterials.quantity,
+    unitCost: jobPlanMaterials.unitCost,
+    taskId: jobPlanMaterials.taskId,
+  }).from(jobPlanMaterials).where(eq(jobPlanMaterials.jpId, jobPlanId));
+ 
+  for (const m of materials) {
+    const insertVal: Record<string, unknown> = {
       woId,
       tenantId,
-      taskId: m.taskId ? taskIdMap.get(m.taskId) : undefined,
-      itemNum: m.itemNum,
-      description: m.description,
-      qtyPlanned: m.quantity,
-      unitCost: m.unitCost,
-    })));
+      description: m.description ?? '',
+      qtyPlanned: String(m.quantity ?? '1'),
+    };
+    if (m.taskId) insertVal.taskId = taskIdMap.get(m.taskId) ?? null;
+    if (m.itemNum !== undefined && m.itemNum !== null) insertVal.itemNum = m.itemNum;
+    if (m.unitCost !== undefined && m.unitCost !== null) insertVal.unitCost = String(m.unitCost);
+ 
+    await db.insert(woMaterials).values(insertVal as typeof woMaterials.$inferInsert);
   }
-
-  if (tools.length > 0) {
-    await db.insert(woTools).values(tools.map((t) => ({
+ 
+  const tools = await db.select({
+    id: jobPlanTools.id,
+    toolDescription: jobPlanTools.toolDescription,
+    quantity: jobPlanTools.quantity,
+    taskId: jobPlanTools.taskId,
+  }).from(jobPlanTools).where(eq(jobPlanTools.jpId, jobPlanId));
+ 
+  for (const t of tools) {
+    const insertVal: Record<string, unknown> = {
       woId,
       tenantId,
-      taskId: t.taskId ? taskIdMap.get(t.taskId) : undefined,
-      description: t.toolDescription,
-      qtyPlanned: t.quantity,
-    })));
+      description: t.toolDescription ?? 'Tool',
+    };
+    if (t.taskId) insertVal.taskId = taskIdMap.get(t.taskId) ?? null;
+    if (t.quantity !== undefined && t.quantity !== null) insertVal.qtyPlanned = Number(t.quantity);
+ 
+    await db.insert(woTools).values(insertVal as typeof woTools.$inferInsert);
   }
-
-  if (safety.length > 0) {
-    await db.insert(woSafety).values(safety.map((s) => ({
+ 
+  const safety = await db.select({
+    id: jobPlanSafety.id,
+    hazard: jobPlanSafety.hazard,
+    control: jobPlanSafety.control,
+    ppe: jobPlanSafety.ppe,
+    sequence: jobPlanSafety.sequence,
+  }).from(jobPlanSafety).where(eq(jobPlanSafety.jpId, jobPlanId)).orderBy(jobPlanSafety.sequence);
+ 
+  for (const s of safety) {
+    const insertVal: Record<string, unknown> = {
       woId,
       tenantId,
-      hazard: s.hazard,
-      control: s.control,
-      ppe: s.ppe,
-      sequence: s.sequence,
-    })));
+      hazard: s.hazard ?? '',
+      control: s.control ?? '',
+      sequence: s.sequence ?? 0,
+    };
+    if (s.ppe !== undefined && s.ppe !== null) insertVal.ppe = s.ppe;
+ 
+    await db.insert(woSafety).values(insertVal as typeof woSafety.$inferInsert);
   }
 }
+ 

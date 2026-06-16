@@ -42,8 +42,8 @@ const S = {
   menuItemGreen: { display: 'block', width: '100%', textAlign: 'left' as const, padding: '9px 14px', fontSize: '13px', color: '#16a34a', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: '8px' },
   menuDivider: { height: '1px', background: '#f1f5f9', margin: '4px 0' },
   modal: { position: 'fixed' as const, inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' },
-  modalBox: { background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '18px', padding: '28px 28px 24px', width: '100%', maxWidth: '500px', margin: '0 16px', boxShadow: '0 24px 64px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' as const, maxHeight: '85vh', overflowY: 'auto' as const },
-  modalTitle: { fontSize: '17px', fontWeight: 700, color: '#111827', marginBottom: '6px' },
+  modalBox: { background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '18px', padding: '28px', width: '100%', maxWidth: '460px', margin: '0 16px', boxShadow: '0 24px 64px rgba(0,0,0,0.15)' },
+  modalTitle: { fontSize: '17px', fontWeight: 700, color: '#111827', marginBottom: '4px' },
   modalSub: { fontSize: '13px', color: '#6b7280', marginBottom: '20px' },
   label: { fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' },
   modalInput: { width: '100%', background: '#f9fafb', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '10px 14px', fontSize: '13px', color: '#111827', outline: 'none', boxSizing: 'border-box' as const },
@@ -94,6 +94,8 @@ export function AdminIdentityPage() {
   const [showBulkAssign,   setShowBulkAssign]   = useState(false);
   const [showAdminSessions, setShowAdminSessions] = useState(false);
   const [sessionMenuId,    setSessionMenuId]    = useState<string | null>(null);
+  const [rolePopupId,      setRolePopupId]      = useState<string | null>(null);
+  const [rolePopupPos,     setRolePopupPos]     = useState({ top: 0, left: 0 });
   const [sessionMenuPos,   setSessionMenuPos]   = useState({ top: 0, right: 0 });
   const [adminSessions,     setAdminSessions]     = useState<{userId:string;displayName:string;email:string;isActive:boolean;sessionCount:number;deactivateAt?:string|null}[]>([]);
   const [assignType,       setAssignType]       = useState<'role'|'group'>('role');
@@ -229,7 +231,20 @@ export function AdminIdentityPage() {
     setScheduling(true); setError('');
     try {
       const r = await api<{ message: string }>(`/admin/users/${scheduleUserId}/schedule-deactivation`, {
-        method: 'POST', body: JSON.stringify({ deactivateAt: new Date(scheduleDate).toISOString() }),
+        method: 'POST', body: JSON.stringify({ deactivateAt: (() => {
+          // scheduleDate from <input type="date"> is always YYYY-MM-DD
+          // but parse safely to avoid locale issues
+          const parts = scheduleDate.split(/[-\/]/);
+          let d: Date;
+          if (parts[0].length === 4) {
+            // YYYY-MM-DD
+            d = new Date(`${parts[0]}-${parts[1]}-${parts[2]}T12:00:00Z`);
+          } else {
+            // DD-MM-YYYY fallback
+            d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00Z`);
+          }
+          return d.toISOString();
+        })() }),
       });
       setMsg(r.message); setScheduleUserId(null); setScheduleDate(''); loadAll();
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed'); }
@@ -397,14 +412,15 @@ export function AdminIdentityPage() {
               </th>
               <th style={S.th}>Name</th>
               <th style={S.th}>Email</th>
+              <th style={S.th}>Role</th>
               <th style={S.th}>Status</th>
               <th style={S.th}>Last login</th>
               <th style={{ ...S.th, width: '48px' }}></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={6} style={S.emptyRow}>Loading users…</td></tr>}
-            {!loading && paged.length === 0 && <tr><td colSpan={6} style={S.emptyRow}>No users found.</td></tr>}
+            {loading && <tr><td colSpan={7} style={S.emptyRow}>Loading users…</td></tr>}
+            {!loading && paged.length === 0 && <tr><td colSpan={7} style={S.emptyRow}>No users found.</td></tr>}
             {paged.map(u => (
               <tr key={u.id} style={selected.has(u.id) ? S.rowSelected : {}}>
                 <td style={{ ...S.td, width: '44px' }}>
@@ -412,6 +428,38 @@ export function AdminIdentityPage() {
                 </td>
                 <td style={S.tdName}>{u.displayName}</td>
                 <td style={S.td}>{u.email}</td>
+                <td style={S.td}>
+                  {u.roles && u.roles.filter(r => r !== 'All Users').length > 0
+                    ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {u.roles.filter(r => r !== 'All Users').slice(0, 2).map(r => (
+                          <span key={r} style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: '20px', padding: '2px 8px', fontSize: '11px', fontWeight: 500 }}>{r}</span>
+                        ))}
+                        {u.roles.filter(r => r !== 'All Users').length > 2 && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const rect = (e.target as HTMLElement).getBoundingClientRect();
+                              setRolePopupPos({ top: rect.bottom + 6, left: rect.left });
+                              setRolePopupId(rolePopupId === u.id ? null : u.id);
+                            }}
+                            style={{ background: '#f1f5f9', color: '#374151', borderRadius: '20px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', border: '1px solid #e5e7eb', fontWeight: 500 }}>
+                            +{u.roles.filter(r => r !== 'All Users').length - 2}
+                          </span>
+                        )}
+                        {rolePopupId === u.id && (
+                          <div style={{ position: 'fixed', top: rolePopupPos.top, left: rolePopupPos.left, zIndex: 9999, background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: '160px' }}>
+                            <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px', fontWeight: 500 }}>All roles</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                              {u.roles.filter(r => r !== 'All Users').map(r => (
+                                <span key={r} style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: '20px', padding: '3px 10px', fontSize: '12px', fontWeight: 500 }}>{r}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    : <span style={{ color: '#9ca3af', fontSize: '12px' }}>—</span>
+                  }
+                </td>
                 <td style={S.td}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
                     <span style={u.isActive ? S.badgeActive : S.badgeInactive}>{u.isActive ? 'Active' : 'Inactive'}</span>
@@ -438,7 +486,7 @@ export function AdminIdentityPage() {
                         <Link to={`/admin/identity/users/${u.id}`} style={{ ...S.menuItem, display: 'block', textDecoration: 'none' }}>✎ Edit</Link>
                         {u.isActive ? (
                           <>
-                            <button style={S.menuItem} onClick={() => { setMenuOpenId(null); resetPassword(u.id, u.email); }}>↺ Reset password</button>
+                            <button style={S.menuItem} onClick={() => { setMenuOpenId(null); resetPassword(u.id, u.email); }}>↺ Force reset password</button>
                             <button style={S.menuItem} onClick={() => { setMenuOpenId(null); forceLogout(u.id, u.displayName); }}>⊘ Force logout</button>
                             {u.deactivateAt
                               ? <button style={{ ...S.menuItem, color: '#f59e0b' }} onClick={() => { setMenuOpenId(null); cancelSchedule(u.id); }}>✕ Cancel schedule</button>
@@ -470,10 +518,10 @@ export function AdminIdentityPage() {
         <div style={S.modal} onClick={() => setShowCreate(false)}>
           <div style={S.modalBox} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <p style={S.modalTitle}>Create new user</p>
+              <p style={{ fontSize: '17px', fontWeight: 700, color: '#111827' }}>Create new user</p>
               <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '22px', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
-            <form onSubmit={createUser}>
+            <form onSubmit={createUser} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={S.grid2}>
                 {([['Email address','email','email'],['Username','username','text'],['Display name','displayName','text'],['Password','password','password']] as [string,string,string][]).map(([lbl,key,type]) => (
                   <div key={key}>
@@ -484,8 +532,8 @@ export function AdminIdentityPage() {
                   </div>
                 ))}
               </div>
-              <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '8px' }}>Min 10 chars · uppercase · number · special char</p>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px' }}>Min 10 chars · uppercase · number · special char</p>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                 <button type="submit" style={S.btnPrimary} disabled={creating}>{creating ? 'Creating…' : 'Create user'}</button>
                 <button type="button" style={S.btnOutline} onClick={() => setShowCreate(false)}>Cancel</button>
               </div>
@@ -497,9 +545,9 @@ export function AdminIdentityPage() {
       {/* ── Import modal ── */}
       {showImport && (
         <div style={S.modal} onClick={() => setShowImport(false)}>
-          <div style={{ ...S.modalBox, maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+          <div style={{ ...S.modalBox }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <p style={S.modalTitle}>Bulk import users</p>
+              <p style={{ fontSize: '17px', fontWeight: 700, color: '#111827' }}>Bulk import users</p>
               <button onClick={() => setShowImport(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '22px', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             <div style={{ background: '#fff8f1', borderRadius: '10px', border: '1px solid #fed7aa', padding: '14px', marginBottom: '16px' }}>
@@ -558,7 +606,7 @@ export function AdminIdentityPage() {
                 })}
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                 <button type="submit" style={S.btnPrimary} disabled={assigning || !assignTargetId}>
                   {assigning ? 'Assigning…' : `Assign to ${selected.size} user(s)`}
                 </button>
@@ -578,7 +626,7 @@ export function AdminIdentityPage() {
             <form onSubmit={confirmSchedule}>
               <label style={S.label}>Deactivation date</label>
               <input type="date" style={S.modalInput} value={scheduleDate} min={minDate} onChange={e => setScheduleDate(e.target.value)} required />
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                 <button type="submit" style={S.btnPrimary} disabled={scheduling}>{scheduling ? 'Saving…' : 'Confirm'}</button>
                 <button type="button" style={S.btnOutline} onClick={() => setScheduleUserId(null)}>Cancel</button>
               </div>
@@ -598,7 +646,7 @@ export function AdminIdentityPage() {
               <label style={S.label}>Type DELETE to confirm</label>
               <input type="text" style={S.modalInput} value={deleteConfirm} placeholder="DELETE"
                 onChange={e => setDeleteConfirm(e.target.value.toUpperCase())} required />
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                 <button type="submit" disabled={deleting || deleteConfirm !== 'DELETE'}
                   style={{ ...S.btnPrimary, background: deleteConfirm === 'DELETE' ? 'linear-gradient(135deg,#ef4444,#dc2626)' : 'rgba(239,68,68,0.3)', boxShadow: 'none' }}>
                   {deleting ? 'Deleting…' : 'Delete permanently'}
@@ -610,6 +658,9 @@ export function AdminIdentityPage() {
         </div>
       )}
 
+      {rolePopupId && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setRolePopupId(null)} />
+      )}
       {sessionMenuId && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setSessionMenuId(null)} />
       )}
@@ -621,7 +672,7 @@ export function AdminIdentityPage() {
       {/* ── Admin sessions modal ── */}
       {showAdminSessions && (
         <div style={S.modal}>
-          <div style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '18px', width: '100%', maxWidth: '600px', margin: '0 16px', boxShadow: '0 24px 64px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', maxHeight: '85vh' }}>
+          <div style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '18px', width: '100%', maxWidth: '600px', margin: '0 16px', boxShadow: '0 24px 64px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 80px)' }}>
             {/* Sticky header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
               <div>
@@ -675,7 +726,7 @@ export function AdminIdentityPage() {
                               }}>···</button>
                               {sessionMenuId === a.userId && (
                                 <div style={{ ...S.menu, top: sessionMenuPos.top, right: sessionMenuPos.right }}>
-                                  <button style={S.menuItem} onClick={() => { setSessionMenuId(null); resetPassword(a.userId, a.email); }}>↺ Reset password</button>
+                                  <button style={S.menuItem} onClick={() => { setSessionMenuId(null); resetPassword(a.userId, a.email); }}>↺ Force reset password</button>
                                   {a.sessionCount > 0 && (
                                     <button style={S.menuItem} onClick={async () => {
                                       setSessionMenuId(null);

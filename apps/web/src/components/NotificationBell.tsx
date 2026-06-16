@@ -198,20 +198,19 @@ export function NotificationBell() {
         <div style={{
           position: 'absolute', right: 0, top: 44, zIndex: 200,
           width: 340, maxHeight: 480,
-          background: 'var(--color-background-primary)',
-          border: '0.5px solid var(--color-border-tertiary)',
-          borderRadius: 'var(--border-radius-lg)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          background: '#ffffff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '16px',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}>
-          <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              Notifications {unread > 0 && <span style={{ color: 'var(--color-text-secondary)', fontWeight: 400 }}>({unread} unread)</span>}
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
+              Notifications {unread > 0 && <span style={{ color: '#9ca3af', fontWeight: 400, fontSize: 13 }}>({unread} unread)</span>}
             </span>
-            {/* P0-8: mark all read button */}
             {unread > 0 && (
-              <button type="button" onClick={markAllRead} style={{ fontSize: 12, color: 'var(--color-text-info)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <button type="button" onClick={markAllRead} style={{ fontSize: 12, color: '#f97316', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
                 Mark all read
               </button>
             )}
@@ -219,7 +218,7 @@ export function NotificationBell() {
 
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {notifications.length === 0 ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: 13 }}>
+              <div style={{ padding: '40px 16px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
                 No notifications yet
               </div>
             ) : (
@@ -228,22 +227,23 @@ export function NotificationBell() {
                   key={n.id}
                   onClick={() => handleNotificationClick(n)}
                   style={{
-                    padding: '12px 16px',
-                    borderBottom: '0.5px solid var(--color-border-tertiary)',
+                    padding: '13px 18px',
+                    borderBottom: '1px solid #f1f5f9',
                     cursor: 'pointer',
-                    background: n.isRead ? 'transparent' : 'var(--color-background-info)',
+                    background: n.isRead ? '#ffffff' : '#fff7ed',
                     display: 'flex', gap: 10, alignItems: 'flex-start',
+                    transition: 'background 0.12s',
                   }}
                 >
                   <div style={{
                     width: 8, height: 8, borderRadius: '50%',
-                    background: n.isRead ? 'transparent' : '#378ADD',
+                    background: n.isRead ? 'transparent' : '#f97316',
                     flexShrink: 0, marginTop: 5,
                   }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: 2 }}>{n.title}</p>
-                    <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 4, lineHeight: 1.4 }}>{n.body}</p>
-                    <p style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{n.title}</p>
+                    <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 4, lineHeight: 1.4 }}>{n.body}</p>
+                    <p style={{ fontSize: 11, color: '#9ca3af' }}>
                       {new Date(n.createdAt).toLocaleString()}
                     </p>
                   </div>
@@ -254,9 +254,8 @@ export function NotificationBell() {
                     onClick={(e) => deleteNotification(n.id, e)}
                     style={{
                       background: 'none', border: 'none', cursor: 'pointer',
-                      color: 'var(--color-text-secondary)', fontSize: 14,
+                      color: '#9ca3af', fontSize: 14,
                       padding: '0 2px', lineHeight: 1, flexShrink: 0,
-                      opacity: 0.6,
                     }}
                   >
                     ✕

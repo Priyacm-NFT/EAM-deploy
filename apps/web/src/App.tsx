@@ -50,6 +50,7 @@ import { DeliveryLogPage } from './pages/admin/notifications/DeliveryLog.js';
 import { BounceListPage } from './pages/admin/notifications/BounceList.js';
 import { UserNotificationPrefsPage } from './pages/admin/notifications/UserNotificationPrefs.js';
 import { LocationTreePage } from './pages/assets/LocationTree.js';
+import { FailureCodesPage } from './pages/assets/FailureCodes.js';
 import { AssetListPage } from './pages/assets/AssetList.js';
 import { AssetFormPage } from './pages/assets/AssetForm.js';
 import { AssetDetailPage } from './pages/assets/AssetDetail.js';
@@ -184,6 +185,7 @@ export default function App() {
   const PAGE_TITLES: [string, string, string?][] = [
     ['/assets', 'Assets', 'Equipment, machinery and infrastructure register'],
     ['/locations', 'Locations'],
+    ['/failure-codes', 'Failure Codes'],
     ['/service-requests', 'Service Requests', 'Customer and internal service tickets'],
     ['/work-orders', 'Work Orders', 'Maintenance and corrective work'],
     ['/job-plans', 'Job Plans', 'Reusable task and resource templates'],
@@ -260,9 +262,10 @@ export default function App() {
                 <div className="app-sidebar-section-label">Operations</div>
 
                 {canReadAssets && (
-                  <CollapsibleSection label="Assets" paths={['/assets', '/locations']}>
+                  <CollapsibleSection label="Assets" paths={['/assets', '/locations', '/failure-codes']}>
                     <SidebarLink to="/assets" label="Asset Register" />
                     <SidebarLink to="/locations" label="Locations" />
+                    <SidebarLink to="/failure-codes" label="Failure Codes" />
                   </CollapsibleSection>
                 )}
 
@@ -528,6 +531,7 @@ export default function App() {
 
             {/* EAM modules */}
             <Route path="/locations" element={<RequireAuth><LocationTreePage /></RequireAuth>} />
+            <Route path="/failure-codes" element={<RequireAuth><FailureCodesPage /></RequireAuth>} />
             <Route path="/assets" element={<RequireAuth><AssetListPage /></RequireAuth>} />
             <Route path="/assets/new" element={<RequireAuth><AssetFormPage /></RequireAuth>} />
             <Route path="/assets/:id" element={<RequireAuth><AssetDetailPage /></RequireAuth>} />

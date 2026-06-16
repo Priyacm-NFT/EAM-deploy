@@ -115,9 +115,35 @@ export function PermitDetailPage() {
 
       {/* Overview tab */}
       {tab === 'overview' && (
-        <>
+        <div className="admin-section space-y-4">
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="form-label">Permit number</span>
+              <p>{permit.permitNum}</p>
+            </div>
+            <div>
+              <span className="form-label">Type</span>
+              <p>{permit.type.replace(/_/g, ' ')}</p>
+            </div>
+            <div>
+              <span className="form-label">Status</span>
+              <p><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[permit.status] ?? ''}`}>{permit.status}</span></p>
+            </div>
+            <div>
+              <span className="form-label">Valid from</span>
+              <p>{permit.validFrom ? new Date(permit.validFrom).toLocaleString() : '—'}</p>
+            </div>
+            <div>
+              <span className="form-label">Valid to</span>
+              <p>{permit.validTo ? new Date(permit.validTo).toLocaleString() : '—'}</p>
+            </div>
+            <div>
+              <span className="form-label">Description</span>
+              <p>{permit.description}</p>
+            </div>
+          </div>
           {permit.notes && (
-            <div className="admin-section">
+            <div>
               <span className="form-label">Notes</span>
               <p className="text-sm whitespace-pre-wrap">{permit.notes}</p>
             </div>
@@ -129,7 +155,7 @@ export function PermitDetailPage() {
             onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))}
             readOnly
           />
-        </>
+        </div>
       )}
 
       {/* Checklist tab */}

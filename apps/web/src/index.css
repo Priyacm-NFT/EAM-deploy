@@ -5,19 +5,12 @@
 @layer base {
   body {
     @apply m-0 font-sans antialiased;
-    background-color: #0a1528;
-    background-image:
-      radial-gradient(ellipse 80% 65% at 50% 25%, rgba(28, 58, 108, 0.42), transparent),
-      radial-gradient(ellipse 60% 50% at 8% 55%, rgba(22, 48, 92, 0.36), transparent),
-      radial-gradient(ellipse 55% 45% at 92% 65%, rgba(32, 62, 112, 0.30), transparent),
-      radial-gradient(ellipse 50% 40% at 50% 100%, rgba(18, 38, 72, 0.48), transparent),
-      radial-gradient(ellipse 35% 30% at 72% 18%, rgba(200, 110, 40, 0.07), transparent),
-      linear-gradient(165deg, #071220 0%, #0c1e38 28%, #122a4c 52%, #0e2240 78%, #081428 100%);
-    background-attachment: fixed;
+    background-color:#1e293b; /* deep slate blue */
     min-height: 100vh;
-    color: rgba(255, 255, 255, 0.88);
+    color: rgba(255, 255, 255, 0.95);
   }
-
+  
+  
   a {
     color: #6aacf5;
     transition: color 0.15s;
@@ -118,7 +111,7 @@
   /* ── Forms ── */
   .form-label {
     @apply block text-sm font-medium mb-1;
-    color: rgba(255, 255, 255, 0.55);
+    @apply block text-sm font-medium mb-1 text-slate-600;
   }
 
   .form-input {

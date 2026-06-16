@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { usePagination } from '../../hooks/usePagination.js';
@@ -403,11 +403,14 @@ export function LabourPage() {
     setError('');
   };
 
-  const openEditCrew = (c: Crew) => {
+  const openEditCrew = async (c: Crew) => {
     setEditCrew(c);
     setCrewForm({ name: c.name, leadUserId: c.leadUserId ?? '' });
     setShowNewCrew(true);
+    setExpandedCrewId(null);
     setError('');
+    const detail = await api<Crew>(`/crews/${c.id}`);
+    setCrewDetail(detail);
   };
 
   const handleSaveCrew = async () => {
@@ -434,30 +437,34 @@ export function LabourPage() {
   const toggleCrewDetail = async (crewId: string) => {
     if (expandedCrewId === crewId) { setExpandedCrewId(null); setCrewDetail(null); return; }
     setExpandedCrewId(crewId);
+    setShowNewCrew(false);
+    setEditCrew(null);
     const detail = await api<Crew>(`/crews/${crewId}`);
     setCrewDetail(detail);
   };
 
   const handleAddMember = async () => {
-    if (!addMemberUserId || !expandedCrewId) return;
+    const crewId = editCrew?.id ?? expandedCrewId;
+    if (!addMemberUserId || !crewId) return;
     setSavingMember(true);
     try {
-      await api(`/crews/${expandedCrewId}/members`, {
+      await api(`/crews/${crewId}/members`, {
         method: 'POST',
         body: JSON.stringify({ userId: addMemberUserId, role: addMemberRole }),
       });
       setAddMemberUserId('');
       setAddMemberRole('MEMBER');
-      const detail = await api<Crew>(`/crews/${expandedCrewId}`);
+      const detail = await api<Crew>(`/crews/${crewId}`);
       setCrewDetail(detail);
     } catch (e) { setError(String(e)); }
     finally { setSavingMember(false); }
   };
 
   const handleRemoveMember = async (memberId: string) => {
-    if (!expandedCrewId) return;
+    const crewId = editCrew?.id ?? expandedCrewId;
+    if (!crewId) return;
     try {
-      await api(`/crews/${expandedCrewId}/members/${memberId}`, { method: 'DELETE' });
+      await api(`/crews/${crewId}/members/${memberId}`, { method: 'DELETE' });
       const detail = await api<Crew>(`/crews/${expandedCrewId}`);
       setCrewDetail(detail);
     } catch (e) { setError(String(e)); }
@@ -626,9 +633,9 @@ export function LabourPage() {
           </div>
 
           {showNewCrew && (
-            <div className="border border-slate-200 rounded p-4 bg-slate-50 space-y-3">
+            <div className="border border-slate-200 rounded-lg p-5 bg-slate-50 space-y-4">
               <h3 className="text-sm font-semibold text-slate-700">
-                {editCrew ? 'Edit Crew' : 'New Crew'}
+                {editCrew ? `Edit Crew — ${editCrew.crewNum}` : 'New Crew'}
               </h3>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -654,8 +661,75 @@ export function LabourPage() {
                   {savingCrew ? 'Saving…' : (editCrew ? 'Update' : 'Create')}
                 </button>
                 <button type="button" className="btn-secondary !w-auto px-4"
-                  onClick={() => { setShowNewCrew(false); setEditCrew(null); }}>Cancel</button>
+                  onClick={() => { setShowNewCrew(false); setEditCrew(null); setExpandedCrewId(null); setCrewDetail(null); }}>Cancel</button>
               </div>
+
+              {/* Members section — only when editing an existing crew */}
+              {editCrew && (
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Members</div>
+
+                  {/* Add member row */}
+                  <div className="flex gap-2 mb-3 items-end">
+                    <div className="flex-1">
+                      <label className="block text-xs text-slate-500 mb-1">Add member</label>
+                      <Combobox
+                        items={users.filter((u) => !crewDetail?.members?.find((m) => m.userId === u.id))}
+                        value={addMemberUserId}
+                        onChange={setAddMemberUserId}
+                        getLabel={(u) => u.displayName ? `${u.displayName} (${u.email})` : u.email}
+                        placeholder="Search user…"
+                      />
+                    </div>
+                    <div style={{ width: 140 }}>
+                      <label className="block text-xs text-slate-500 mb-1">Role</label>
+                      <select className="form-input" value={addMemberRole}
+                        onChange={(e) => setAddMemberRole(e.target.value)}>
+                        <option value="MEMBER">Member</option>
+                        <option value="LEAD">Lead</option>
+                        <option value="SUPERVISOR">Supervisor</option>
+                      </select>
+                    </div>
+                    <button type="button" className="btn-primary !w-auto px-4"
+                      disabled={!addMemberUserId || savingMember}
+                      onClick={handleAddMember}>
+                      {savingMember ? '…' : '+ Add'}
+                    </button>
+                  </div>
+
+                  {/* Members table */}
+                  {!crewDetail?.members || crewDetail.members.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-2">No members yet. Add one above.</p>
+                  ) : (
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                          <th className="pb-2 pr-4">Name</th>
+                          <th className="pb-2 pr-4">Email</th>
+                          <th className="pb-2 pr-4">Role</th>
+                          <th className="pb-2">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {crewDetail.members.map((m) => (
+                          <tr key={m.id} className="border-b border-slate-100">
+                            <td className="py-2 pr-4 font-medium">
+                              {m.userName ?? '—'}
+                              {m.isPrimary && <span className="ml-2 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">Primary</span>}
+                            </td>
+                            <td className="py-2 pr-4 text-slate-400 text-xs">{m.userEmail ?? '—'}</td>
+                            <td className="py-2 pr-4 text-slate-500">{m.role}</td>
+                            <td className="py-2">
+                              <button type="button" className="text-xs text-red-500 hover:underline"
+                                onClick={() => handleRemoveMember(m.id)}>Remove</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -674,8 +748,8 @@ export function LabourPage() {
                 <tr><td colSpan={5} className="py-6 text-center text-slate-400">No crews.</td></tr>
               ) : (
                 pagedCrews.map((c) => (
-                  <>
-                    <tr key={c.id} className="border-b border-slate-100">
+                  <React.Fragment key={c.id}>
+                    <tr className="border-b border-slate-100">
                       <td className="py-2 pr-4 font-mono text-xs text-blue-600">{c.crewNum}</td>
                       <td className="py-2 pr-4 font-medium">{c.name}</td>
                       <td className="py-2 pr-4">
@@ -692,7 +766,7 @@ export function LabourPage() {
                       </td>
                     </tr>
                     {expandedCrewId === c.id && crewDetail && (
-                      <tr key={`${c.id}-members`}>
+                      <tr>
                         <td colSpan={5} style={{ padding: '0 0 12px 24px', background: '#f8fafc' }}>
                           <div style={{ borderLeft: '2px solid #e2e8f0', paddingLeft: 16, paddingTop: 12 }}>
                             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Members</div>
@@ -757,7 +831,7 @@ export function LabourPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))
               )}
             </tbody>

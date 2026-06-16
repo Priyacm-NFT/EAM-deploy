@@ -9,7 +9,21 @@ interface Location {
   code: string;
   type: string;
   parentId: string | null;
+  siteId?: string | null;
   children?: Location[];
+}
+
+interface Site {
+  id: string;
+  name: string;
+  siteNum: string;
+}
+
+function flattenTree(nodes: Location[], depth = 0): (Location & { depth: number })[] {
+  return nodes.flatMap((n) => [
+    { ...n, depth },
+    ...(n.children ? flattenTree(n.children, depth + 1) : []),
+  ]);
 }
 
 function LocationNode({ node, depth = 0 }: { node: Location; depth?: number }) {
@@ -44,14 +58,16 @@ function LocationNode({ node, depth = 0 }: { node: Location; depth?: number }) {
 
 export function LocationTreePage() {
   const [tree, setTree] = useState<Location[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', code: '', type: 'FLOOR', parentId: '' });
+  const [form, setForm] = useState({ name: '', code: '', type: 'FLOOR', parentId: '', siteId: '' });
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
     api<Location[]>('/locations?tree=true').then(setTree).catch((e) => setError(String(e)));
+    api<Site[]>('/admin/org/sites').then(setSites).catch(() => setSites([]));
   }, []);
 
   const save = async () => {
@@ -60,7 +76,7 @@ export function LocationTreePage() {
     try {
       await api('/locations', {
         method: 'POST',
-        body: JSON.stringify({ ...form, parentId: form.parentId || undefined }),
+        body: JSON.stringify({ ...form, parentId: form.parentId || undefined, siteId: form.siteId || undefined }),
       });
       setSuccess('Location created');
       setShowForm(false);
@@ -97,6 +113,15 @@ export function LocationTreePage() {
               <input className="form-input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
             </label>
             <label className="block">
+              <span className="form-label">Site</span>
+              <select className="form-input" value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
+                <option value="">No site</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.siteNum})</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
               <span className="form-label">Type</span>
               <select className="form-input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
                 {['SITE', 'BUILDING', 'FLOOR', 'ROOM', 'AREA', 'ZONE', 'YARD', 'OTHER'].map((t) => (
@@ -105,8 +130,13 @@ export function LocationTreePage() {
               </select>
             </label>
             <label className="block">
-              <span className="form-label">Parent ID (optional)</span>
-              <input className="form-input" value={form.parentId} placeholder="Leave blank for top-level" onChange={(e) => setForm({ ...form, parentId: e.target.value })} />
+              <span className="form-label">Parent location (optional)</span>
+              <select className="form-input" value={form.parentId} onChange={(e) => setForm({ ...form, parentId: e.target.value })}>
+                <option value="">No parent (top-level)</option>
+                {flattenTree(tree).map((l) => (
+                  <option key={l.id} value={l.id}>{'— '.repeat(l.depth)}{l.code} – {l.name}</option>
+                ))}
+              </select>
             </label>
             <div className="col-span-2 flex gap-2">
               <button type="button" className="btn-primary !w-auto px-4" onClick={save} disabled={saving}>

@@ -36,7 +36,7 @@ export function WOFormPage() {
     ]).then(([a, l, jp]) => {
       setAssets(a.data ?? []);
       setLocations(Array.isArray(l) ? l : []);
-      setJobPlans(jp.data ?? []);
+      setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? []));
     }).catch((e) => setError(String(e)));
 
     if (!isNew) {

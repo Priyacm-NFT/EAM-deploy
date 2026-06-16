@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, desc, ilike, or, isNull } from 'drizzle-orm';
+import { eq, and, desc, ilike, or, isNull, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import QRCode from 'qrcode';
 import { WorkflowEngine } from '@eam/workflow-engine';
 import {
@@ -25,6 +26,11 @@ import { FieldRulesService } from '@eam/config-engine';
 const readGuard = { preHandler: requirePermission('assets:read') };
 const writeGuard = { preHandler: requirePermission('assets:write') };
 const adminGuard = { preHandler: requirePermission('admin:config:manage') };
+
+// Aliases used to resolve site/org via the asset's location when the asset's
+// own siteId/orgId are not set directly.
+const locationSites = alias(sites, 'location_sites');
+const locationOrgs = alias(organisations, 'location_orgs');
 
 export async function assetRoutes(app: FastifyInstance) {
 
@@ -273,18 +279,19 @@ export async function assetRoutes(app: FastifyInstance) {
         updatedAt: assets.updatedAt,
         locationCode: locations.code,
         locationName: locations.name,
-        siteName: sites.name,
+        siteName: sql<string | null>`coalesce(${sites.name}, ${locationSites.name})`,
         className: assetClassifications.description,
       })
       .from(assets)
       .leftJoin(locations, eq(assets.locationId, locations.id))
       .leftJoin(sites, eq(assets.siteId, sites.id))
+      .leftJoin(locationSites, eq(locations.siteId, locationSites.id))
       .leftJoin(assetClassifications, eq(assets.classId, assetClassifications.id))
       .where(
         and(
           eq(assets.tenantId, tid),
           status ? eq(assets.status, status as typeof assets.$inferSelect.status) : undefined,
-          siteId ? eq(assets.siteId, siteId) : undefined,
+          siteId ? or(eq(assets.siteId, siteId), eq(locations.siteId, siteId)) : undefined,
           orgId ? eq(assets.orgId, orgId) : undefined,
           locationId ? eq(assets.locationId, locationId) : undefined,
           classId ? eq(assets.classId, classId) : undefined,
@@ -376,14 +383,16 @@ export async function assetRoutes(app: FastifyInstance) {
         updatedAt: assets.updatedAt,
         locationCode: locations.code,
         locationName: locations.name,
-        siteName: sites.name,
-        orgName: organisations.name,
+        siteName: sql<string | null>`coalesce(${sites.name}, ${locationSites.name})`,
+        orgName: sql<string | null>`coalesce(${organisations.name}, ${locationOrgs.name})`,
         className: assetClassifications.description,
       })
       .from(assets)
       .leftJoin(locations, eq(assets.locationId, locations.id))
       .leftJoin(sites, eq(assets.siteId, sites.id))
       .leftJoin(organisations, eq(assets.orgId, organisations.id))
+      .leftJoin(locationSites, eq(locations.siteId, locationSites.id))
+      .leftJoin(locationOrgs, eq(locations.orgId, locationOrgs.id))
       .leftJoin(assetClassifications, eq(assets.classId, assetClassifications.id))
       .where(and(eq(assets.id, id), eq(assets.tenantId, tid)))
       .limit(1);

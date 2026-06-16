@@ -40,7 +40,7 @@ export function PMFormPage() {
       .then((r) => setAssets(Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? []))
       .catch(() => {});
     api<JobPlan[]>('/job-plans')
-      .then(setJobPlans)
+      .then((r) => setJobPlans(Array.isArray(r) ? r : ((r as { data: JobPlan[] }).data ?? [])))
       .catch(() => {});
   }, []);
 

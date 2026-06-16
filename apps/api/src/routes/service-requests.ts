@@ -138,12 +138,9 @@ async function validateCustomFields(
     };
     const tid = request.user!.tenantId;
 
-    // Auto-number
-    // ── Custom field validation ──────────────────────────────────────────────
     const customData = body.customData ?? {};
     const validation = await validateCustomFields(tid, 'ServiceRequest', { ...body, ...customData }, request.user!.roles ?? []);
     if (!validation.valid) return reply.code(422).send({ error: 'Validation failed', errors: validation.errors });
-    // ────────────────────────────────────────────────────────────────────────
 
     const count = await db.select({ id: serviceRequests.id }).from(serviceRequests)
       .where(eq(serviceRequests.tenantId, tid));
@@ -174,6 +171,17 @@ async function validateCustomFields(
     return reply.code(201).send(row);
   });
 
+  // ─── Assignable users (MUST be before /:id routes) ───────────────────────────
+
+  app.get('/service-requests/assignable-users', readGuard, async (request) => {
+    const tid = request.user!.tenantId;
+    return db
+      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(and(eq(users.tenantId, tid), eq(users.isActive, true)))
+      .orderBy(users.displayName);
+  });
+
   // ─── Get detail ───────────────────────────────────────────────────────────────
 
   app.get('/service-requests/:id', readGuard, async (request, reply) => {
@@ -187,7 +195,6 @@ async function validateCustomFields(
       .limit(1);
     if (!sr) return reply.code(404).send({ error: 'Service request not found' });
 
-    // Linked WO if converted
     let convertedWo = null;
     if (sr.convertedToWoId) {
       const [wo] = await db.select({ id: workOrders.id, woNum: workOrders.woNum, status: workOrders.status })
@@ -216,6 +223,85 @@ async function validateCustomFields(
     return row;
   });
 
+  // ─── Assign ───────────────────────────────────────────────────────────────────
+
+  app.post('/service-requests/:id/assign', writeGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { assignedToUserId: string | null; comment?: string };
+    const tid = request.user!.tenantId;
+
+    const [sr] = await db
+      .select()
+      .from(serviceRequests)
+      .where(and(eq(serviceRequests.id, id), eq(serviceRequests.tenantId, tid)))
+      .limit(1);
+    if (!sr) return reply.code(404).send({ error: 'Service request not found' });
+
+    if (body.assignedToUserId) {
+      const [assignee] = await db
+        .select({ id: users.id, displayName: users.displayName, isActive: users.isActive })
+        .from(users)
+        .where(and(eq(users.id, body.assignedToUserId), eq(users.tenantId, tid)))
+        .limit(1);
+      if (!assignee) return reply.code(400).send({ error: 'Assignee not found in this tenant' });
+      if (!assignee.isActive) return reply.code(400).send({ error: 'Cannot assign to an inactive user' });
+    }
+
+    const prevAssignee = sr.assignedToUserId;
+
+    const [updated] = await db
+      .update(serviceRequests)
+      .set({
+        assignedToUserId: body.assignedToUserId ?? null,
+        status:
+          sr.status === 'NEW' && body.assignedToUserId
+            ? 'QUEUED'
+            : sr.status,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(serviceRequests.id, id), eq(serviceRequests.tenantId, tid)))
+      .returning();
+
+    await audit(db, {
+      tenantId: tid,
+      userId: request.user!.id,
+      action: body.assignedToUserId ? 'ASSIGN' : 'UNASSIGN',
+      resource: 'ServiceRequest',
+      resourceId: id,
+      metadata: {
+        prevAssignee,
+        newAssignee: body.assignedToUserId ?? null,
+        comment: body.comment ?? null,
+        autoStatusAdvance: sr.status === 'NEW' && !!body.assignedToUserId,
+      },
+    });
+
+    void dispatchWebhookEvent(tid, 'SR_ASSIGNED', {
+      srId: id,
+      srNum: sr.srNum,
+      assignedToUserId: body.assignedToUserId ?? null,
+      assignedByUserId: request.user!.id,
+    });
+
+    const { WorkflowEngine } = await import('@eam/workflow-engine');
+    const engine = new WorkflowEngine(db);
+    void engine.startWorkflow(
+      'ServiceRequest',
+      id,
+      'SR_ASSIGNED',
+      tid,
+      {
+        srId: id,
+        srNum: sr.srNum,
+        assignedToUserId: body.assignedToUserId ?? null,
+        priority: sr.priority,
+        description: sr.description,
+      },
+    );
+
+    return updated;
+  });
+
   // ─── Status Transition ────────────────────────────────────────────────────────
 
   app.post('/service-requests/:id/transition', writeGuard, async (request, reply) => {
@@ -227,7 +313,6 @@ async function validateCustomFields(
       .where(and(eq(serviceRequests.id, id), eq(serviceRequests.tenantId, tid))).limit(1);
     if (!sr) return reply.code(404).send({ error: 'Service request not found' });
 
-    // Validate transition
     const [srSet] = await db.select().from(statusSets)
       .where(and(eq(statusSets.entityType, 'ServiceRequest'), eq(statusSets.tenantId, tid))).limit(1);
 
@@ -272,7 +357,6 @@ async function validateCustomFields(
       metadata: { fromStatus: sr.status, toStatus: body.toStatus, comment: body.comment ?? null },
     });
 
-    // ── Auto-start matching workflow on SR status transition ───────────────
     const { WorkflowEngine } = await import('@eam/workflow-engine');
     const engine = new WorkflowEngine(db);
     void engine.startWorkflow(
@@ -311,7 +395,6 @@ async function validateCustomFields(
     if (!sr) return reply.code(404).send({ error: 'Service request not found' });
     if (sr.convertedToWoId) return reply.code(409).send({ error: 'SR already converted to a work order' });
 
-    // Auto-number WO
     const woCount = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.tenantId, tid));
     const woNum = `WO-${String(woCount.length + 1).padStart(6, '0')}`;
 
