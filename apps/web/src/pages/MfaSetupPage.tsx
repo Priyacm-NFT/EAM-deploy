@@ -46,7 +46,6 @@ export function MfaSetupPage() {
   const setupMessage = setupState?.message ?? '';
   const setupOnly = Boolean(mfaSessionToken);
   const authToken = setupOnly ? mfaSessionToken : null;
-
   const [setup, setSetup] = useState<SetupResponse | null>(null);
   const [code, setCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
@@ -54,16 +53,6 @@ export function MfaSetupPage() {
   const [loading, setLoading] = useState(false);
   const [disableCode, setDisableCode] = useState('');
   const [mfaEnabled, setMfaEnabled] = useState(false);
-
-  // Recovery code test state
-  const [showRecoveryTest, setShowRecoveryTest] = useState(false);
-  const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
-  const [recoveryTestMsg, setRecoveryTestMsg] = useState('');
-  const [recoveryTestError, setRecoveryTestError] = useState('');
-  const [testingRecovery, setTestingRecovery] = useState(false);
-
-  // Copy recovery codes state
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!setupOnly && !isLoggedIn()) {
@@ -139,48 +128,6 @@ export function MfaSetupPage() {
     }
   }
 
-  // Test a recovery code against the backend MFA challenge
-  async function testRecoveryCode(e: React.FormEvent) {
-    e.preventDefault();
-    if (!recoveryCodeInput.trim()) return;
-    setTestingRecovery(true);
-    setRecoveryTestMsg('');
-    setRecoveryTestError('');
-    try {
-      // We need a mfa_session_token to call /auth/mfa/challenge
-      // For the account page (not forced setup), we get a temp mfa token first
-      const tokenRes = await mfaApi<{ mfa_session_token: string }>(
-        '/auth/mfa/request-session',
-        { method: 'POST' },
-        authToken,
-      );
-      await mfaApi(
-        '/auth/mfa/challenge',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            mfa_session_token: tokenRes.mfa_session_token,
-            recovery_code: recoveryCodeInput.trim().toUpperCase().replace(/\s/g, ''),
-          }),
-        },
-        authToken,
-      );
-      setRecoveryTestMsg('Recovery code is valid. It has been marked as used.');
-      setRecoveryCodeInput('');
-    } catch (e) {
-      setRecoveryTestError(e instanceof Error ? e.message : 'Invalid recovery code');
-    } finally {
-      setTestingRecovery(false);
-    }
-  }
-
-  function copyRecoveryCodes() {
-    if (!recoveryCodes) return;
-    navigator.clipboard.writeText(recoveryCodes.join('\n'));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   return (
     <div className="max-w-lg mx-auto">
       <div className="auth-card">
@@ -201,7 +148,6 @@ export function MfaSetupPage() {
           </p>
         )}
 
-        {/* Recovery codes shown after setup */}
         {recoveryCodes && (
           <div className="space-y-4">
             <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
@@ -209,105 +155,42 @@ export function MfaSetupPage() {
             </p>
             <ul className="grid grid-cols-2 gap-2 font-mono text-sm bg-gray-50 p-4 rounded border">
               {recoveryCodes.map((c) => (
-                <li key={c} className="tracking-wider">{c}</li>
+                <li key={c} style={{ color: '#111827', fontWeight: 600 }}>{c}</li>
               ))}
             </ul>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={copyRecoveryCodes}
-                className="btn-outline !w-auto px-4 text-sm"
-              >
-                {copied ? '✓ Copied!' : 'Copy codes'}
-              </button>
-              <Link to={setupOnly ? '/login' : '/account'} className="btn-primary !w-auto px-4 text-sm text-center">
-                {setupOnly ? 'Sign in again' : 'Back to account'}
-              </Link>
-            </div>
           </div>
         )}
 
-        {/* MFA enabled — manage screen */}
         {!recoveryCodes && mfaEnabled && !setup && !setupOnly && (
-          <div className="space-y-6">
+          <form onSubmit={disableMfa} className="space-y-4">
             <p className="text-sm text-gray-600">MFA is currently <strong>enabled</strong>.</p>
-
-            {/* Disable MFA */}
-            <form onSubmit={disableMfa} className="space-y-3">
-              <div>
-                <label htmlFor="disable-code" className="form-label">
-                  Enter authenticator code to disable
-                </label>
-                <input
-                  id="disable-code"
-                  type="text"
-                  inputMode="numeric"
-                  className="form-input"
-                  value={disableCode}
-                  onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  required
-                  maxLength={6}
-                />
-              </div>
-              <button type="submit" className="btn-primary" disabled={loading}>
-                {loading ? 'Disabling…' : 'Disable MFA'}
-              </button>
-            </form>
-
-            {/* Test recovery code section */}
-            <div className="border-t border-slate-200 pt-4">
-              <button
-                type="button"
-                className="text-sm text-accent hover:underline font-medium"
-                onClick={() => { setShowRecoveryTest((v) => !v); setRecoveryTestMsg(''); setRecoveryTestError(''); }}
-              >
-                {showRecoveryTest ? '▲ Hide' : '▼ Test a recovery code'}
-              </button>
-
-              {showRecoveryTest && (
-                <form onSubmit={testRecoveryCode} className="mt-3 space-y-3">
-                  <p className="text-xs text-slate-500">
-                    Enter one of your saved recovery codes to verify it is valid. It will be marked as used after testing.
-                  </p>
-                  {recoveryTestMsg && (
-                    <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
-                      {recoveryTestMsg}
-                    </p>
-                  )}
-                  {recoveryTestError && (
-                    <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-                      {recoveryTestError}
-                    </p>
-                  )}
-                  <div>
-                    <label htmlFor="recovery-input" className="form-label">Recovery code</label>
-                    <input
-                      id="recovery-input"
-                      type="text"
-                      className="form-input font-mono tracking-widest uppercase"
-                      value={recoveryCodeInput}
-                      onChange={(e) => setRecoveryCodeInput(e.target.value)}
-                      placeholder="XXXX-XXXX-XXXX"
-                      required
-                    />
-                  </div>
-                  <button type="submit" className="btn-outline !w-auto px-4 text-sm" disabled={testingRecovery}>
-                    {testingRecovery ? 'Testing…' : 'Test recovery code'}
-                  </button>
-                </form>
-              )}
+            <div>
+              <label htmlFor="disable-code" className="form-label">
+                Enter authenticator code to disable
+              </label>
+              <input
+                id="disable-code"
+                type="text"
+                inputMode="numeric"
+                className="form-input"
+                value={disableCode}
+                onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                required
+                maxLength={6}
+              />
             </div>
-          </div>
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? 'Disabling…' : 'Disable MFA'}
+            </button>
+          </form>
         )}
 
-        {/* MFA not enabled — start setup */}
         {!recoveryCodes && !mfaEnabled && !setup && (
           <button type="button" onClick={startSetup} className="btn-primary" disabled={loading}>
             {loading ? 'Starting…' : 'Set up authenticator app'}
           </button>
         )}
 
-        {/* QR scan + verify step */}
         {!recoveryCodes && setup && (
           <form onSubmit={verifySetup} className="space-y-4">
             <img src={setup.qrDataUri} alt="MFA QR code" className="mx-auto w-48 h-48 rounded border" />

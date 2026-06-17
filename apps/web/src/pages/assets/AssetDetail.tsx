@@ -125,6 +125,7 @@ export function AssetDetailPage() {
 
   return (
     <IdentityPageLayout title={asset.assetNum} backTo="/assets" backLabel="Back to assets">
+      <div style={{ marginTop: '-12px' }}>
       {error && <MessageBanner type="error" text={error} />}
 
       <div className="flex items-start gap-4 mb-4">
@@ -165,7 +166,7 @@ export function AssetDetailPage() {
 
       {/* Overview tab */}
       {tab === 'overview' && (
-        <div className="admin-section grid grid-cols-2 gap-4 text-sm">
+        <div className="admin-section grid grid-cols-2 gap-4 text-sm" style={{ marginBottom: '20px' }}>
           <div><span className="form-label">Class</span><p>{asset.classDescription ?? '—'}</p></div>
           <div><span className="form-label">Location</span><p>{asset.locationName ?? '—'}</p></div>
           <div><span className="form-label">Site</span><p>{asset.siteName ?? '—'}</p></div>
@@ -381,6 +382,7 @@ export function AssetDetailPage() {
           <AttachmentPanel entityType="Asset" entityId={asset.id} />
         </div>
       )}
+      </div>
     </IdentityPageLayout>
   );
 }

@@ -42,10 +42,9 @@ export function ChatPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // ── Context from URL (when opened from a WO/Asset page) ────────────────────
-  const urlContext     = searchParams.get('context') ?? '';        // e.g. 'WorkOrder'
-  const urlContextId   = searchParams.get('contextId') ?? '';      // UUID
-  const urlContextLabel = searchParams.get('contextLabel') ?? '';  // e.g. 'WO-0023'
+  const urlContext     = searchParams.get('context') ?? '';
+  const urlContextId   = searchParams.get('contextId') ?? '';
+  const urlContextLabel = searchParams.get('contextLabel') ?? '';
 
   const [partnerId, setPartnerId] = useState('');
   const [content, setContent] = useState('');
@@ -61,21 +60,17 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // ── Load conversation history ───────────────────────────────────────────────
   const loadHistory = useCallback(async (withUserId: string) => {
     if (!withUserId) return;
     const rows = await api<ChatMessage[]>(`/chat/messages?with=${encodeURIComponent(withUserId)}`);
-    setMessages(rows.slice().reverse()); // API returns newest-first, display oldest-first
-    // Mark as read
+    setMessages(rows.slice().reverse());
     await api('/chat/messages/mark-read', { method: 'POST', body: JSON.stringify({ fromUserId: withUserId }) })
       .catch(() => {});
-    // Refresh unread count
     api<{ count: number }>('/chat/messages/unread-count')
       .then((r) => setUnreadCount(r.count))
       .catch(() => {});
   }, []);
 
-  // ── Socket connection ───────────────────────────────────────────────────────
   useEffect(() => {
     const token = getAccessToken();
     if (!token) { setStatus('error'); return; }
@@ -96,7 +91,6 @@ export function ChatPage() {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
-      // Bump unread if it's not the current conversation
       if (msg.fromUserId !== partnerId) {
         setUnreadCount((c) => c + 1);
       }
@@ -114,7 +108,6 @@ export function ChatPage() {
     }
     void refreshOnline();
 
-    // Initial unread count
     api<{ count: number }>('/chat/messages/unread-count')
       .then((r) => setUnreadCount(r.count))
       .catch(() => {});
@@ -128,7 +121,7 @@ export function ChatPage() {
   useEffect(() => {
     if (partnerId) {
       void loadHistory(partnerId);
-      setUnreadCount(0); // clear badge when opening a conversation
+      setUnreadCount(0);
     }
   }, [partnerId, loadHistory]);
 
@@ -136,7 +129,6 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Send message ────────────────────────────────────────────────────────────
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     const socket = socketRef.current;
@@ -145,7 +137,6 @@ export function ChatPage() {
 
     setSending(true);
     try {
-      // If file attached, upload first then send via REST
       if (attachFile) {
         const form = new FormData();
         form.append('file', attachFile);
@@ -157,12 +148,10 @@ export function ChatPage() {
         const msg = await api<ChatMessage>('/chat/messages/with-attachment', {
           method: 'POST',
           body: form,
-          // don't set Content-Type — browser sets it with boundary
         });
         setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]);
         setAttachFile(null);
       } else {
-        // Normal socket send
         socket.emit('chat:send', {
           toUserId: partnerId.trim(),
           content: content.trim(),
@@ -172,7 +161,6 @@ export function ChatPage() {
       }
       setContent('');
     } catch {
-      // fallback: REST send
       const msg = await api<ChatMessage>('/chat/messages', {
         method: 'POST',
         body: JSON.stringify({
@@ -189,7 +177,6 @@ export function ChatPage() {
     }
   }
 
-  // ── Filtered messages (search) ──────────────────────────────────────────────
   const displayedMessages = searchQuery.trim()
     ? messages.filter((m) => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
     : messages;
@@ -197,7 +184,7 @@ export function ChatPage() {
   const partnerName = onlineUsers.find((u) => u.userId === partnerId)?.displayName ?? partnerId?.slice(0, 8);
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="page-title">Chat</h1>
@@ -206,7 +193,6 @@ export function ChatPage() {
 
       {/* Status + Online Users */}
       <div className="content-card flex flex-col sm:flex-row sm:items-start gap-4">
-        {/* Connection status + presence dropdown */}
         <div className="flex items-center gap-2 shrink-0">
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_DOT[status], display: 'inline-block' }} />
           <span className="text-xs font-medium text-slate-600">{status === 'connected' ? 'Connected' : status === 'error' ? 'Connection error' : 'Disconnected'}</span>
@@ -257,7 +243,6 @@ export function ChatPage() {
           <button
             type="button"
             onClick={async () => {
-              // Find the most recent unread sender and open their conversation
               try {
                 const msgs = await api<{ fromUserId: string }[]>('/chat/messages?with=');
                 const sender = msgs.find((m) => m.fromUserId !== partnerId)?.fromUserId;
@@ -276,7 +261,6 @@ export function ChatPage() {
       {/* Chat area */}
       <div className="content-card flex flex-col gap-0 p-0 overflow-hidden">
 
-        {/* Context banner (shown when opened from WO/Asset page) */}
         {urlContext && urlContextLabel && (
           <div className="px-5 py-2 bg-accent/10 border-b border-accent/20 flex items-center gap-2">
             <span className="text-xs font-semibold text-accent-dark">
@@ -292,7 +276,6 @@ export function ChatPage() {
           </div>
         )}
 
-        {/* Recipient selector + search */}
         <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row gap-3">
           <div className="flex-1">
             <label className="form-label text-xs" htmlFor="chat-partner-id">Chat with (User ID)</label>
@@ -318,7 +301,7 @@ export function ChatPage() {
         </div>
 
         {/* Messages list */}
-        <div className="flex-1 min-h-[260px] max-h-[400px] overflow-y-auto px-5 py-4 space-y-3 bg-white">
+        <div className="flex-1 min-h-[420px] max-h-[600px] overflow-y-auto px-5 py-4 space-y-3 bg-white">
           {displayedMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full py-12 text-slate-400 text-sm">
               {searchQuery ? (
@@ -339,7 +322,7 @@ export function ChatPage() {
 
               return (
                 <div key={m.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[72%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
+                  <div className={`max-w-[60%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
                     isMine ? 'bg-accent text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'
                   }`}>
                     {!isMine && (
@@ -348,7 +331,6 @@ export function ChatPage() {
                       </p>
                     )}
 
-                    {/* Context link badge */}
                     {entityLabel && m.contextEntityId && (
                       <button
                         type="button"
@@ -368,7 +350,6 @@ export function ChatPage() {
                       </button>
                     )}
 
-                    {/* Attachment link */}
                     {m.attachmentUrl && (
                       <a
                         href={m.attachmentUrl}
@@ -393,7 +374,6 @@ export function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Attachment preview */}
         {attachFile && (
           <div className="flex items-center gap-2 px-5 py-2 bg-accent/5 border-t border-accent/20 text-sm text-slate-700">
             <span>📎 {attachFile.name}</span>
@@ -403,7 +383,6 @@ export function ChatPage() {
 
         {/* Message input */}
         <form onSubmit={sendMessage} className="flex items-center gap-3 px-5 py-4 border-t border-slate-200 bg-slate-50/60">
-          {/* File attachment button */}
           <button
             type="button"
             title="Attach file"
@@ -451,7 +430,6 @@ export function ChatPage() {
         </form>
       </div>
 
-      {/* Char limit note when close to limit */}
       {content.length >= MAX_CHARS && (
         <p className="text-xs text-red-500">Message limit is {MAX_CHARS} characters.</p>
       )}

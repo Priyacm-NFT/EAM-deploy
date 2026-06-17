@@ -143,24 +143,33 @@ export function SRDetailPage() {
 
   return (
     <IdentityPageLayout title={sr.srNum} backTo="/service-requests" backLabel="Back to service requests">
+      <div style={{ marginTop: '4px' }}>
       {error && <MessageBanner type="error" text={error} />}
 
-      <div className="flex items-start gap-4 mb-4">
+      <div className="flex items-start gap-4 mb-3">
         <div className="flex-1">
-          <p className="text-lg font-medium text-slate-800">{sr.subject}</p>
-          <div className="flex gap-2 mt-1 flex-wrap">
+          <p className="text-lg font-medium text-slate-800 mb-2">{sr.subject}</p>
+          <div className="flex gap-2 flex-wrap">
             <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">{sr.status}</span>
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[sr.priority] ?? ''}`}>{sr.priority}</span>
             <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">{sr.channel}</span>
             {sr.slaBreached && <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">SLA BREACHED</span>}
           </div>
         </div>
-        <Link to={`/chat?context=ServiceRequest&contextId=${id}&contextLabel=${encodeURIComponent(`SR: ${sr.srNum}`)}`} className="btn-outline !w-auto px-4 text-sm">💬 Chat</Link>
-        <Link to={`/service-requests/${id}/edit`} className="btn-primary !w-auto px-4 text-sm">Edit</Link>
+        <div className="flex gap-2 flex-shrink-0">
+          <Link to={`/chat?context=ServiceRequest&contextId=${id}&contextLabel=${encodeURIComponent(`SR: ${sr.srNum}`)}`} className="btn-outline !w-auto px-4 text-sm">💬 Chat</Link>
+          <Link to={`/service-requests/${id}/edit`} className="btn-primary !w-auto px-4 text-sm">Edit</Link>
+        </div>
       </div>
 
-      <div className="admin-section">
-        <div className="flex flex-wrap gap-2 mb-2">
+      {(available.length > 0 || (sr.status === 'IN_PROGRESS' && !sr.convertedToWoId) || sr.convertedToWoId) && (
+        <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-slate-100">
+          {sr.convertedToWoId && (
+            <Link to={`/work-orders/${sr.convertedToWoId}`}
+              style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#ffffff', borderRadius: '10px', padding: '8px 18px', fontSize: '13px', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', boxShadow: '0 4px 14px rgba(249,115,22,0.35)' }}>
+              View Work Order
+            </Link>
+          )}
           {available.map((s) => (
             <button key={s} type="button" className="btn-primary !w-auto px-4 text-sm" onClick={() => transition(s)} disabled={transitioning}>
               → {s}
@@ -172,13 +181,7 @@ export function SRDetailPage() {
             </button>
           )}
         </div>
-        {sr.convertedToWoId && (
-          <Link to={`/work-orders/${sr.convertedToWoId}`}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-semibold no-underline hover:bg-slate-700 transition-colors">
-            View Work Order
-          </Link>
-        )}
-      </div>
+      )}
 
       {showConvert && (
         <div className="admin-section bg-indigo-50 border border-indigo-200">
@@ -236,6 +239,7 @@ export function SRDetailPage() {
           <AttachmentPanel entityType="ServiceRequest" entityId={sr.id} />
         </div>
       )}
+      </div>
     </IdentityPageLayout>
   );
 }

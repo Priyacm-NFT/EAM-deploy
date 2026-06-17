@@ -283,7 +283,7 @@ function BiPermissionMappingsPanel({ connections }: { connections: Array<{ id: s
         <label className="form-label text-xs">Select connection</label>
         <select className="form-select max-w-xs text-sm" value={connId}
           onChange={(e) => { setConnId(e.target.value); }}>
-          {paged.map((c) => (
+          {connections.map((c) => (
             <option key={c.id} value={c.id}>{c.name} ({c.adapterType})</option>
           ))}
         </select>

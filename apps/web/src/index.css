@@ -5,7 +5,7 @@
 @layer base {
   body {
     @apply m-0 font-sans antialiased;
-    background-color:#1e293b; /* deep slate blue */
+    background-color:#132439; /* deep slate blue */
     min-height: 100vh;
     color: rgba(255, 255, 255, 0.95);
   }
@@ -186,7 +186,12 @@
 .app-sidebar {
   width: 220px;
   flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(5, 11, 22, 0.97) 0%, rgba(7, 14, 28, 0.95) 45%, rgba(9, 17, 34, 0.93) 100%);
+  background: linear-gradient(
+  180deg,
+  rgba(5, 11, 22, 0.97) 0%,
+  rgba(7, 14, 28, 0.95) 45%,
+  rgba(9, 17, 34, 0.93) 100%
+);
   border-right: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);

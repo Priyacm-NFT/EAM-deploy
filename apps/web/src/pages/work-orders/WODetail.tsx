@@ -238,19 +238,20 @@ export function WODetailPage() {
 
   return (
     <IdentityPageLayout title={wo.woNum} backTo="/work-orders" backLabel="Back to work orders">
+      <div style={{ marginTop: '0px' }}>
       {error && <MessageBanner type="error" text={error} />}
 
-      <div className="flex items-start gap-4 mb-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1">
-          <p className="text-lg font-medium text-slate-800">{wo.description}</p>
-          <div className="flex gap-2 mt-1 flex-wrap text-xs">
+          {wo.description && <p className="text-lg font-medium text-slate-800 mb-2">{wo.description}</p>}
+          <div className="flex gap-2 flex-wrap text-xs">
             <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">{wo.status}</span>
             <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700">{wo.type}</span>
             <span className="px-2 py-0.5 rounded bg-orange-50 text-orange-700">{wo.priority}</span>
             {wo.assetNum && <span className="text-slate-500">Asset: {wo.assetNum}</span>}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0">
           <Link to={`/chat?context=WorkOrder&contextId=${id}&contextLabel=${encodeURIComponent(`WO: ${wo.woNum}`)}`} className="btn-outline !w-auto px-4 text-sm">💬 Chat</Link>
           <Link to={`/work-orders/${id}/edit`} className="btn-primary !w-auto px-4 text-sm">Edit</Link>
           {wo.jobPlanDescription && wo.status !== 'CLOSE' && (
@@ -262,7 +263,7 @@ export function WODetailPage() {
       </div>
 
       {nextStatuses.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4 pt-1">
           {nextStatuses.map((s) => (
             <button key={s} type="button" className="btn-primary !w-auto px-4 text-sm" onClick={() => transition(s)} disabled={transitioning}>
               → {s}
@@ -313,7 +314,7 @@ export function WODetailPage() {
       {/* Overview */}
       {tab === 'overview' && (
         <>
-          <div className="admin-section grid grid-cols-2 gap-4 text-sm">
+          <div className="admin-section grid grid-cols-2 gap-4 text-sm" style={{ marginBottom: '20px' }}>
             <div><span className="form-label">Asset</span><p>{wo.assetNum ?? '—'}</p></div>
             <div><span className="form-label">Location</span><p>{wo.locationName ?? '—'}</p></div>
             <div><span className="form-label">Site</span><p>{wo.siteName ?? '—'}</p></div>
@@ -328,8 +329,14 @@ export function WODetailPage() {
             {wo.longDescription && <div className="col-span-2"><span className="form-label">Details</span><p className="whitespace-pre-wrap">{wo.longDescription}</p></div>}
             {wo.closureNotes && <div className="col-span-2"><span className="form-label">Closure notes</span><p className="whitespace-pre-wrap">{wo.closureNotes}</p></div>}
           </div>
-          <DynamicFormRenderer entityName="WorkOrder" record={wo as unknown as Record<string, unknown>}
-            values={customData} onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))} readOnly />
+          <div className="dynamic-form-spaced">
+            <DynamicFormRenderer entityName="WorkOrder" record={wo as unknown as Record<string, unknown>}
+              values={customData} onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))} readOnly />
+          </div>
+          <style>{`
+            .dynamic-form-spaced > * + * { margin-top: 20px !important; }
+            .dynamic-form-spaced .admin-section { margin-bottom: 0 !important; }
+          `}</style>
         </>
       )}
 
@@ -596,7 +603,10 @@ export function WODetailPage() {
         <div className="admin-section">
           <div className="flex justify-between items-center mb-3">
             <h2 className="admin-section-title">Permits to Work</h2>
-            <Link to={`/permits/new?woId=${id}`} className="btn-primary !w-auto px-4 text-sm">+ Request permit</Link>
+            <Link to={`/permits/new?woId=${id}`}
+              style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#ffffff', borderRadius: '10px', padding: '8px 18px', fontSize: '13px', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', boxShadow: '0 4px 14px rgba(249,115,22,0.35)' }}>
+              + Request permit
+            </Link>
           </div>
           {woPermits.length === 0 ? (
             <p className="text-slate-400 text-sm">No permits linked to this work order.</p>
@@ -631,6 +641,7 @@ export function WODetailPage() {
           <AttachmentPanel entityType="WorkOrder" entityId={wo.id} />
         </div>
       )}
+      </div>
     </IdentityPageLayout>
   );
 }
