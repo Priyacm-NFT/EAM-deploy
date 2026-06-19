@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../../api/client.js';
 import { MessageBanner } from '../../../components/identity/IdentityLayout.js';
@@ -133,6 +133,20 @@ export function WorkflowDesignerPage() {
 
   const selectedNode = nodes.find((n) => n.id === selected);
 
+  // ── FIX: if the selected node id no longer exists in `nodes` (e.g. it was
+  // deleted, or stale state survived a re-render), clear the selection
+  // instead of letting the Properties panel try to read fields off
+  // `undefined`. This was the root cause of the blank-page crash when
+  // clicking nodes — `selectedNode.config.assigneeType` etc. would throw
+  // "Cannot read properties of undefined" once `selected` pointed at a
+  // node id that wasn't in the current `nodes` array.
+  useEffect(() => {
+    if (selected && !nodes.some((n) => n.id === selected)) {
+      setSelected(null);
+      setConnecting(null);
+    }
+  }, [selected, nodes]);
+
   function addNode(type: NodeType) {
     const newNode: WFNode = {
       id: `node_${Date.now()}`,
@@ -160,6 +174,16 @@ export function WorkflowDesignerPage() {
 
   function handleNodeClick(e: React.MouseEvent, nodeId: string) {
     e.stopPropagation();
+    // FIX: guard against clicking a node id that isn't in the current
+    // `nodes` array (can happen if state updates land out of order during
+    // a fast double-click / drag-then-click sequence).
+    const targetExists = nodes.some((n) => n.id === nodeId);
+    if (!targetExists) {
+      setSelected(null);
+      setConnecting(null);
+      return;
+    }
+
     if (connecting && connecting !== nodeId) {
       const exists = edges.some((ed) => ed.fromId === connecting && ed.toId === nodeId);
       if (!exists) {
@@ -707,8 +731,13 @@ export function WorkflowDesignerPage() {
                 </thead>
                 <tbody>
                   {instances.map((inst) => (
-                    <>
-                      <tr key={inst.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    // FIX: React.Fragment with an explicit key — the original
+                    // shorthand `<>...</>` cannot carry a `key` prop, which is
+                    // invalid when returned from .map(). Using the full
+                    // `React.Fragment` form here is required wherever a
+                    // fragment needs a key.
+                    <Fragment key={inst.id}>
+                      <tr className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="py-2 pr-4 font-mono text-xs text-slate-500">{inst.id.slice(0, 8)}…</td>
                         <td className="py-2 pr-4 text-xs">{inst.entityType}<br /><span className="text-slate-400">{inst.entityId.slice(0, 8)}…</span></td>
                         <td className="py-2 pr-4">
@@ -745,7 +774,7 @@ export function WorkflowDesignerPage() {
                         </td>
                       </tr>
                       {expandedInstance === inst.id && (
-                        <tr key={`${inst.id}-trace`}>
+                        <tr>
                           <td colSpan={6} className="py-3 px-4 bg-slate-50">
                             {!nodeTrace[inst.id] ? (
                               <p className="text-xs text-slate-400">Loading trace…</p>
@@ -766,7 +795,7 @@ export function WorkflowDesignerPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
