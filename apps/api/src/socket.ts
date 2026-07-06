@@ -1,6 +1,6 @@
 import { Server, type Namespace } from 'socket.io';
 import type { Server as HttpServer } from 'node:http';
-import { and, desc, eq, or } from 'drizzle-orm';
+import { and, desc, eq, or, sql } from 'drizzle-orm';
 import { verifyToken } from '@eam/auth';
 import { db, chatMessages } from '@eam/db';
 import { persistChatMessage } from './lib/chat-persist.js';
@@ -118,15 +118,12 @@ export function registerCollaborationHandlers(nsp: Namespace) {
     );
 
     socket.on('chat:read', async (data: { messageId: string }) => {
-      await db
-        .update(chatMessages)
-        .set({ readAt: new Date() })
-        .where(
-          and(
-            eq(chatMessages.id, data.messageId),
-            eq(chatMessages.toUserId, userId),
-          ),
-        );
+      await db.execute(sql`
+        UPDATE chat_messages
+        SET read_at = NOW()
+        WHERE id = ${data.messageId}
+          AND to_user_id = ${userId}
+      `);
     });
 
     socket.on('notification:new', (payload: unknown) => {
