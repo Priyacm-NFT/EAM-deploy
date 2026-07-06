@@ -10,12 +10,10 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { initJwtKeys, signAccessToken, hashRecoveryCode } from '@eam/auth';
 import {
   users,
-  groups,
-  userGroups,
   sessions,
   mfaRecoveryCodes,
 } from '@eam/db';
@@ -184,8 +182,13 @@ describeDb('P0-1-A — Local Authentication', () => {
       .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
 
-    const [updated] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
-    expect(updated?.mustResetPassword).toBe(true);
+    expect(res.body.ok).toBe(true);
+
+    const activeSessions = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)));
+    expect(activeSessions).toHaveLength(0);
   });
 });
 

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';
 
 interface Asset { id: string; assetNum: string; description: string }
 interface JobPlan { id: string; jpNum: string; description: string }
@@ -18,6 +19,7 @@ const INTERVAL_UNITS  = ['DAY', 'WEEK', 'MONTH', 'YEAR', 'HOUR'] as const;
 
 export function PMFormPage() {
   const navigate = useNavigate();
+  const { defaultSiteId } = useActiveDefaultSite();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [jobPlans, setJobPlans] = useState<JobPlan[]>([]);
   const [pmRoutesList, setPmRoutesList] = useState<PMRoute[]>([]);
@@ -54,14 +56,28 @@ export function PMFormPage() {
   const [targetMode, setTargetMode] = useState<'asset' | 'route'>('asset');
 
   useEffect(() => {
-    api<{ data: Asset[] } | Asset[]>('/assets?pageSize=200')
-      .then((r) => setAssets(Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? []))
-      .catch(() => {});
     api<JobPlan[]>('/job-plans')
       .then((r) => setJobPlans(Array.isArray(r) ? r : ((r as { data: JobPlan[] }).data ?? [])))
       .catch(() => {});
     api<PMRoute[]>('/pm-routes').then(setPmRoutesList).catch(() => setPmRoutesList([]));
   }, []);
+
+  useEffect(() => {
+    if (!defaultSiteId) {
+      setAssets([]);
+      return;
+    }
+    const siteQuery = `siteId=${encodeURIComponent(defaultSiteId)}&`;
+    api<{ data: Asset[] } | Asset[]>(`/assets?${siteQuery}pageSize=200`)
+      .then((r) => setAssets(Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? []))
+      .catch(() => setAssets([]));
+  }, [defaultSiteId]);
+
+  useEffect(() => {
+    if (form.assetId && assets.length > 0 && !assets.some((a) => a.id === form.assetId)) {
+      setForm((f) => ({ ...f, assetId: '' }));
+    }
+  }, [assets, form.assetId]);
 
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -82,6 +98,7 @@ export function PMFormPage() {
           manualNextDueDate: form.manualNextDueDate || undefined,
           leadDays: parseInt(form.leadDays) || 7,
           priority: form.priority,
+          siteId: defaultSiteId || undefined,
           assetId: targetMode === 'asset' ? (form.assetId || undefined) : undefined,
           routeId: targetMode === 'route' ? (form.routeId || undefined) : undefined,
           jobPlanId: form.jobPlanId || undefined,

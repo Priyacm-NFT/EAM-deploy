@@ -21,7 +21,8 @@ interface ItemOption { id: string; itemNum: string; description: string }
 interface Asset {
   id: string; assetNum: string; description: string; status: string;
   criticality: string | null; manufacturer: string | null; model: string | null;
-  serialNum: string | null; locationId: string | null; classId: string | null;
+  serialNum: string | null; locationId: string | null; siteId: string | null;
+  classId: string | null;
   parentAssetId: string | null;
   itemId: string | null;
   isLinear?: boolean;
@@ -38,6 +39,9 @@ export function AssetFormPage() {
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
   const { defaultSiteId } = useActiveDefaultSite();
+
+  const [assetSiteId, setAssetSiteId] = useState<string | null>(null);
+  const activeSiteId = isNew ? (defaultSiteId ?? null) : assetSiteId;
 
   const [locations, setLocations] = useState<Location[]>([]);
   // FIX: candidate Items for the new "Item" (Rotating Item) dropdown —
@@ -86,9 +90,6 @@ export function AssetFormPage() {
     // (falls back to an empty list, same as the Parent Asset dropdown
     // below already does) instead of one optional lookup blocking the
     // whole form with a scary top-level error.
-    if (!isNew) {
-      api<Location[]>('/locations').then(setLocations).catch(() => setLocations([]));
-    }
     api<{ data: ItemOption[] } | ItemOption[]>('/items?pageSize=500')
       .then((itemsResp) => setItemOptions(Array.isArray(itemsResp) ? itemsResp : itemsResp.data ?? []))
       .catch(() => setItemOptions([]));
@@ -99,6 +100,7 @@ export function AssetFormPage() {
         .catch(() => {});
     } else {
       api<Asset>(`/assets/${id}`).then((a) => {
+        setAssetSiteId(a.siteId ?? null);
         setForm({
           assetNum: a.assetNum, description: a.description, status: a.status,
           criticality: a.criticality ?? 'MEDIUM', manufacturer: a.manufacturer ?? '',
@@ -120,19 +122,21 @@ export function AssetFormPage() {
   }, [id, isNew]);
 
   useEffect(() => {
-    if (!isNew) return;
-    const params = defaultSiteId ? `?siteId=${defaultSiteId}` : '';
-    api<Location[]>(`/locations${params}`)
+    if (!activeSiteId) {
+      setLocations([]);
+      return;
+    }
+    api<Location[]>(`/locations?flat=true&siteId=${encodeURIComponent(activeSiteId)}`)
       .then(setLocations)
       .catch(() => setLocations([]));
-  }, [isNew, defaultSiteId]);
+  }, [activeSiteId]);
 
   useEffect(() => {
-    if (!isNew || !form.locationId) return;
+    if (!form.locationId) return;
     if (locations.length > 0 && !locations.some((l) => l.id === form.locationId)) {
       setForm((f) => ({ ...f, locationId: '' }));
     }
-  }, [locations, defaultSiteId, isNew, form.locationId]);
+  }, [locations, form.locationId]);
 
   // FIX: load every asset once on page load so the "Parent asset" dropdown
   // already has the full list ready — open it and click, no typing needed.
@@ -142,21 +146,25 @@ export function AssetFormPage() {
   // simpler and matches "already iruka assets ellam inga vantha directa
   // parent asset click pannikalam."
   useEffect(() => {
-    const siteQuery = isNew && defaultSiteId ? `siteId=${defaultSiteId}&` : '';
+    if (!activeSiteId) {
+      setAssetOptions([]);
+      return;
+    }
+    const siteQuery = `siteId=${encodeURIComponent(activeSiteId)}&`;
     api<{ data: AssetOption[] } | AssetOption[]>(`/assets?${siteQuery}pageSize=500`)
       .then((r) => {
         const list = Array.isArray(r) ? r : r.data ?? [];
         setAssetOptions(list.filter((a) => a.id !== id));
       })
       .catch(() => setAssetOptions([]));
-  }, [id, isNew, defaultSiteId]);
+  }, [id, activeSiteId]);
 
   useEffect(() => {
-    if (!isNew || !form.parentAssetId) return;
+    if (!form.parentAssetId) return;
     if (assetOptions.length > 0 && !assetOptions.some((a) => a.id === form.parentAssetId)) {
       setForm((f) => ({ ...f, parentAssetId: '' }));
     }
-  }, [assetOptions, defaultSiteId, isNew, form.parentAssetId]);
+  }, [assetOptions, form.parentAssetId]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 

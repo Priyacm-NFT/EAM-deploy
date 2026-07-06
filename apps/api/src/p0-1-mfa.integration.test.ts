@@ -167,13 +167,14 @@ describeDb('P0-1-B MFA (TOTP)', () => {
       .where(and(eq(users.tenantId, tenant!.id), eq(users.email, email)))
       .limit(1);
 
+  // requireMfa is enforced on security groups, not role metadata.
     const [group] = await db
       .insert(groups)
-      .values({ tenantId: tenant!.id, name: `mfa-group-${Date.now()}`, source: 'LOCAL' })
+      .values({ tenantId: tenant!.id, name: `mfa-group-${Date.now()}`, source: 'LOCAL', requireMfa: true })
       .returning();
     const [role] = await db
       .insert(roles)
-      .values({ tenantId: tenant!.id, name: `mfa-role-${Date.now()}`, requireMfa: true })
+      .values({ tenantId: tenant!.id, name: `mfa-role-${Date.now()}` })
       .returning();
 
     await db.insert(userGroups).values({ userId: registered!.id, groupId: group!.id });

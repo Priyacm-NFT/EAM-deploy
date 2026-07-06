@@ -26,45 +26,44 @@ export function WOFormPage() {
   const [form, setForm] = useState({
     description: '', longDescription: '', type: 'CM', priority: 'MEDIUM',
     status: 'DRAFT',
+    siteId: '',
     assetId: searchParams.get('assetId') ?? '', locationId: '', jobPlanId: '',
     targetStartDate: '', targetFinishDate: '', notes: '',
   });
 
   useEffect(() => {
-    if (isNew) {
-      const siteQuery = defaultSiteId ? `siteId=${defaultSiteId}&` : '';
-      const locationQuery = defaultSiteId ? `?siteId=${defaultSiteId}` : '';
-      Promise.all([
-        api<{ data: Asset[] }>(`/assets?${siteQuery}pageSize=500`),
-        api<Location[]>(`/locations${locationQuery}`),
-        api<{ data: JobPlan[] }>('/job-plans'),
-      ]).then(([a, l, jp]) => {
-        setAssets(a.data ?? []);
-        setLocations(Array.isArray(l) ? l : []);
-        setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? []));
-      }).catch((e) => setError(String(e)));
-    } else {
-      Promise.all([
-        api<{ data: Asset[] }>('/assets'),
-        api<Location[]>('/locations'),
-        api<{ data: JobPlan[] }>('/job-plans'),
-      ]).then(([a, l, jp]) => {
-        setAssets(a.data ?? []);
-        setLocations(Array.isArray(l) ? l : []);
-        setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? []));
-      }).catch((e) => setError(String(e)));
-    }
+    api<{ data: JobPlan[] }>('/job-plans')
+      .then((jp) => setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? [])))
+      .catch((e) => setError(String(e)));
 
     if (!isNew) {
-      api<typeof form & { id: string }>(`/work-orders/${id}`).then((wo) => {
+      api<typeof form & { id: string }>(`/work-orders/${id}`).then(async (wo) => {
+        const assetId = (wo as { assetId?: string }).assetId ?? '';
+        const locationId = (wo as { locationId?: string }).locationId ?? '';
+        let siteId = (wo as { siteId?: string }).siteId ?? '';
+
+        if (!siteId && assetId) {
+          try {
+            const asset = await api<{ siteId?: string | null }>(`/assets/${assetId}`);
+            siteId = asset.siteId ?? '';
+          } catch { /* keep resolving from location */ }
+        }
+        if (!siteId && locationId) {
+          try {
+            const loc = await api<{ siteId?: string | null }>(`/locations/${locationId}`);
+            siteId = loc.siteId ?? '';
+          } catch { /* no site to filter by */ }
+        }
+
         setForm({
           description: wo.description,
           longDescription: (wo as { longDescription?: string }).longDescription ?? '',
           type: (wo as { type: string }).type,
           priority: (wo as { priority: string }).priority,
           status: (wo as { status?: string }).status ?? 'DRAFT',
-          assetId: (wo as { assetId?: string }).assetId ?? '',
-          locationId: (wo as { locationId?: string }).locationId ?? '',
+          siteId,
+          assetId,
+          locationId,
           jobPlanId: (wo as { jobPlanId?: string }).jobPlanId ?? '',
           targetStartDate: (wo as { targetStartDate?: string }).targetStartDate?.slice(0, 10) ?? '',
           targetFinishDate: (wo as { targetFinishDate?: string }).targetFinishDate?.slice(0, 10) ?? '',
@@ -72,17 +71,41 @@ export function WOFormPage() {
         });
       }).catch((e) => setError(String(e)));
     }
-  }, [id, isNew, defaultSiteId]);
+  }, [id, isNew]);
 
   useEffect(() => {
-    if (!isNew) return;
+    if (!isNew || form.siteId || !defaultSiteId) return;
+    setForm((f) => ({ ...f, siteId: defaultSiteId }));
+  }, [isNew, defaultSiteId, form.siteId]);
+
+  useEffect(() => {
+    if (!form.siteId) {
+      setAssets([]);
+      setLocations([]);
+      return;
+    }
+    const siteQuery = `siteId=${encodeURIComponent(form.siteId)}&`;
+    const locationQuery = `?flat=true&siteId=${encodeURIComponent(form.siteId)}`;
+    Promise.all([
+      api<{ data: Asset[] } | Asset[]>(`/assets?${siteQuery}pageSize=200`),
+      api<Location[]>(`/locations${locationQuery}`),
+    ]).then(([a, l]) => {
+      setAssets(Array.isArray(a) ? a : (a as { data: Asset[] }).data ?? []);
+      setLocations(Array.isArray(l) ? l : []);
+    }).catch(() => {
+      setAssets([]);
+      setLocations([]);
+    });
+  }, [form.siteId]);
+
+  useEffect(() => {
     if (form.locationId && locations.length > 0 && !locations.some((l) => l.id === form.locationId)) {
       setForm((f) => ({ ...f, locationId: '' }));
     }
     if (form.assetId && assets.length > 0 && !assets.some((a) => a.id === form.assetId)) {
       setForm((f) => ({ ...f, assetId: '' }));
     }
-  }, [locations, assets, defaultSiteId, isNew, form.locationId, form.assetId]);
+  }, [locations, assets, form.locationId, form.assetId]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -91,6 +114,7 @@ export function WOFormPage() {
     try {
       const payload = {
         ...form,
+        siteId: form.siteId || undefined,
         assetId: form.assetId || undefined,
         locationId: form.locationId || undefined,
         jobPlanId: form.jobPlanId || undefined,

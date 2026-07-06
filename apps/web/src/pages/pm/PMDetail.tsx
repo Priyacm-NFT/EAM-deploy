@@ -3,13 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, FormField, FormActions, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';
 
 interface PMDetail {
   id: string; pmNum: string; description: string; status: string;
   frequencyType: string; interval: number | null; intervalUnit: string | null;
   nextDueDate: string | null; leadDays: number; priority: string;
   isActive: boolean; assetId: string | null; jobPlanId: string | null;
-  locationId: string | null; siteId: string | null;
+  locationId: string | null; siteId: string | null; routeId: string | null;
 }
 interface Asset { id: string; assetNum: string; description: string }
 interface JobPlan { id: string; jpNum: string; description: string }
@@ -17,9 +18,45 @@ interface JobPlan { id: string; jpNum: string; description: string }
 const FREQUENCY_TYPES = ['CALENDAR', 'METER', 'CALENDAR_AND_METER', 'SEASONAL'] as const;
 const INTERVAL_UNITS = ['DAY', 'WEEK', 'MONTH', 'YEAR', 'HOUR'] as const;
 
+async function resolvePmSiteId(
+  p: PMDetail,
+  defaultSiteId: string | null,
+): Promise<string> {
+  let siteId = p.siteId ?? '';
+  if (!siteId && p.assetId) {
+    try {
+      const asset = await api<{ siteId?: string | null }>(`/assets/${p.assetId}`);
+      siteId = asset.siteId ?? '';
+    } catch { /* keep resolving from location */ }
+  }
+  if (!siteId && p.locationId) {
+    try {
+      const loc = await api<{ siteId?: string | null }>(`/locations/${p.locationId}`);
+      siteId = loc.siteId ?? '';
+    } catch { /* keep resolving from route */ }
+  }
+  if (!siteId && p.routeId) {
+    try {
+      const route = await api<{ siteId?: string | null }>(`/pm-routes/${p.routeId}`);
+      siteId = route.siteId ?? '';
+    } catch { /* no site on route */ }
+  }
+  if (!siteId && defaultSiteId) {
+    siteId = defaultSiteId;
+  }
+  return siteId;
+}
+
+async function loadSiteAssets(siteId: string): Promise<Asset[]> {
+  const siteQuery = `siteId=${encodeURIComponent(siteId)}&`;
+  const r = await api<{ data: Asset[] } | Asset[]>(`/assets?${siteQuery}pageSize=200`);
+  return Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? [];
+}
+
 export function PMDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { defaultSiteId, ready: defaultSiteReady } = useActiveDefaultSite();
   const [pm, setPm] = useState<PMDetail | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [jobPlans, setJobPlans] = useState<JobPlan[]>([]);
@@ -28,18 +65,21 @@ export function PMDetailPage() {
   const [saving, setSaving] = useState(false);
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [generating, setGenerating] = useState(false);
+  const [assetsReady, setAssetsReady] = useState(false);
   const [form, setForm] = useState({
     description: '', frequencyType: 'CALENDAR', interval: '1',
     intervalUnit: 'MONTH', leadDays: '7', priority: 'MEDIUM',
-    assetId: '', jobPlanId: '', status: 'ACTIVE',
+    siteId: '', assetId: '', jobPlanId: '', status: 'ACTIVE',
     // FIX: deliberately starts blank, NOT pre-filled from the current
     // nextDueDate — see the save() comment below for why that matters.
     manualNextDueDate: '',
   });
 
   useEffect(() => {
-    if (!id) return;
-    api<PMDetail>(`/pm-masters/${id}`).then((p) => {
+    if (!id || !defaultSiteReady) return;
+    setAssetsReady(false);
+    api<PMDetail>(`/pm-masters/${id}`).then(async (p) => {
+      const siteId = await resolvePmSiteId(p, defaultSiteId);
       setPm(p);
       setForm({
         description: p.description,
@@ -48,18 +88,39 @@ export function PMDetailPage() {
         intervalUnit: p.intervalUnit ?? 'MONTH',
         leadDays: String(p.leadDays ?? 7),
         priority: p.priority,
+        siteId,
         assetId: p.assetId ?? '',
         jobPlanId: p.jobPlanId ?? '',
         status: p.status,
         manualNextDueDate: '',
       });
-    }).catch((e) => setError(String(e)));
+    }).catch((e) => {
+      setError(String(e));
+      setAssetsReady(true);
+    });
 
-    api<{ data: Asset[] } | Asset[]>('/assets?pageSize=200')
-      .then((r) => setAssets(Array.isArray(r) ? r : (r as { data: Asset[] }).data ?? []))
-      .catch(() => {});
     api<JobPlan[]>('/job-plans').then(setJobPlans).catch(() => {});
-  }, [id]);
+  }, [id, defaultSiteReady, defaultSiteId]);
+
+  useEffect(() => {
+    if (!pm) return;
+    if (!form.siteId) {
+      setAssets([]);
+      setAssetsReady(true);
+      return;
+    }
+    setAssetsReady(false);
+    loadSiteAssets(form.siteId)
+      .then(setAssets)
+      .catch(() => setAssets([]))
+      .finally(() => setAssetsReady(true));
+  }, [pm, form.siteId]);
+
+  useEffect(() => {
+    if (form.assetId && assets.length > 0 && !assets.some((a) => a.id === form.assetId)) {
+      setForm((f) => ({ ...f, assetId: '' }));
+    }
+  }, [assets, form.assetId]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,7 +151,9 @@ export function PMDetailPage() {
       setForm((f) => ({ ...f, manualNextDueDate: '' }));
       setMsg('PM master updated successfully.');
       const refreshed = await api<PMDetail>(`/pm-masters/${id}`);
+      const siteId = await resolvePmSiteId(refreshed, defaultSiteId);
       setPm(refreshed);
+      setForm((f) => ({ ...f, siteId }));
     } catch (e) {
       setError(String(e));
     } finally { setSaving(false); }
@@ -107,7 +170,7 @@ export function PMDetailPage() {
     }
   };
 
-  if (!pm) return <IdentityPageLayout title="Loading…" backTo="/pm" backLabel="Back to PM masters"><div /></IdentityPageLayout>;
+  if (!pm || !assetsReady) return <IdentityPageLayout title="Loading…" backTo="/pm" backLabel="Back to PM masters"><div /></IdentityPageLayout>;
 
   const isOverdue = pm.nextDueDate && new Date(pm.nextDueDate) < new Date();
 
