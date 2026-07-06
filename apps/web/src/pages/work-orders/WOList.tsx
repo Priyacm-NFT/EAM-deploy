@@ -127,13 +127,9 @@ export function WOListPage() {
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="py-2 pr-4">WO #</th>
-                <th className="py-2 pr-4">Description</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Type</th>
-                <th className="py-2 pr-4">Priority</th>
-                <th className="py-2 pr-4">Asset</th>
-                <th className="py-2 pr-4">Target finish</th>
+                {columns.map((col) => (
+                  <th key={col.fieldKey} className="py-2 pr-4">{col.label}</th>
+                ))}
                 <th className="py-2" />
               </tr>
             </thead>

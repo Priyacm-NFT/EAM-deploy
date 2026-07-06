@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import {
-  IdentityPageLayout, FormField, FormActions, MessageBanner,
+  IdentityPageLayout, FormField, MessageBanner,
 } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';

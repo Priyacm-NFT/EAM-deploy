@@ -417,7 +417,7 @@ export function DashboardPage() {
   // ── Auto-refresh per widget ───────────────────────────────────────────────
   useEffect(() => {
     const timers: ReturnType<typeof setInterval>[] = [];
-    for (const [id, cfg] of Object.entries(widgetConfigs)) {
+    for (const [, cfg] of Object.entries(widgetConfigs)) {
       if (cfg.refreshMs && cfg.refreshMs > 0) {
         const t = setInterval(() => {
           api<DashboardResponse>('/dashboard').then(setData).catch(() => {});
@@ -585,7 +585,7 @@ export function DashboardPage() {
         className="grid grid-cols-1 lg:grid-cols-2 gap-5"
         onDragOver={(e) => e.preventDefault()}
       >
-        {rest.map((w, idx) => {
+        {rest.map((w) => {
           const globalIdx = orderedWidgets.findIndex((x) => x.id === w.id);
           return (
             <div key={w.id}

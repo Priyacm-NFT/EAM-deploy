@@ -62,7 +62,7 @@ export function StandardReportsPage() {
   );
   const uncategorised = filtered.filter((s) => !allCategorised.includes(s));
 
-  const { page, setPage, paged, totalPages, totalItems } = usePagination(filtered, 10);
+  const { page, setPage, totalPages, totalItems } = usePagination(filtered, 10);
 
   return (
     <IdentityPageLayout

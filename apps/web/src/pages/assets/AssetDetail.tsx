@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
@@ -113,7 +113,6 @@ const STATUS_PILL: Record<string, string> = {
 
 export function AssetDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('overview');
   const [asset, setAsset] = useState<Asset | null>(null);
   const [children, setChildren] = useState<ChildAsset[]>([]);

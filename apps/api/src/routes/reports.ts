@@ -16,6 +16,7 @@ import {
   type ReportDefinitionBody,
 } from '@eam/reporting-engine';
 import { authenticate, requirePermission } from '../plugins/auth.js';
+import { parseReportFilters } from '../lib/report-filters.js';
 
 const manageGuard = { preHandler: [authenticate, requirePermission('admin:reporting:manage')] };
 const authGuard = { preHandler: authenticate };
@@ -557,12 +558,17 @@ export async function reportRoutes(app: FastifyInstance) {
 
       // Merge paramFilters over the saved definition filters
       const savedDef = report.definition as ReportDefinitionBody;
+      let paramFilters;
+      try {
+        paramFilters = parseReportFilters(body.paramFilters);
+      } catch (err) {
+        return reply.status(400).send({
+          error: err instanceof Error ? err.message : 'Invalid report filter',
+        });
+      }
       const mergedDef: ReportDefinitionBody = {
         ...savedDef,
-        filters: [
-          ...(savedDef.filters ?? []),
-          ...(body.paramFilters ?? []),
-        ],
+        filters: [...(savedDef.filters ?? []), ...paramFilters],
       };
 
       // Temporarily write merged def to a throwaway run (no DB update)
@@ -574,7 +580,7 @@ export async function reportRoutes(app: FastifyInstance) {
         const builder = new ReportQueryBuilder();
         const safeQuery = builder.buildQuery(subject.name, request.user!.tenantId, {
           fields: mergedDef.fields,
-          filters: mergedDef.filters as import('@eam/reporting-engine').ReportFilter[],
+          filters: mergedDef.filters,
           groupBy: mergedDef.groupBy,
           orderBy: mergedDef.orderBy,
         });

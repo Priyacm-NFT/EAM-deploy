@@ -84,7 +84,7 @@ export async function adminAttachmentRoutes(app: FastifyInstance) {
 
   // ─── Mandatory attachment enforcement helper (called by entity routes) ───────
   // Exposed as a utility — entity save routes import checkMandatoryAttachments()
-  app.get('/admin/attachments/mandatory-check', guard, async (request, reply) => {
+  app.get('/admin/attachments/mandatory-check', guard, async (request) => {
     const q = request.query as { entityType: string; entityId: string; toStatus: string };
     const result = await checkMandatoryAttachments(
       request.user!.tenantId,

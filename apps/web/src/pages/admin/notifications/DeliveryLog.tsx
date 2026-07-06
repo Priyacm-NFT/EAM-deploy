@@ -211,28 +211,3 @@ export function DeliveryLogPage() {
     </IdentityPageLayout>
   );
 }
-
-
-interface DeliveryRecord {
-  id: string;
-  triggerId: string;
-  triggerEventType: string;
-  templateName: string | null;
-  recipientEmail: string;
-  recipientName: string | null;
-  sentAt: string | null;
-  status: 'delivered' | 'failed' | 'bounced' | 'pending';
-  errorMessage: string | null;
-  retryCount: number;
-  channel: 'email' | 'in_app';
-  entityType: string | null;
-  entityId: string | null;
-}
-
-interface DeliveryStats {
-  totalSent: number;
-  delivered: number;
-  failed: number;
-  bounced: number;
-  pending: number;
-}

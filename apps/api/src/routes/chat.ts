@@ -61,33 +61,34 @@ export async function chatRoutes(app: FastifyInstance) {
     const searchTerm = (q.q ?? '').trim();
     if (!searchTerm) return [];
 
-    const conditions = [
-      eq(chatMessages.tenantId, request.user!.tenantId),
-      like(chatMessages.content, `%${searchTerm}%`),
-    ];
+    const tenantId = request.user!.tenantId;
+    const userId = request.user!.id;
+    const contentMatch = like(chatMessages.content, `%${searchTerm}%`);
 
-    // Optionally scope to a specific conversation
-    if (q.with) {
-      conditions.push(
-        or(
-          and(eq(chatMessages.fromUserId, request.user!.id), eq(chatMessages.toUserId, q.with)),
-          and(eq(chatMessages.fromUserId, q.with), eq(chatMessages.toUserId, request.user!.id)),
-        ) as ReturnType<typeof and>,
-      );
-    } else {
-      // Global search — only messages the user is party to
-      conditions.push(
-        or(
-          eq(chatMessages.fromUserId, request.user!.id),
-          eq(chatMessages.toUserId, request.user!.id),
-        ) as ReturnType<typeof and>,
-      );
-    }
+    const whereClause = q.with
+      ? and(
+          eq(chatMessages.tenantId, tenantId),
+          contentMatch,
+          or(
+            and(eq(chatMessages.fromUserId, userId), eq(chatMessages.toUserId, q.with)),
+            and(eq(chatMessages.fromUserId, q.with), eq(chatMessages.toUserId, userId)),
+          ),
+        )
+      : and(
+          eq(chatMessages.tenantId, tenantId),
+          contentMatch,
+          or(
+            eq(chatMessages.fromUserId, userId),
+            eq(chatMessages.toUserId, userId),
+          ),
+        );
+
+    if (!whereClause) return [];
 
     return db
       .select()
       .from(chatMessages)
-      .where(and(...conditions))
+      .where(whereClause)
       .orderBy(desc(chatMessages.createdAt))
       .limit(50);
   });

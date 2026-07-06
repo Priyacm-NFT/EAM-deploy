@@ -1,4 +1,4 @@
-import { and, count, desc, eq, notInArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, notInArray } from 'drizzle-orm';
 import type { Database } from '@eam/db';
 import { serviceRequests, workOrders, assets } from '@eam/db';
 import { listOnlineUsers } from './presence.js';

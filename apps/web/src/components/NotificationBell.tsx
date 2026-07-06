@@ -44,9 +44,7 @@ export function NotificationBell() {
   useEffect(() => {
     load(); // initial load
 
-    const API_URL = (import.meta as Record<string, unknown>).env
-      ? String((import.meta as Record<string, { VITE_API_URL?: string }>).env?.VITE_API_URL ?? 'http://localhost:3000')
-      : 'http://localhost:3000';
+    const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
     let sseConnected = false;
 

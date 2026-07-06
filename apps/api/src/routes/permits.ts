@@ -9,8 +9,7 @@ import {
   audit,
 } from '@eam/db';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
-import { entityDefinitions, fieldDefinitions } from '@eam/db';
-import { FieldRulesService } from '@eam/config-engine';
+import { validateCustomFields } from '../lib/entity-fields.js';
 import { requirePermission } from '../plugins/auth.js';
 import { nextAutoRecordCode } from '@eam/shared';
 
@@ -19,32 +18,6 @@ const writeGuard = { preHandler: requirePermission('permits:write') };
 const approveGuard = { preHandler: requirePermission('permits:approve') };
 
 export async function permitRoutes(app: FastifyInstance) {
-
-// ── Custom field validation helper ──────────────────────────────────────────
-async function validateCustomFields(
-  tid: string,
-  entityName: string,
-  data: Record<string, unknown>,
-  userRoles: string[],
-  currentStatus?: string,
-): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
-  const [entity] = await db
-    .select()
-    .from(entityDefinitions)
-    .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
-    .limit(1);
-  if (!entity) return { valid: true, errors: [] };
-
-  const fields = await db
-    .select()
-    .from(fieldDefinitions)
-    .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
-
-  const svc = new FieldRulesService(db);
-  const rules = await svc.loadRules(tid, entity.id, currentStatus);
-  return svc.validateWrite(fields, rules, data, userRoles);
-}
-// ─────────────────────────────────────────────────────────────────────────────
 
   // ─── List ─────────────────────────────────────────────────────────────────────
 

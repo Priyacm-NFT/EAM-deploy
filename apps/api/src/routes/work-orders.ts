@@ -24,8 +24,6 @@ import {
   statusTransitions,
   permits,
   audit,
-  entityDefinitions,
-  fieldDefinitions,
   statusHistory,
   recordStatusHistory,
   pmForecasts,
@@ -35,7 +33,7 @@ import { dispatchWebhookEvent } from '../lib/webhooks.js';
 import { globalEventBus, nextAutoRecordCode } from '@eam/shared';
 import { WorkflowEngine } from '@eam/workflow-engine';
 import { checkMandatoryAttachments } from './admin-attachments.js';
-import { FieldRulesService } from '@eam/config-engine';
+import { validateCustomFields } from '../lib/entity-fields.js';
  
 const readGuard = { preHandler: requirePermission('work_orders:read') };
 
@@ -152,32 +150,7 @@ export async function workOrderRoutes(app: FastifyInstance) {
  
     return { data: rows, page: Number(page ?? 1), pageSize: limit };
   });
- 
-  // ─── Custom field validation helper ──────────────────────────────────────────
-  async function validateCustomFields(
-    tid: string,
-    entityName: string,
-    data: Record<string, unknown>,
-    userRoleIds: string[],
-    currentStatus?: string,
-  ): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
-    const [entity] = await db
-      .select()
-      .from(entityDefinitions)
-      .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
-      .limit(1);
-    if (!entity) return { valid: true, errors: [] };
- 
-    const fields = await db
-      .select()
-      .from(fieldDefinitions)
-      .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
- 
-    const svc = new FieldRulesService(db);
-    const rules = await svc.loadRules(tid, entity.id, currentStatus);
-    return svc.validateWrite(fields, rules, data, userRoleIds);
-  }
- 
+
   // ─── Create ───────────────────────────────────────────────────────────────────
  
   app.post('/work-orders', writeGuard, async (request, reply) => {

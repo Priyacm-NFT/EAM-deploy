@@ -19,8 +19,7 @@ import {
   statusHistory,
   recordStatusHistory,
 } from '@eam/db';
-import { entityDefinitions, fieldDefinitions } from '@eam/db';
-import { FieldRulesService } from '@eam/config-engine';
+import { validateCustomFields } from '../lib/entity-fields.js';
 import { requirePermission } from '../plugins/auth.js';
 import { nextAutoRecordCode } from '@eam/shared';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
@@ -37,32 +36,6 @@ const SLA_HOURS: Record<string, number> = {
 };
 
 export async function serviceRequestRoutes(app: FastifyInstance) {
-
-// ── Custom field validation helper ──────────────────────────────────────────
-async function validateCustomFields(
-  tid: string,
-  entityName: string,
-  data: Record<string, unknown>,
-  userRoles: string[],
-  currentStatus?: string,
-): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
-  const [entity] = await db
-    .select()
-    .from(entityDefinitions)
-    .where(and(eq(entityDefinitions.tenantId, tid), eq(entityDefinitions.name, entityName)))
-    .limit(1);
-  if (!entity) return { valid: true, errors: [] };
-
-  const fields = await db
-    .select()
-    .from(fieldDefinitions)
-    .where(and(eq(fieldDefinitions.entityId, entity.id), eq(fieldDefinitions.tenantId, tid), eq(fieldDefinitions.isActive, true)));
-
-  const svc = new FieldRulesService(db);
-  const rules = await svc.loadRules(tid, entity.id, currentStatus);
-  return svc.validateWrite(fields, rules, data, userRoles);
-}
-// ─────────────────────────────────────────────────────────────────────────────
 
   // ─── List ─────────────────────────────────────────────────────────────────────
 

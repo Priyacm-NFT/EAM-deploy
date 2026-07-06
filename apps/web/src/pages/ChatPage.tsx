@@ -287,6 +287,9 @@ export function ChatPage() {
               placeholder="Paste a user ID or click a name above"
               data-testid="chat-partner-id"
             />
+            {partnerId ? (
+              <p className="text-xs text-slate-500 mt-1">Chatting with {partnerName}</p>
+            ) : null}
           </div>
           <div className="flex-1">
             <label className="form-label text-xs">Search messages</label>

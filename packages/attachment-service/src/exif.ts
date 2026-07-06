@@ -10,7 +10,6 @@
 const JPEG_SOI = 0xffd8;      // Start of Image
 const JPEG_EOI = 0xffd9;      // End of Image
 const JPEG_APP1 = 0xffe1;     // APP1 marker — where EXIF lives
-const JPEG_APP0 = 0xffe0;     // APP0 marker (JFIF)
 // APP2–APPF can also carry metadata; strip all APPn markers
 const JPEG_APP_MIN = 0xffe0;
 const JPEG_APP_MAX = 0xffef;
@@ -88,11 +87,10 @@ export function sanitizeForStorage(
   source?: 'mobile' | 'web',
 ): Buffer {
   const isPhoto = mimeType === 'image/jpeg' || mimeType === 'image/jpg';
-  const isMobile = source === 'mobile';
 
-  // Strip EXIF from all JPEGs on mobile uploads (GPS privacy).
-  // On web we also strip to be safe.
-  if (isPhoto) {
+  // Strip EXIF from JPEG uploads. Mobile is the primary privacy concern; web
+  // uploads are stripped as well when source is omitted or explicitly web.
+  if (isPhoto && (source === undefined || source === 'mobile' || source === 'web')) {
     return stripExif(buffer);
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
-import { IdentityPageLayout, FormField, FormActions, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';
 
@@ -62,6 +62,7 @@ export function WOFormPage() {
           longDescription: (wo as { longDescription?: string }).longDescription ?? '',
           type: (wo as { type: string }).type,
           priority: (wo as { priority: string }).priority,
+          status: (wo as { status?: string }).status ?? 'DRAFT',
           assetId: (wo as { assetId?: string }).assetId ?? '',
           locationId: (wo as { locationId?: string }).locationId ?? '',
           jobPlanId: (wo as { jobPlanId?: string }).jobPlanId ?? '',

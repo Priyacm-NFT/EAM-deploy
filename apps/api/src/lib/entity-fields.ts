@@ -1,7 +1,48 @@
 import { eq, and, inArray } from 'drizzle-orm';
-import { db, fieldDefinitions, roles } from '@eam/db';
-import { FieldRulesService } from '@eam/config-engine';
+import { db, fieldDefinitions, entityDefinitions, roles } from '@eam/db';
+import { FieldRulesService, type FieldDef } from '@eam/config-engine';
 import type { AuthUser } from '@eam/auth';
+
+type FieldDefinitionRow = typeof fieldDefinitions.$inferSelect;
+
+export function toFieldDefs(fields: FieldDefinitionRow[]): FieldDef[] {
+  return fields.map((f) => ({
+    fieldKey: f.fieldKey,
+    isRequiredGlobal: f.isRequiredGlobal,
+    fieldType: f.fieldType,
+    validationRules: f.validationRules ?? undefined,
+  }));
+}
+
+export async function validateCustomFields(
+  tenantId: string,
+  entityName: string,
+  data: Record<string, unknown>,
+  userRoleNames: string[],
+  currentStatus?: string,
+): Promise<{ valid: boolean; errors: Array<{ field_key: string; message: string }> }> {
+  const [entity] = await db
+    .select()
+    .from(entityDefinitions)
+    .where(and(eq(entityDefinitions.tenantId, tenantId), eq(entityDefinitions.name, entityName)))
+    .limit(1);
+  if (!entity) return { valid: true, errors: [] };
+
+  const fields = await db
+    .select()
+    .from(fieldDefinitions)
+    .where(
+      and(
+        eq(fieldDefinitions.entityId, entity.id),
+        eq(fieldDefinitions.tenantId, tenantId),
+        eq(fieldDefinitions.isActive, true),
+      ),
+    );
+
+  const service = new FieldRulesService(db);
+  const rules = await service.loadRules(tenantId, entity.id, currentStatus);
+  return service.validateWrite(toFieldDefs(fields), rules, data, userRoleNames);
+}
 
 export async function getUserRoleIds(user: AuthUser): Promise<string[]> {
   if (user.roles.length === 0) return [];
@@ -38,12 +79,7 @@ export async function validateEntityWrite(
     .from(fieldDefinitions)
     .where(and(eq(fieldDefinitions.tenantId, tenantId), eq(fieldDefinitions.entityId, entityId)));
 
-  const fieldDefs = fields.map((f) => ({
-    fieldKey: f.fieldKey,
-    isRequiredGlobal: f.isRequiredGlobal,
-    fieldType: f.fieldType,
-    validationRules: f.validationRules ?? undefined,
-  }));
+  const fieldDefs = toFieldDefs(fields);
 
   const service = new FieldRulesService(db);
   const rules = await service.loadRules(tenantId, entityId, status);

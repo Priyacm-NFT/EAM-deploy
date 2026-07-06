@@ -21,7 +21,7 @@ export function StoreroomListPage() {
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ code: '', name: '', description: '' });
   const [saving, setSaving] = useState(false);
-a
+
   const load = () => {
     setError('');
     api<Storeroom[]>('/storerooms')

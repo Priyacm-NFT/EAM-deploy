@@ -190,7 +190,7 @@ export function SmtpConfigPage() {
             <FormField label="Recipient email" htmlFor="test-email">
               <input id="test-email" className="form-input" type="email" required value={testEmail} onChange={(e) => setTestEmail(e.target.value)} placeholder="you@company.com" />
             </FormField>
-            <button type="submit" className="btn-primary !w-auto px-4 shrink-0 mb-[1px]" disabled={testing}>
+            <button type="submit" className="btn-primary !w-auto px-4 shrink-0 mb-[1px]" disabled={testing !== false}>
               {testing ? 'Sending…' : 'Send test'}
             </button>
           </form>

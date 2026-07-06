@@ -20,7 +20,6 @@ export interface IcapScanOptions {
 }
 
 function buildIcapRequest(buffer: Buffer, host: string, service: string): Buffer {
-  const boundary = `EAM-ICAP-${Date.now()}`;
   const httpBody = buffer;
 
   // Minimal HTTP request wrapper for ICAP REQMOD
@@ -29,7 +28,6 @@ function buildIcapRequest(buffer: Buffer, host: string, service: string): Buffer
   );
 
   const encapsulatedOffset = httpHeader.length;
-  const bodyOffset = encapsulatedOffset + httpBody.length;
 
   const icapHeader = [
     `REQMOD icap://${host}${service} ICAP/1.0`,

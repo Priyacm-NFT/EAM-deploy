@@ -57,6 +57,7 @@ export function JobPlanFormPage() {
         description: form.description,
         longDescription: form.longDescription || undefined,
         estimatedDurationHours: form.estimatedDurationHours ? parseFloat(form.estimatedDurationHours) : undefined,
+        customData,
       };
       if (isEdit) {
         await api(`/job-plans/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -101,6 +102,13 @@ export function JobPlanFormPage() {
               placeholder="e.g. 2.5"
               value={form.estimatedDurationHours} onChange={set('estimatedDurationHours')} />
           </FormField>
+
+          <DynamicFormRenderer
+            entityName="JobPlan"
+            record={form}
+            values={customData}
+            onChange={(key, value) => setCustomData((prev) => ({ ...prev, [key]: value }))}
+          />
 
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">
             <button type="button" className="btn-outline !w-auto px-6"

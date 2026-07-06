@@ -17,6 +17,7 @@ export interface ReportDefinitionRow {
   };
   isPublic: boolean;
   version?: number;
+  currentVersion?: number;
   updatedAt?: string;
 }
 

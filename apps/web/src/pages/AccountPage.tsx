@@ -41,7 +41,7 @@ export function AccountPage() {
   const [otpSent, setOtpSent]           = useState(false);
   const [otpCode, setOtpCode]           = useState('');
   const [verifying, setVerifying]       = useState(false);
-  const [smsEnabled, setSmsEnabled]     = useState(true); // Always show — admin controls via Identity → SMS OTP Config
+  const [smsEnabled] = useState(true); // Always show — admin controls via Identity → SMS OTP Config
   const [showSmsEnroll, setShowSmsEnroll] = useState(false);
 
   async function loadMe() {

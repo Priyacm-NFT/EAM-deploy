@@ -39,13 +39,13 @@ export function JobPlanListPage() {
         <div className="flex justify-end mb-4">
           <button type="button" className="btn-primary !w-auto px-4" onClick={() => navigate('/job-plans/new')}>+ New job plan</button>
         </div>
+        <TableViewBar views={views} activeView={activeView} onSwitch={setActiveView} />
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="py-2 pr-4">JP #</th>
-              <th className="py-2 pr-4">Description</th>
-              <th className="py-2 pr-4">Est. hours</th>
-              <th className="py-2 pr-4">Updated</th>
+              {columns.map((col) => (
+                <th key={col.fieldKey} className="py-2 pr-4">{col.label}</th>
+              ))}
               <th className="py-2" />
             </tr>
           </thead>

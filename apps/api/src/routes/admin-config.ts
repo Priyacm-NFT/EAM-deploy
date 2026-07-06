@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, asc, desc, inArray } from 'drizzle-orm';
+import { eq, and, asc, desc, inArray, sql } from 'drizzle-orm';
 import {
   db,
   entityDefinitions,

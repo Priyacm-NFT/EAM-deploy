@@ -63,15 +63,13 @@ export function PMMasterListPage() {
           <Link to="/pm/forecast" className="btn-link text-sm">Forecast calendar →</Link>
           <button type="button" className="btn-primary !w-auto px-4 ml-auto" onClick={() => navigate('/pm/new')}>+ New PM</button>
         </div>
+        <TableViewBar views={views} activeView={activeView} onSwitch={setActiveView} />
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="py-2 pr-4">PM #</th>
-              <th className="py-2 pr-4">Description</th>
-              <th className="py-2 pr-4">Frequency</th>
-              <th className="py-2 pr-4">Next due</th>
-              <th className="py-2 pr-4">Asset</th>
-              <th className="py-2 pr-4">Site</th>
+              {columns.map((col) => (
+                <th key={col.fieldKey} className="py-2 pr-4">{col.label}</th>
+              ))}
               <th className="py-2" />
             </tr>
           </thead>

@@ -23,6 +23,10 @@ export function IdentityPageLayout({
           ← {backLabel}
         </Link>
       )}
+      <div>
+        <h1 className="text-xl font-semibold text-white">{title}</h1>
+        {subtitle ? <p className="text-sm text-white/60 mt-1">{subtitle}</p> : null}
+      </div>
       {children}
     </div>
   );

@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "pnpm --filter @eam/db --filter @eam/workflow-engine run build",
+    "pretypecheck": "pnpm --filter @eam/db --filter @eam/workflow-engine run build",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",

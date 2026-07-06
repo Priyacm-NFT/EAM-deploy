@@ -130,12 +130,7 @@ export function AdminIdentityPage() {
     finally { setLoading(false); }
   }
 
-  // Check if current user is admin
-  const isCurrentUserAdmin = () => {
-    const u = users.find(u => u.email && u.roles?.includes('System Administrator'));
-    return true; // shown only to admin via permission guard
-  };
-
+  // Admin-only page — access enforced by route permission guard.
   async function loadAdminSessions() {
     try {
       const all = await api<UserRow[]>('/admin/users');

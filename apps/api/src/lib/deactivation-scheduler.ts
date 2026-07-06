@@ -1,5 +1,4 @@
-import { eq } from 'drizzle-orm';
-import { db, users, audit } from '@eam/db';
+import { db, audit } from '@eam/db';
 import { revokeAllSessions } from '@eam/auth';
  
 const INTERVAL_MS = 60 * 60 * 1000;

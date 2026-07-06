@@ -785,7 +785,9 @@ export function WorkflowDesignerPage() {
                                 {(nodeTrace[inst.id] as Record<string, unknown>[]).map((h, i) => (
                                   <div key={String(h.id ?? i)} className="bg-white border border-slate-200 rounded px-3 py-1.5 text-xs">
                                     <span className="font-medium">{String(h.action ?? h.nodeId ?? 'Node')}</span>
-                                    {h.comment && <span className="ml-2 text-slate-400">— {String(h.comment)}</span>}
+                                    {h.comment != null && h.comment !== '' ? (
+                                      <span className="ml-2 text-slate-400">— {String(h.comment)}</span>
+                                    ) : null}
                                     <br />
                                     <span className="text-slate-400">{h.createdAt ? new Date(String(h.createdAt)).toLocaleTimeString() : ''}</span>
                                   </div>

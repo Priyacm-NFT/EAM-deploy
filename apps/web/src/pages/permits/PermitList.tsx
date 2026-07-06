@@ -66,14 +66,13 @@ export function PermitListPage() {
           <button type="button" className="btn-primary !w-auto px-4 ml-auto" onClick={() => navigate('/permits/new')}>+ New permit</button>
         </div>
 
+        <TableViewBar views={views} activeView={activeView} onSwitch={setActiveView} />
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="py-2 pr-4">PTW #</th>
-              <th className="py-2 pr-4">Type</th>
-              <th className="py-2 pr-4">Status</th>
-              <th className="py-2 pr-4">Valid from</th>
-              <th className="py-2 pr-4">Valid to</th>
+              {columns.map((col) => (
+                <th key={col.fieldKey} className="py-2 pr-4">{col.label}</th>
+              ))}
               <th className="py-2" />
             </tr>
           </thead>

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, and } from 'drizzle-orm';
-import { db, reportBiConnections, reportSubjects, reportBiPermissionMappings } from '@eam/db';
+import { db, reportBiConnections, reportSubjects } from '@eam/db';
 import {
   getBiConnectionInfo,
   getBiAdapter,

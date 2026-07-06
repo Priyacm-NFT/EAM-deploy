@@ -99,7 +99,7 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
       .where(and(eq(users.id, id), eq(users.tenantId, request.user!.tenantId)))
       .limit(1);
     if (!user) return reply.status(404).send({ error: 'Not found' });
-    const { roles: roleNames, permissions: perms } = await getEffectivePermissions(db, id);
+    const { groupNames: roleNames, permissions: perms } = await getEffectivePermissions(db, id);
     const memberGroups = await db
       .select({ id: groups.id, name: groups.name })
       .from(userGroups)
@@ -309,7 +309,7 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
       .limit(1);
     if (!target) return reply.status(404).send({ error: 'Not found' });
  
-    const { roles, permissions } = await getEffectivePermissions(db, id);
+    const { groupNames: roles, permissions } = await getEffectivePermissions(db, id);
     const accessToken = await signAccessToken({
       sub: target.id,
       tenantId: target.tenantId,

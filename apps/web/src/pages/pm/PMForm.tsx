@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
-import { IdentityPageLayout, FormField, FormActions, MessageBanner } from '../../components/identity/IdentityLayout.js';
+import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
 interface Asset { id: string; assetNum: string; description: string }
 interface JobPlan { id: string; jpNum: string; description: string }
@@ -85,6 +85,7 @@ export function PMFormPage() {
           assetId: targetMode === 'asset' ? (form.assetId || undefined) : undefined,
           routeId: targetMode === 'route' ? (form.routeId || undefined) : undefined,
           jobPlanId: form.jobPlanId || undefined,
+          customData,
         }),
       });
       navigate('/pm');
@@ -191,6 +192,15 @@ export function PMFormPage() {
               ))}
             </select>
           </FormField>
+        </div>
+
+        <div className="admin-section max-w-3xl mt-4">
+          <DynamicFormRenderer
+            entityName="PMaster"
+            record={form}
+            values={customData}
+            onChange={(key, value) => setCustomData((prev) => ({ ...prev, [key]: value }))}
+          />
         </div>
 
         <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 mt-2">

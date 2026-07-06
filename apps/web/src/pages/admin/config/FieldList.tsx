@@ -24,6 +24,8 @@ interface FieldRow {
   fieldType: string;
   isRequiredGlobal: boolean;
   isSystem: boolean;
+  isActive: boolean;
+  displayOrder: number;
   validationRules?: Record<string, unknown>;
 }
 
@@ -87,6 +89,7 @@ function formatValidation(rules?: Record<string, unknown>): string {
 export function ConfigFieldListPage() {
   const { entityId } = useParams();
   const [entity, setEntity] = useState<Entity | null>(null);
+  const [entities, setEntities] = useState<Entity[]>([]);
   const [fields, setFields] = useState<FieldRow[]>([]);
   const [filter, setFilter] = useState('');
   const [form, setForm] = useState(emptyForm);
@@ -102,7 +105,10 @@ export function ConfigFieldListPage() {
   function load() {
     if (!entityId) return;
     api<Entity[]>('/admin/config/entities')
-      .then((list) => setEntity(list.find((e) => e.id === entityId) ?? null))
+      .then((list) => {
+        setEntities(list);
+        setEntity(list.find((e) => e.id === entityId) ?? null);
+      })
       .catch((e) => setError(String(e)));
     api<FieldRow[]>(`/admin/config/entities/${entityId}/fields`)
       .then(setFields)
