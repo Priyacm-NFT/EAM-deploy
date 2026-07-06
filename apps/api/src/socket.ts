@@ -83,17 +83,13 @@ export function registerCollaborationHandlers(nsp: Namespace) {
 
         // Create an in-app notification for the recipient so the bell shows it
         try {
-          const { inAppNotifications } = await import('@eam/db');
           const senderName = socket.data?.displayName ?? userId.slice(0, 8);
           const preview = data.content.length > 60 ? data.content.slice(0, 57) + '…' : data.content;
-          await db.insert(inAppNotifications).values({
-            userId: data.toUserId,
-            tenantId,
-            title: `New message from ${senderName}`,
-            body: preview,
-            entityType: 'ChatMessage',
-            entityId: msg.id,
-          });
+          const title = `New message from ${senderName}`;
+          await db.execute(sql`
+            INSERT INTO in_app_notifications (tenant_id, user_id, title, body, entity_type, entity_id)
+            VALUES (${tenantId}, ${data.toUserId}, ${title}, ${preview}, 'ChatMessage', ${msg.id})
+          `);
         } catch { /* non-critical — don't break the chat send */ }
       },
     );

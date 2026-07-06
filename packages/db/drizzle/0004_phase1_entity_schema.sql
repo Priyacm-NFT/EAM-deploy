@@ -20,6 +20,22 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
 
+-- organisations/sites are fully defined in 0005, but this migration alters them first
+CREATE TABLE IF NOT EXISTS "organisations" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "tenant_id" uuid NOT NULL,
+  "name" text NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "sites" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "tenant_id" uuid NOT NULL,
+  "name" text NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+
 ALTER TABLE "organisations" ADD COLUMN IF NOT EXISTS "gl_account" text;
 ALTER TABLE "organisations" ADD COLUMN IF NOT EXISTS "cost_center" text;
 
