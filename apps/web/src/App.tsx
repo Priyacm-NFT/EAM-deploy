@@ -713,7 +713,7 @@ export default function App() {
             <Route path="/job-plans" element={<RequireAuth><JobPlanListPage /></RequireAuth>} />
             <Route path="/job-plans/new" element={<RequireAuth><JobPlanFormPage /></RequireAuth>} />
             <Route path="/job-plans/:id" element={<RequireAuth><JobPlanDetailPage /></RequireAuth>} />
-            <Route path="/job-plans/:id/edit" element={<RequireAuth><JobPlanDetailPage /></RequireAuth>} />
+            <Route path="/job-plans/:id/edit" element={<RequireAuth><JobPlanFormPage /></RequireAuth>} />
             <Route path="/pm" element={<RequireAuth><PMMasterListPage /></RequireAuth>} />
             <Route path="/pm/new" element={<RequireAuth><PMFormPage /></RequireAuth>} />
             <Route path="/pm/forecast" element={<RequireAuth><PMForecastPage /></RequireAuth>} />
