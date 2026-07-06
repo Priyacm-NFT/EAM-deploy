@@ -33,7 +33,17 @@ export async function issueTokens(
   const [tenant] = await db.select().from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
   const policy = parseSessionPolicy((tenant?.settings ?? {}) as Record<string, unknown>);
 
-  const { roles, permissions } = await getEffectivePermissions(db, user.id);
+  // FIX: rebuilt for the Maximo-style model — permissions/scope/MFA are
+  // resolved straight from the user's Security Groups now, with no role
+  // hop. getEffectivePermissions returns `groupNames` (the security groups
+  // the user belongs to), which we still sign into the JWT under the
+  // `roles` field name for backward compatibility — every existing route
+  // guard and frontend check reads request.user.roles / user.roles, and
+  // renaming the wire field would mean touching ~20 files for a label
+  // change with no behavioural difference. The field now holds Security
+  // Group names instead of Role names; the permission MODEL changed, the
+  // wire SHAPE didn't.
+  const { groupNames: roles, permissions, scope } = await getEffectivePermissions(db, user.id);
   const refreshToken = generateRefreshToken();
   const now = new Date();
   const expiresAt = computeSessionExpiry(policy, now);
@@ -58,6 +68,7 @@ export async function issueTokens(
     email: user.email,
     roles,
     permissions,
+    scope,
     sid: session!.id,
     mfa_verified: opts.mfaVerified ?? false,
   });

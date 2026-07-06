@@ -11,9 +11,12 @@ import {
   uniqueIndex,
   pgEnum,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { tenants, users } from './identity.js';
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
+
+export const orgScopeLevelEnum = pgEnum('org_scope_level', ['ORG', 'SITE']);
 
 export const locationTypeEnum = pgEnum('location_type', [
   'FUNCTIONAL',
@@ -33,10 +36,13 @@ export const assetStatusEnum = pgEnum('asset_status', [
 
 export const criticalityEnum = pgEnum('criticality', ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 
+export const assetTypeEnum = pgEnum('asset_type', ['NORMAL', 'STRUCTURAL']);
+
 export const srStatusEnum = pgEnum('sr_status', [
   'NEW',
   'QUEUED',
   'IN_PROGRESS',
+  'WAITING_ON_REQUESTER',
   'CLOSED',
   'RESOLVED',
   'CONVERTED',
@@ -81,14 +87,64 @@ export const organisations = pgTable(
     name: text('name').notNull(),
     code: text('code').notNull(),
     description: text('description'),
-    address: text('address'),
+    addressLine1: text('address_line1'),
+    addressLine2: text('address_line2'),
+    city: text('city'),
+    stateProvince: text('state_province'),
+    postalCode: text('postal_code'),
+    country: text('country'),
     glAccount: text('gl_account'),
     costCenter: text('cost_center'),
+    // FIX (Maximo Organization tab parity): real Maximo's Organization
+    // record carries two base currencies plus default Item Status / Stock
+    // Category used by every Item created under this Org. `baseCurrency`
+    // (pre-existing) is "Base Currency 1"; `baseCurrency2` added alongside
+    // it for "Base Currency 2".
+    baseCurrency: text('base_currency'),
+    baseCurrency2: text('base_currency_2'),
+    defaultItemStatus: text('default_item_status'),
+    defaultStockCategory: text('default_stock_category'),
+    language: text('language'),
+    itemSetCode: text('item_set_code'),
+    companySetCode: text('company_set_code'),
     isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('organisations_tenant_idx').on(t.tenantId)],
+);
+
+// FIX (multi-address support): an Organisation can have multiple
+// addresses, each with its own Address Code — a list, not one set of
+// fields baked into the organisations row above (which only ever
+// supported one address).
+export const organisationAddresses = pgTable(
+  'organisation_addresses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'cascade' }),
+    addressCode: text('address_code').notNull(),
+    addressLine1: text('address_line1'),
+    addressLine2: text('address_line2'),
+    city: text('city'),
+    stateProvince: text('state_province'),
+    postalCode: text('postal_code'),
+    country: text('country'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('org_addresses_org_idx').on(t.orgId),
+    uniqueIndex('org_addresses_org_code_idx').on(t.orgId, t.addressCode),
+  ],
 );
 
 export const sites = pgTable(
@@ -102,15 +158,36 @@ export const sites = pgTable(
     name: text('name').notNull(),
     siteNum: text('site_num').notNull(),
     description: text('description'),
-    address: text('address'),
+    addressLine1: text('address_line1'),
+    addressLine2: text('address_line2'),
+    city: text('city'),
+    stateProvince: text('state_province'),
+    postalCode: text('postal_code'),
+    country: text('country'),
     timezone: text('timezone').default('UTC'),
     glAccount: text('gl_account'),
     costCenter: text('cost_center'),
+    inheritGlAccount: boolean('inherit_gl_account').notNull().default(true),
+    inheritCostCenter: boolean('inherit_cost_center').notNull().default(true),
     isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('sites_tenant_idx').on(t.tenantId)],
+  (t) => [
+    index('sites_tenant_idx').on(t.tenantId),
+    uniqueIndex('sites_org_sitenum_idx').on(t.orgId, t.siteNum),
+  ],
+);
+
+export const entityScopeRegistry = pgTable(
+  'entity_scope_registry',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    entityName: text('entity_name').notNull().unique(),
+    scopeLevel: orgScopeLevelEnum('scope_level').notNull(),
+    notes: text('notes'),
+  },
 );
 
 // ─── Locations ────────────────────────────────────────────────────────────────
@@ -129,11 +206,17 @@ export const locations = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     type: locationTypeEnum('type').default('FUNCTIONAL'),
+    path: text('path'),
+    position: text('position'),
+    isCmLocation: boolean('is_cm_location').notNull().default(false),
+    cmItemId: uuid('cm_item_id').references(() => items.id, { onDelete: 'set null' }),
+    assetRequired: boolean('asset_required').notNull().default(false),
     glAccount: text('gl_account'),
     costCenter: text('cost_center'),
     effectiveFrom: timestamp('effective_from', { withTimezone: true }),
     effectiveTo: timestamp('effective_to', { withTimezone: true }),
     isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -141,6 +224,7 @@ export const locations = pgTable(
     index('locations_tenant_idx').on(t.tenantId),
     index('locations_site_idx').on(t.siteId),
     index('locations_parent_idx').on(t.parentId),
+    index('locations_path_idx').using('btree', sql`${t.path} text_pattern_ops`),
   ],
 );
 
@@ -188,6 +272,13 @@ export const assets = pgTable(
     siteId: uuid('site_id').references(() => sites.id),
     orgId: uuid('org_id').references(() => organisations.id),
     parentAssetId: uuid('parent_asset_id'),
+    isRotating: boolean('is_rotating').notNull().default(false),
+    position: text('position'),
+    itemId: uuid('item_id').references(() => items.id, { onDelete: 'set null' }),
+    assetType: assetTypeEnum('asset_type').notNull().default('NORMAL'),
+    isLinear: boolean('is_linear').notNull().default(false),
+    lengthUnit: text('length_unit'),
+    totalLength: numeric('total_length', { precision: 14, scale: 3 }),
     classId: uuid('class_id').references(() => assetClassifications.id),
     status: assetStatusEnum('status').notNull().default('ACTIVE'),
     criticality: criticalityEnum('criticality').default('MEDIUM'),
@@ -201,7 +292,9 @@ export const assets = pgTable(
     purchaseCost: numeric('purchase_cost', { precision: 14, scale: 2 }),
     replacementCost: numeric('replacement_cost', { precision: 14, scale: 2 }),
     classAttributes: jsonb('class_attributes').$type<Record<string, unknown>>().default({}),
+    classAttributeOverrides: jsonb('class_attribute_overrides').$type<Record<string, boolean>>().default({}),
     customData: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -213,9 +306,18 @@ export const assets = pgTable(
   ],
 );
 
-// ─── Asset Meters ─────────────────────────────────────────────────────────────
+// ─── Asset & Location Meters ────────────────────────────────────────────────
 
 export const meterTypeEnum = pgEnum('meter_type', ['GAUGE', 'CONTINUOUS', 'CHARACTERISTIC']);
+
+// FIX (Maximo rolldown parity): real Maximo puts the rolldown control on
+// the *receiving* meter's "Accept Rolldown From" field, not on the
+// source — an asset meter chooses whether it pulls its reading from its
+// parent asset's meter of the same name, from its location's meter of
+// the same name, or accepts no rolldown at all (NONE). This replaces the
+// previous same-named `rolldown` boolean, which lived on the source
+// meter and only ever supported the parent-asset direction.
+export const acceptRolldownFromEnum = pgEnum('accept_rolldown_from', ['NONE', 'PARENT_ASSET', 'LOCATION']);
 
 export const assetMeters = pgTable(
   'asset_meters',
@@ -230,13 +332,17 @@ export const assetMeters = pgTable(
     name: text('name').notNull(),
     unit: text('unit').notNull(),
     meterType: meterTypeEnum('meter_type').notNull().default('CONTINUOUS'),
+    acceptRolldownFrom: acceptRolldownFromEnum('accept_rolldown_from').notNull().default('NONE'),
     lastReading: numeric('last_reading', { precision: 18, scale: 4 }),
     lastReadingDate: timestamp('last_reading_date', { withTimezone: true }),
     rolloverValue: numeric('rollover_value', { precision: 18, scale: 4 }),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('asset_meters_asset_idx').on(t.assetId)],
+  (t) => [
+    index('asset_meters_asset_idx').on(t.assetId),
+    uniqueIndex('asset_meters_asset_name_idx').on(t.assetId, t.name),
+  ],
 );
 
 export const assetMeterReadings = pgTable(
@@ -260,6 +366,86 @@ export const assetMeterReadings = pgTable(
   (t) => [index('meter_readings_meter_idx').on(t.meterId)],
 );
 
+// FIX (Maximo location-meter parity): Maximo attaches meters to
+// Locations as well as Assets — same three meter types, same reading
+// history — but a Location meter can never itself *accept* a rolldown
+// (Maximo: "there is no rolldown of meter readings between locations in
+// the location hierarchy"). A Location meter can only ever be a *source*
+// that an Asset meter rolls down from (assetMeters.acceptRolldownFrom =
+// 'LOCATION' above), so there is deliberately no accept-rolldown field
+// on this table at all.
+export const locationMeters = pgTable(
+  'location_meters',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    locationId: uuid('location_id')
+      .notNull()
+      .references(() => locations.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    unit: text('unit').notNull(),
+    meterType: meterTypeEnum('meter_type').notNull().default('CONTINUOUS'),
+    lastReading: numeric('last_reading', { precision: 18, scale: 4 }),
+    lastReadingDate: timestamp('last_reading_date', { withTimezone: true }),
+    rolloverValue: numeric('rollover_value', { precision: 18, scale: 4 }),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('location_meters_location_idx').on(t.locationId),
+    uniqueIndex('location_meters_location_name_idx').on(t.locationId, t.name),
+  ],
+);
+
+export const locationMeterReadings = pgTable(
+  'location_meter_readings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    meterId: uuid('meter_id')
+      .notNull()
+      .references(() => locationMeters.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    value: numeric('value', { precision: 18, scale: 4 }).notNull(),
+    delta: numeric('delta', { precision: 18, scale: 4 }),
+    readingDate: timestamp('reading_date', { withTimezone: true }).defaultNow().notNull(),
+    source: text('source').default('MANUAL'),
+    loggedByUserId: uuid('logged_by_user_id').references(() => users.id),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('location_meter_readings_meter_idx').on(t.meterId)],
+);
+
+// ─── Asset Downtime ─────────────────────────────────────────────────────────────
+
+export const assetDowntimeLogs = pgTable(
+  'asset_downtime_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    startTime: timestamp('start_time', { withTimezone: true }).notNull(),
+    endTime: timestamp('end_time', { withTimezone: true }),
+    reasonCode: text('reason_code'),
+    notes: text('notes'),
+    workOrderId: uuid('work_order_id').references(() => workOrders.id, { onDelete: 'set null' }),
+    loggedByUserId: uuid('logged_by_user_id').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('asset_downtime_asset_idx').on(t.assetId),
+    index('asset_downtime_tenant_idx').on(t.tenantId),
+  ],
+);
+
 // ─── Asset Move History ───────────────────────────────────────────────────────
 
 export const assetMoveHistory = pgTable(
@@ -279,6 +465,33 @@ export const assetMoveHistory = pgTable(
     reason: text('reason'),
   },
   (t) => [index('asset_move_asset_idx').on(t.assetId)],
+);
+
+// ─── Asset Spares (BOM) ────────────────────────────────────────────────────────
+
+export const assetSpares = pgTable(
+  'asset_spares',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull().default(1),
+    notes: text('notes'),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('asset_spares_asset_idx').on(t.assetId),
+    index('asset_spares_tenant_idx').on(t.tenantId),
+    uniqueIndex('asset_spares_asset_item_idx').on(t.assetId, t.itemId),
+  ],
 );
 
 // ─── Failure Codes ────────────────────────────────────────────────────────────
@@ -318,6 +531,14 @@ export const serviceRequests = pgTable(
     channel: srChannelEnum('channel').default('WEB'),
     category: text('category'),
     requesterId: uuid('requester_id').references(() => users.id),
+    reportedByUserId: uuid('reported_by_user_id').references(() => users.id),
+    reportedDate: timestamp('reported_date', { withTimezone: true }),
+    // FIX (SR create/detail form parity): the requested service window —
+    // when work is expected to start/finish — distinct from reportedDate
+    // (when the SR was logged) and the SLA due date (when it must be
+    // resolved by).
+    startDate: timestamp('start_date', { withTimezone: true }),
+    endDate: timestamp('end_date', { withTimezone: true }),
     assignedToUserId: uuid('assigned_to_user_id').references(() => users.id),
     assetId: uuid('asset_id').references(() => assets.id),
     locationId: uuid('location_id').references(() => locations.id),
@@ -326,11 +547,14 @@ export const serviceRequests = pgTable(
     slaTargetHours: integer('sla_target_hours'),
     slaDueAt: timestamp('sla_due_at', { withTimezone: true }),
     slaBreached: boolean('sla_breached').notNull().default(false),
+    slaPausedAt: timestamp('sla_paused_at', { withTimezone: true }),
+    slaPausedTotalMs: numeric('sla_paused_total_ms', { precision: 20, scale: 0 }).notNull().default('0'),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     convertedToWoId: uuid('converted_to_wo_id'),
     closureNotes: text('closure_notes'),
     customData: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+    routedRole: text('routed_role'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -338,6 +562,30 @@ export const serviceRequests = pgTable(
     index('service_requests_tenant_idx').on(t.tenantId),
     index('service_requests_status_idx').on(t.tenantId, t.status),
     index('service_requests_sla_idx').on(t.tenantId, t.slaBreached, t.slaDueAt),
+  ],
+);
+
+// ─── SR Categories (P1-2 gap) ───────────────────────────────────────────────
+
+export const srCategories = pgTable(
+  'sr_categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    parentId: uuid('parent_id'),
+    defaultPriority: srPriorityEnum('default_priority').default('MEDIUM'),
+    slaHours: integer('sla_hours'),
+    routingRole: text('routing_role'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('sr_categories_tenant_idx').on(t.tenantId),
+    uniqueIndex('sr_categories_tenant_name_idx').on(t.tenantId, t.name),
   ],
 );
 
@@ -450,6 +698,8 @@ export const workOrders = pgTable(
     pmId: uuid('pm_id'),
     jobPlanId: uuid('job_plan_id').references(() => jobPlans.id),
     permitId: uuid('permit_id'),
+    reportedByUserId: uuid('reported_by_user_id').references(() => users.id),
+    reportedDate: timestamp('reported_date', { withTimezone: true }),
     targetStartDate: timestamp('target_start_date', { withTimezone: true }),
     targetFinishDate: timestamp('target_finish_date', { withTimezone: true }),
     actualStartDate: timestamp('actual_start_date', { withTimezone: true }),
@@ -498,6 +748,7 @@ export const woTasks = pgTable(
     sequence: integer('sequence').notNull(),
     description: text('description').notNull(),
     taskType: text('task_type').default('GENERAL'),
+    assetId: uuid('asset_id').references(() => assets.id),
     status: woTaskStatusEnum('status').notNull().default('PENDING'),
     assignedUserId: uuid('assigned_user_id').references(() => users.id),
     estimatedHours: numeric('estimated_hours', { precision: 8, scale: 2 }),
@@ -660,6 +911,7 @@ export const pmMasters = pgTable(
     locationId: uuid('location_id').references(() => locations.id),
     siteId: uuid('site_id').references(() => sites.id),
     jobPlanId: uuid('job_plan_id').references(() => jobPlans.id),
+    routeId: uuid('route_id').references(() => pmRouteMasters.id),
     frequencyType: pmFrequencyTypeEnum('frequency_type').notNull().default('CALENDAR'),
     interval: integer('interval'),
     intervalUnit: pmIntervalUnitEnum('interval_unit'),
@@ -691,6 +943,44 @@ export const pmMeterTriggers = pgTable('pm_meter_triggers', {
   threshold: numeric('threshold', { precision: 18, scale: 4 }).notNull(),
   resetOnWo: boolean('reset_on_wo').notNull().default(true),
 });
+
+// ─── PM Routes ──────────────────────────────────────────────────────────────
+
+export const pmRouteMasters = pgTable(
+  'pm_routes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    siteId: uuid('site_id').references(() => sites.id),
+    isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('pm_routes_tenant_idx').on(t.tenantId)],
+);
+
+export const pmRouteAssets = pgTable(
+  'pm_route_assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    routeId: uuid('route_id')
+      .notNull()
+      .references(() => pmRouteMasters.id, { onDelete: 'cascade' }),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull().default(0),
+  },
+  (t) => [
+    index('pm_route_assets_route_idx').on(t.routeId),
+    uniqueIndex('pm_route_assets_route_asset_idx').on(t.routeId, t.assetId),
+  ],
+);
 
 export const pmForecastStatusEnum = pgEnum('pm_forecast_status', [
   'PROJECTED',
@@ -743,6 +1033,29 @@ export const permitStatusEnum = pgEnum('permit_status', [
   'REJECTED',
 ]);
 
+export const permitTypesConfig = pgTable(
+  'permit_types_config',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    label: text('label').notNull(),
+    checklistTemplate: jsonb('checklist_template').notNull().default('[]'),
+    requiredApproverRoles: jsonb('required_approver_roles').notNull().default('[]'),
+    maxValidityHours: integer('max_validity_hours'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('permit_types_config_tenant_idx').on(t.tenantId),
+    uniqueIndex('permit_types_config_tenant_type_idx').on(t.tenantId, t.type),
+  ],
+);
+
 export const permits = pgTable(
   'permits',
   {
@@ -751,7 +1064,7 @@ export const permits = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
     permitNum: text('permit_num').notNull(),
-    type: permitTypeEnum('type').notNull(),
+    type: text('type').notNull(),
     woId: uuid('wo_id').references(() => workOrders.id),
     assetId: uuid('asset_id').references(() => assets.id),
     locationId: uuid('location_id').references(() => locations.id),
@@ -849,12 +1162,37 @@ export const items = pgTable(
     isHazardous: boolean('is_hazardous').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
     customData: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('items_tenant_idx').on(t.tenantId),
     uniqueIndex('items_num_idx').on(t.tenantId, t.itemNum),
+  ],
+);
+
+export const itemAssemblyStructure = pgTable(
+  'item_assembly_structure',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    parentItemId: uuid('parent_item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'cascade' }),
+    childItemId: uuid('child_item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'cascade' }),
+    position: text('position').notNull(),
+    quantity: integer('quantity').notNull().default(1),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('ias_parent_item_idx').on(t.parentItemId),
+    uniqueIndex('ias_parent_position_idx').on(t.parentItemId, t.position),
   ],
 );
 
@@ -867,6 +1205,7 @@ export const storerooms = pgTable(
       .references(() => tenants.id, { onDelete: 'cascade' }),
     siteId: uuid('site_id').references(() => sites.id),
     storeroomNum: text('storeroom_num').notNull(),
+    code: text('code'),
     name: text('name').notNull(),
     description: text('description'),
     custodianUserId: uuid('custodian_user_id').references(() => users.id),
@@ -874,7 +1213,10 @@ export const storerooms = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('storerooms_tenant_idx').on(t.tenantId)],
+  (t) => [
+    index('storerooms_tenant_idx').on(t.tenantId),
+    uniqueIndex('storerooms_tenant_code_idx').on(t.tenantId, t.code),
+  ],
 );
 
 export const inventoryBalances = pgTable(
@@ -1128,3 +1470,26 @@ export const statusTransitions = pgTable('status_transitions', {
   conditionExpression: text('condition_expression'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ─── Status History (universal audit trail) ────────────────────────────────
+
+export const statusHistory = pgTable(
+  'status_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status').notNull(),
+    changedByUserId: uuid('changed_by_user_id').references(() => users.id),
+    changedAt: timestamp('changed_at', { withTimezone: true }).defaultNow().notNull(),
+    notes: text('notes'),
+  },
+  (t) => [
+    index('status_history_entity_idx').on(t.entityType, t.entityId),
+    index('status_history_tenant_idx').on(t.tenantId),
+  ],
+);

@@ -16,7 +16,10 @@ import {
   roles,
   userGroups,
   groupRoles,
-  rolePermissions,
+  // FIX: rolePermissions no longer exists in the schema — permissions are
+  // granted directly to groups now (Maximo-style). groupPermissions
+  // replaces it everywhere in this file.
+  groupPermissions,
   permissions,
   sessions,
   tenants,
@@ -356,7 +359,20 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
   });
  
   app.post('/admin/groups', guard, async (request, reply) => {
-    const body = request.body as { name: string; description?: string };
+    // FIX: Maximo-style Security Group — requireMfa and scopeType/scopeIds
+    // (PRD §8.1 data scoping) now live on the group itself, matching
+    // Maximo's "Authorize Group for All Sites?" on the Sites tab and a
+    // group-level stricter-login requirement. Defaults match the
+    // pre-existing unrestricted behaviour for every group that doesn't
+    // specify these.
+    const body = request.body as {
+      name: string;
+      description?: string;
+      requireMfa?: boolean;
+      displaySideNav?: boolean;
+      scopeType?: 'ALL' | 'ORGANISATION' | 'SITE' | 'LOCATION';
+      scopeIds?: string[];
+    };
     const [group] = await db
       .insert(groups)
       .values({
@@ -364,6 +380,10 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
         name: body.name,
         description: body.description,
         source: 'LOCAL',
+        requireMfa: body.requireMfa ?? false,
+        displaySideNav: body.displaySideNav ?? true,
+        scopeType: body.scopeType ?? 'ALL',
+        scopeIds: body.scopeType && body.scopeType !== 'ALL' ? (body.scopeIds ?? []) : [],
       })
       .returning();
     return reply.status(201).send(group);
@@ -371,25 +391,111 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
  
   app.put('/admin/groups/:id', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { name?: string; description?: string; roleIds?: string[] };
+    // FIX: roleIds here is now display-metadata only (which job-title
+    // labels this group's members typically hold) — it does NOT affect
+    // permissions. permissionIds is the new, real authorization control:
+    // setting it replaces this group's direct permission grants
+    // (group_permissions), matching Maximo's group-level access editing.
+    // requireMfa/scopeType/scopeIds work the same way: only touched when
+    // present in the body, so a save that doesn't include them leaves the
+    // existing values alone.
+    const body = request.body as {
+      name?: string;
+      description?: string;
+      roleIds?: string[];
+      permissionIds?: string[];
+      requireMfa?: boolean;
+      displaySideNav?: boolean;
+      scopeType?: 'ALL' | 'ORGANISATION' | 'SITE' | 'LOCATION';
+      scopeIds?: string[];
+    };
     const [group] = await db
       .update(groups)
-      .set({ name: body.name, description: body.description })
+      .set({
+        name: body.name,
+        description: body.description,
+        requireMfa: body.requireMfa,
+        ...(body.displaySideNav !== undefined && { displaySideNav: body.displaySideNav }),
+        ...(body.scopeType !== undefined ? {
+          scopeType: body.scopeType,
+          scopeIds: body.scopeType !== 'ALL' ? (body.scopeIds ?? []) : [],
+        } : {}),
+      })
       .where(and(eq(groups.id, id), eq(groups.tenantId, request.user!.tenantId)))
       .returning();
     if (!group) return reply.status(404).send({ error: 'Not found' });
- 
+
+    let permissionsOrMfaOrScopeChanged = false;
+
     if (body.roleIds) {
+      // Display-only metadata — no session revocation needed since this
+      // can't change what the group's members are authorized to do.
       await db.delete(groupRoles).where(eq(groupRoles.groupId, id));
       if (body.roleIds.length > 0) {
         await db.insert(groupRoles).values(body.roleIds.map((roleId) => ({ groupId: id, roleId })));
       }
+    }
+
+    if (body.permissionIds) {
+      await db.delete(groupPermissions).where(eq(groupPermissions.groupId, id));
+      if (body.permissionIds.length > 0) {
+        await db.insert(groupPermissions).values(
+          body.permissionIds.map((permissionId) => ({ groupId: id, permissionId })),
+        );
+      }
+      permissionsOrMfaOrScopeChanged = true;
+    }
+    if (body.requireMfa !== undefined || body.scopeType !== undefined) {
+      permissionsOrMfaOrScopeChanged = true;
+    }
+
+    if (permissionsOrMfaOrScopeChanged) {
       const members = await db.select({ userId: userGroups.userId }).from(userGroups).where(eq(userGroups.groupId, id));
       for (const m of members) {
         await revokeAllSessions(db, m.userId);
       }
     }
     return group;
+  });
+
+  // FIX: new endpoint — Maximo-style direct group→permission assignment.
+  // This is the actual "edit a Security Group's access" screen's save
+  // action; PUT /admin/groups/:id above also accepts permissionIds inline
+  // for convenience, but a dedicated endpoint matches the pattern already
+  // used for /admin/roles/:id/permissions (kept for role display metadata
+  // elsewhere) and makes the group-permissions UI simpler to wire.
+  app.put('/admin/groups/:id/permissions', guard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { permissionIds: string[] };
+    const [group] = await db
+      .select()
+      .from(groups)
+      .where(and(eq(groups.id, id), eq(groups.tenantId, request.user!.tenantId)))
+      .limit(1);
+    if (!group) return reply.status(404).send({ error: 'Not found' });
+
+    await db.delete(groupPermissions).where(eq(groupPermissions.groupId, id));
+    if (body.permissionIds.length > 0) {
+      await db.insert(groupPermissions).values(
+        body.permissionIds.map((permissionId) => ({ groupId: id, permissionId })),
+      );
+    }
+
+    const members = await db.select({ userId: userGroups.userId }).from(userGroups).where(eq(userGroups.groupId, id));
+    for (const m of members) {
+      await revokeAllSessions(db, m.userId);
+    }
+
+    return reply.send({ ok: true });
+  });
+
+  app.get('/admin/groups/:id/permissions', guard, async (request) => {
+    const { id } = request.params as { id: string };
+    return db
+      .select({ id: permissions.id, resource: permissions.resource, action: permissions.action })
+      .from(groupPermissions)
+      .innerJoin(permissions, eq(groupPermissions.permissionId, permissions.id))
+      .where(eq(groupPermissions.groupId, id));
   });
  
   app.delete('/admin/groups/:id', guard, async (request, reply) => {
@@ -435,15 +541,19 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
     return role;
   });
  
+  // FIX: Role is now pure descriptive metadata (job title), matching how
+  // Maximo treats role data — no requireMfa, no scope, nothing
+  // security-related. Editing a role's name/description never needs to
+  // revoke anyone's sessions, since it can't change what anyone is
+  // authorized to do.
   app.post('/admin/roles', guard, async (request, reply) => {
-    const body = request.body as { name: string; description?: string; requireMfa?: boolean };
+    const body = request.body as { name: string; description?: string };
     const [role] = await db
       .insert(roles)
       .values({
         tenantId: request.user!.tenantId,
         name: body.name,
         description: body.description,
-        requireMfa: body.requireMfa ?? false,
       })
       .returning();
     return reply.status(201).send(role);
@@ -451,35 +561,13 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
  
   app.put('/admin/roles/:id', guard, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { name?: string; description?: string; requireMfa?: boolean };
-    const [existing] = await db
-      .select()
-      .from(roles)
-      .where(and(eq(roles.id, id), eq(roles.tenantId, request.user!.tenantId)))
-      .limit(1);
-    if (!existing) return reply.status(404).send({ error: 'Not found' });
- 
+    const body = request.body as { name?: string; description?: string };
     const [role] = await db
       .update(roles)
-      .set({
-        name: body.name,
-        description: body.description,
-        requireMfa: body.requireMfa,
-      })
+      .set({ name: body.name, description: body.description })
       .where(and(eq(roles.id, id), eq(roles.tenantId, request.user!.tenantId)))
       .returning();
- 
-    if (body.requireMfa !== undefined && body.requireMfa !== existing.requireMfa) {
-      const groupUsers = await db
-        .select({ userId: userGroups.userId })
-        .from(groupRoles)
-        .innerJoin(userGroups, eq(groupRoles.groupId, userGroups.groupId))
-        .where(eq(groupRoles.roleId, id));
-      for (const { userId } of groupUsers) {
-        await revokeAllSessions(db, userId);
-      }
-    }
- 
+    if (!role) return reply.status(404).send({ error: 'Not found' });
     return role;
   });
  
@@ -497,37 +585,10 @@ export async function adminIdentityRoutes(app: FastifyInstance) {
     return reply.send({ ok: true });
   });
  
-  app.get('/admin/roles/:id/permissions', guard, async (request) => {
-    const { id } = request.params as { id: string };
-    return db
-      .select({ id: permissions.id, resource: permissions.resource, action: permissions.action })
-      .from(rolePermissions)
-      .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-      .where(eq(rolePermissions.roleId, id));
-  });
- 
-  app.put('/admin/roles/:id/permissions', guard, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const body = request.body as { permissionIds: string[] };
-    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, id));
-    if (body.permissionIds.length > 0) {
-      await db
-        .insert(rolePermissions)
-        .values(body.permissionIds.map((permissionId) => ({ roleId: id, permissionId })));
-    }
- 
-    const groupUsers = await db
-      .select({ userId: userGroups.userId })
-      .from(groupRoles)
-      .innerJoin(userGroups, eq(groupRoles.groupId, userGroups.groupId))
-      .where(eq(groupRoles.roleId, id));
-    const userIds = new Set(groupUsers.map((u) => u.userId));
-    for (const userId of userIds) {
-      await revokeAllSessions(db, userId);
-    }
- 
-    return reply.send({ ok: true });
-  });
+  // FIX: GET/PUT /admin/roles/:id/permissions removed entirely — roles no
+  // longer carry permissions in the Maximo-style model. Use
+  // GET/PUT /admin/groups/:id/permissions instead (defined above with the
+  // group endpoints), which is where authorization actually lives now.
  
   app.get('/admin/permissions', guard, async () => {
     return db.select().from(permissions);

@@ -1,40 +1,56 @@
 
 import axios from 'axios';
- 
-function resolvePath(obj, path) {
-  return path.split('.').reduce((acc, key) => {
-    if (acc && typeof acc === 'object') return acc[key];
+import type { IntegrationAdapter, AdapterResult, TestResult } from './base.js';
+
+export interface RestConfig {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  authType?: 'apiKey' | 'oauth2';
+  apiKey?: string;
+  apiKeyHeader?: string;
+  oauthTokenUrl?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+  oauthScope?: string;
+  retryAttempts?: number;
+  responseMap?: Record<string, string>;
+}
+
+function resolvePath(obj: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((acc, key) => {
+    if (acc && typeof acc === 'object') return (acc as Record<string, unknown>)[key];
     return undefined;
   }, obj);
 }
- 
-function applyResponseMap(data, map) {
-  const result = {};
+
+function applyResponseMap(data: unknown, map: Record<string, string>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   for (const [sourcePath, targetField] of Object.entries(map)) {
     result[targetField] = resolvePath(data, sourcePath);
   }
   return result;
 }
- 
-async function fetchOAuthToken(c) {
+
+async function fetchOAuthToken(c: RestConfig): Promise<string> {
   const params = new URLSearchParams({
     grant_type: 'client_credentials',
     client_id: c.oauthClientId ?? '',
     client_secret: c.oauthClientSecret ?? '',
     ...(c.oauthScope ? { scope: c.oauthScope } : {}),
   });
-  const res = await axios.post(c.oauthTokenUrl, params.toString(), {
+  const res = await axios.post(c.oauthTokenUrl as string, params.toString(), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     timeout: 10000,
   });
   return String(res.data.access_token ?? '');
 }
- 
-export class RestAdapter {
-  type = 'REST';
- 
-  async test(config) {
-    const c = config;
+
+export class RestAdapter implements IntegrationAdapter {
+  type = 'REST' as const;
+
+  async test(config: unknown): Promise<TestResult> {
+    const c = config as RestConfig;
     if (!c.url) return { success: false, message: 'url required' };
     try {
       await axios.get(c.url, { timeout: 5000, validateStatus: () => true });
@@ -43,18 +59,18 @@ export class RestAdapter {
       return { success: false, message: e instanceof Error ? e.message : 'failed' };
     }
   }
- 
-  async execute(config, payload) {
-    const c = config;
- 
+
+  async execute(config: unknown, payload: unknown): Promise<AdapterResult> {
+    const c = config as RestConfig;
+
     if (!c.url) return { success: false, error: 'url is required in connection config' };
- 
+
     // Validate URL format
     try { new URL(c.url); } catch {
       return { success: false, error: `Invalid URL: "${c.url}" — must start with https:// or http://` };
     }
- 
-    const authHeaders = {};
+
+    const authHeaders: Record<string, string> = {};
     if (c.authType === 'apiKey' && c.apiKey) {
       authHeaders[c.apiKeyHeader ?? 'X-API-Key'] = c.apiKey;
     } else if (c.authType === 'oauth2' && c.oauthTokenUrl) {
@@ -65,8 +81,8 @@ export class RestAdapter {
         return { success: false, error: `OAuth token fetch failed: ${e instanceof Error ? e.message : 'unknown'}` };
       }
     }
- 
-    let lastError;
+
+    let lastError: string | undefined;
     const attempts = c.retryAttempts ?? 1;
     for (let i = 0; i < attempts; i++) {
       try {

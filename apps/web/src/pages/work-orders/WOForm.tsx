@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, FormField, FormActions, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
+import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';
 
 interface Asset { id: string; assetNum: string; description: string }
 interface Location { id: string; code: string; name: string }
@@ -13,6 +14,7 @@ export function WOFormPage() {
   const [searchParams] = useSearchParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
+  const { defaultSiteId } = useActiveDefaultSite();
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -29,15 +31,29 @@ export function WOFormPage() {
   });
 
   useEffect(() => {
-    Promise.all([
-      api<{ data: Asset[] }>('/assets'),
-      api<Location[]>('/locations'),
-      api<{ data: JobPlan[] }>('/job-plans'),
-    ]).then(([a, l, jp]) => {
-      setAssets(a.data ?? []);
-      setLocations(Array.isArray(l) ? l : []);
-      setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? []));
-    }).catch((e) => setError(String(e)));
+    if (isNew) {
+      const siteQuery = defaultSiteId ? `siteId=${defaultSiteId}&` : '';
+      const locationQuery = defaultSiteId ? `?siteId=${defaultSiteId}` : '';
+      Promise.all([
+        api<{ data: Asset[] }>(`/assets?${siteQuery}pageSize=500`),
+        api<Location[]>(`/locations${locationQuery}`),
+        api<{ data: JobPlan[] }>('/job-plans'),
+      ]).then(([a, l, jp]) => {
+        setAssets(a.data ?? []);
+        setLocations(Array.isArray(l) ? l : []);
+        setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? []));
+      }).catch((e) => setError(String(e)));
+    } else {
+      Promise.all([
+        api<{ data: Asset[] }>('/assets'),
+        api<Location[]>('/locations'),
+        api<{ data: JobPlan[] }>('/job-plans'),
+      ]).then(([a, l, jp]) => {
+        setAssets(a.data ?? []);
+        setLocations(Array.isArray(l) ? l : []);
+        setJobPlans(Array.isArray(jp) ? jp : (jp.data ?? []));
+      }).catch((e) => setError(String(e)));
+    }
 
     if (!isNew) {
       api<typeof form & { id: string }>(`/work-orders/${id}`).then((wo) => {
@@ -55,7 +71,17 @@ export function WOFormPage() {
         });
       }).catch((e) => setError(String(e)));
     }
-  }, [id, isNew]);
+  }, [id, isNew, defaultSiteId]);
+
+  useEffect(() => {
+    if (!isNew) return;
+    if (form.locationId && locations.length > 0 && !locations.some((l) => l.id === form.locationId)) {
+      setForm((f) => ({ ...f, locationId: '' }));
+    }
+    if (form.assetId && assets.length > 0 && !assets.some((a) => a.id === form.assetId)) {
+      setForm((f) => ({ ...f, assetId: '' }));
+    }
+  }, [locations, assets, defaultSiteId, isNew, form.locationId, form.assetId]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -114,13 +140,13 @@ export function WOFormPage() {
         <FormField label="Asset" htmlFor="assetId">
           <select id="assetId" className="form-input" value={form.assetId} onChange={(e) => set('assetId', e.target.value)}>
             <option value="">— None —</option>
-            {assets.map((a) => <option key={a.id} value={a.id}>{a.assetNum} – {a.description}</option>)}
+            {assets.map((a) => <option key={a.id} value={a.id}>{a.assetNum} — {a.description}</option>)}
           </select>
         </FormField>
         <FormField label="Location" htmlFor="locationId">
           <select id="locationId" className="form-input" value={form.locationId} onChange={(e) => set('locationId', e.target.value)}>
             <option value="">— None —</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.code} – {l.name}</option>)}
+            {locations.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.name}</option>)}
           </select>
         </FormField>
         <FormField label="Job plan" htmlFor="jobPlanId">

@@ -17,15 +17,25 @@
   }
   a:hover { color: #93c4f8; }
 
-  /* Inside white cards, links should be orange */
-  .auth-card a,
-  .admin-section a,
-  .content-card a {
+  /* Inside white cards, links should be orange — EXCEPT when the link
+     is actually styled as a button (Link components used for
+     navigation, e.g. "+ New sub-asset", still need btn-primary's white
+     text). FIX: this rule's specificity (.admin-section a = one class +
+     one element) was beating .btn-primary/.btn-secondary/etc.'s own
+     text color (a single class), so any <Link className="btn-primary">
+     rendered inside an .admin-section card got its white text silently
+     overridden to orange #E8650A — orange text on an orange gradient
+     background, which reads as blank/invisible. Same bug would have hit
+     every other *-styled Link (btn-secondary, btn-outline, etc.) used
+     inside these cards, not just this one button. */
+  .auth-card a:not(.btn-primary):not(.btn-secondary):not(.btn-outline):not(.btn-outline-light):not(.btn-danger),
+  .admin-section a:not(.btn-primary):not(.btn-secondary):not(.btn-outline):not(.btn-outline-light):not(.btn-danger),
+  .content-card a:not(.btn-primary):not(.btn-secondary):not(.btn-outline):not(.btn-outline-light):not(.btn-danger) {
     color: #E8650A;
   }
-  .auth-card a:hover,
-  .admin-section a:hover,
-  .content-card a:hover {
+  .auth-card a:hover:not(.btn-primary):not(.btn-secondary):not(.btn-outline):not(.btn-outline-light):not(.btn-danger),
+  .admin-section a:hover:not(.btn-primary):not(.btn-secondary):not(.btn-outline):not(.btn-outline-light):not(.btn-danger),
+  .content-card a:hover:not(.btn-primary):not(.btn-secondary):not(.btn-outline):not(.btn-outline-light):not(.btn-danger) {
     color: #c45608;
   }
 
@@ -408,4 +418,19 @@
   top: 0; left: 0; right: 0;
   height: 2px;
   border-radius: 14px 14px 0 0;
+}
+
+/* FIX: the record-title/description line on detail pages (Asset
+   Detail's "Rooftop AC Unit-bang", WO Detail's job-plan-name heading,
+   etc.) was rendering with a Tailwind color utility (text-slate-800 /
+   text-slate-900) that should be solid dark text on the white content
+   card behind it — but was showing up invisible (only readable via
+   text-selection highlight, confirming the text itself was present and
+   correctly positioned, just uncolored). Rather than leave this
+   dependent on a Tailwind utility whose specificity/generation could be
+   silently interfered with, this is a plain, unlayered, !important rule
+   that unconditionally wins — guaranteed dark text regardless of
+   whatever was suppressing the utility class. */
+.detail-title-text {
+  color: #1e293b !important;
 }

@@ -6,6 +6,7 @@ import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { usePagination } from '../../hooks/usePagination.js';
 import { Pagination } from '../../components/Pagination.js';
+import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';
 
 interface WO {
   id: string; woNum: string; description: string; status: string;
@@ -41,6 +42,15 @@ export function WOListPage() {
   const [status, setStatus] = useState('');
   const [type, setType] = useState('');
   const [priority, setPriority] = useState('');
+  // FIX: same "Use Default Insert Site as a Display Filter?" gap as the
+  // Asset list — the setting saved fine but nothing read it. Default
+  // Insert Site's Organisation is a fixed pairing in Maximo (Site always
+  // belongs to exactly one Org), so filtering WOs by Site alone is
+  // sufficient here, same as the Asset list.
+  const [siteId, setSiteId] = useState('');
+  const [siteOptions, setSiteOptions] = useState<Array<{ id: string; siteNum: string; name: string }>>([]);
+  const [siteFilterReady, setSiteFilterReady] = useState(false);
+  const { defaultSiteId, useDefaultSiteAsFilter, ready: defaultSiteReady } = useActiveDefaultSite();
 
   const { views, activeView, setActiveView } = useTableView('WorkOrder');
   const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
@@ -48,14 +58,30 @@ export function WOListPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    api<Array<{ id: string; siteNum: string; name: string }>>('/account/lookups/sites')
+      .then(setSiteOptions)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!defaultSiteReady || siteFilterReady) return;
+    if (useDefaultSiteAsFilter && defaultSiteId) {
+      setSiteId(defaultSiteId);
+    }
+    setSiteFilterReady(true);
+  }, [defaultSiteReady, siteFilterReady, useDefaultSiteAsFilter, defaultSiteId]);
+
+  useEffect(() => {
+    if (!siteFilterReady) return;
     const params = new URLSearchParams();
     if (status) params.set('status', status);
     if (type) params.set('type', type);
     if (priority) params.set('priority', priority);
+    if (siteId) params.set('siteId', siteId);
     api<{ data: WO[] }>(`/work-orders?${params}`)
-  .then((res) => setWos(res.data ?? []))
-  .catch((e) => setError(String(e)));
-  }, [status, type, priority]);
+      .then((res) => setWos(res.data ?? []))
+      .catch((e) => setError(String(e)));
+  }, [status, type, priority, siteId, siteFilterReady]);
 
   const { page, setPage, paged, totalPages, totalItems } = usePagination(wos, 10);
 
@@ -84,6 +110,13 @@ export function WOListPage() {
             <select className="form-input" value={priority} onChange={(e) => setPriority(e.target.value)}>
               <option value="">All</option>
               {['EMERGENCY', 'URGENT', 'HIGH', 'MEDIUM', 'LOW'].map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </label>
+          <label className="block w-52">
+            <span className="form-label">Site</span>
+            <select className="form-input" value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+              <option value="">All sites</option>
+              {siteOptions.map((s) => <option key={s.id} value={s.id}>{s.siteNum} — {s.name}</option>)}
             </select>
           </label>
           <button type="button" className="btn-primary !w-auto px-4" onClick={() => navigate('/work-orders/new')}>+ New WO</button>

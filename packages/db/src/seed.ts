@@ -4,7 +4,7 @@ import {
   tenants,
   permissions,
   roles,
-  rolePermissions,
+  groupPermissions,
   groups,
   groupRoles,
   userGroups,
@@ -442,12 +442,17 @@ async function seedPhase1Data(db: Database, tenantId: string): Promise<void> {
   if (existingOrg.length > 0) return;
 
   // ── Organisation / Site / Location hierarchy ────────────────────────────────
+  // FIX (Org/Site numeric code parity): Organisation code and Site code are
+  // no longer admin-typed, alphanumeric values — every org/site now gets an
+  // auto-generated numeric code starting at 10000 (see nextOrgCodeForTenant /
+  // nextSiteNumForTenant in admin-org.ts). This is the very first org/site
+  // for a freshly-seeded tenant, so it gets the starting value directly.
   const [org] = await db
     .insert(organisations)
     .values({
       tenantId,
       name: 'Default Organisation',
-      code: 'DEFAULT',
+      code: '10000',
       description: 'Default organisation seeded at setup',
       glAccount: '1000',
       costCenter: 'CC001',
@@ -460,7 +465,7 @@ async function seedPhase1Data(db: Database, tenantId: string): Promise<void> {
       tenantId,
       orgId: org!.id,
       name: 'Main Site',
-      siteNum: 'SITE001',
+      siteNum: '10000',
       description: 'Primary operating site',
       timezone: 'UTC',
       glAccount: '1100',
@@ -687,12 +692,21 @@ export async function removeLegacyDemoRoles(db: Database): Promise<void> {
  * 3. An "All Users" role exists with basic read permissions
  * 4. admin@eam.local gets the System Admin role via the Admins group
  */
+// FIX: rebuilt for the Maximo-style model — permissions are granted
+// directly to Security Groups now, not via a role indirection. Roles
+// ('system_admin', 'eam_user') still get created here purely as
+// descriptive job-title labels attached to groups via groupRoles (for
+// display, e.g. "this group's members are typically System
+// Administrators") — but the actual access grant
+// (group -> groupPermissions -> permissions) is the new authorization
+// path, matching "A security group grants access to members of the
+// group ... The access options can be read, insert, save, and delete."
 async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
   // ── 1. Get all permission IDs ────────────────────────────────────────────
   const allPerms = await db.select().from(permissions);
   if (allPerms.length === 0) return;
 
-  // ── 2. Create System Admin role ──────────────────────────────────────────
+  // ── 2. Create "System Administrator" role label (metadata only) ──────────
   let [adminRole] = await db.select().from(roles)
     .where(and(eq(roles.tenantId, tenantId), eq(roles.name, 'system_admin'))).limit(1);
 
@@ -700,17 +714,10 @@ async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
     const [inserted] = await db.insert(roles).values({
       tenantId,
       name: 'system_admin',
-      description: 'Full access to all EAM modules and administration',
+      description: 'Job-title label for system administrators (display only — grants no access by itself)',
       isSystem: true,
     }).returning();
     adminRole = inserted!;
-  }
-
-  // Assign ALL permissions to System Admin role
-  for (const perm of allPerms) {
-    await db.insert(rolePermissions)
-      .values({ roleId: adminRole.id, permissionId: perm.id })
-      .onConflictDoNothing();
   }
 
   // ── 3. Create All Users group (basic group every new user joins) ──────────
@@ -726,7 +733,7 @@ async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
     allUsersGroup = inserted!;
   }
 
-  // ── 4. Create basic "EAM User" role with read-only access ────────────────
+  // ── 4. Create "EAM User" role label (metadata only) ───────────────────────
   let [basicRole] = await db.select().from(roles)
     .where(and(eq(roles.tenantId, tenantId), eq(roles.name, 'eam_user'))).limit(1);
 
@@ -734,27 +741,28 @@ async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
     const [inserted] = await db.insert(roles).values({
       tenantId,
       name: 'eam_user',
-      description: 'Basic read access — can view work orders, assets, and service requests',
+      description: 'Job-title label for basic EAM users (display only — grants no access by itself)',
       isSystem: true,
     }).returning();
     basicRole = inserted!;
   }
 
-  // Give basic role read permissions for core entities
-  const basicPermNames = [
-    'assets:read', 'work_orders:read', 'service_requests:read',
-    'pm:read', 'permits:read', 'inventory:read', 'labour:read', 'reports:read',
-  ];
-  const basicPerms = allPerms.filter((p) =>
-    basicPermNames.includes(`${p.resource}:${p.action}`)
-  );
-  for (const perm of basicPerms) {
-    await db.insert(rolePermissions)
-      .values({ roleId: basicRole.id, permissionId: perm.id })
-      .onConflictDoNothing();
-  }
+  // FIX: "All Users" stays permission-less by design. It exists purely
+  // so every account has a place to live (sidebar/start-center access),
+  // not to grant data access. Combined with its scope_type defaulting to
+  // ALL (unrestricted), giving it any read permissions here would let it
+  // silently override every other scoped group a user belongs to — e.g.
+  // a user in both "All Users" and a Site-scoped "Chennai Technician"
+  // group would see assets from every site, not just Chennai, because
+  // the unrestricted "All Users" scope wins the union. Real data access
+  // should always come from a task-specific group instead. Also clear
+  // out any permissions this group may have picked up from an older seed
+  // run, so re-running this script always restores the zero-permission
+  // state.
+  await db.delete(groupPermissions).where(eq(groupPermissions.groupId, allUsersGroup.id));
 
-  // Assign basic role to All Users group (so every new user gets read access)
+  // Attach the "EAM User" job-title label to All Users — display only,
+  // does not affect access (which is intentionally zero, set above).
   await db.insert(groupRoles)
     .values({ groupId: allUsersGroup.id, roleId: basicRole.id })
     .onConflictDoNothing();
@@ -772,7 +780,16 @@ async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
     adminsGroup = inserted!;
   }
 
-  // Assign System Admin role to Admins group
+  // FIX: ALL permissions now go directly onto the Admins GROUP.
+  for (const perm of allPerms) {
+    await db.insert(groupPermissions)
+      .values({ groupId: adminsGroup.id, permissionId: perm.id })
+      .onConflictDoNothing();
+  }
+
+  // Attach the "System Administrator" job-title label to Admins —
+  // display only, does not affect what the group can access (that's set
+  // above).
   await db.insert(groupRoles)
     .values({ groupId: adminsGroup.id, roleId: adminRole.id })
     .onConflictDoNothing();
@@ -792,12 +809,10 @@ async function ensureAdminSetup(db: Database, tenantId: string): Promise<void> {
   }
 
   // ── 7. Dev MailHog SMTP (localhost:1025) when none configured ─────────────
-  const [existingSmtp] = await db
-    .select({ id: smtpConfigurations.id })
-    .from(smtpConfigurations)
-    .where(eq(smtpConfigurations.tenantId, tenantId))
-    .limit(1);
-
+  // FIX: removed the unused `existingSmtp` single-row lookup — it was
+  // declared but never read (the code below already fetches the full
+  // list via `tenantSmtp`), which tripped TypeScript's noUnusedLocals and
+  // failed `pnpm build`.
   const tenantSmtp = await db
     .select({ id: smtpConfigurations.id, isActive: smtpConfigurations.isActive })
     .from(smtpConfigurations)

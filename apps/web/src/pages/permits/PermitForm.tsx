@@ -1,18 +1,36 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 
-const PERMIT_TYPES = ['HOT_WORK','CONFINED_SPACE','ELECTRICAL','HEIGHT','EXCAVATION','CHEMICAL','GENERAL'] as const;
+// FIX (P1-6 gap — UI for AC-P1-6.6): this used to be a hardcoded const
+// array — meaning even after the backend started reading permit types
+// from permit_types_config, any *new* type an admin configured would
+// never show up here, since this form never asked the API. Now fetches
+// /admin/permit-types and falls back to the original 7 only if that
+// call fails (e.g. before the seed migration has run).
+const FALLBACK_PERMIT_TYPES = ['HOT_WORK','CONFINED_SPACE','ELECTRICAL','HEIGHT','EXCAVATION','CHEMICAL','GENERAL'];
+
+interface PermitTypeConfig { id: string; type: string; label: string; maxValidityHours: number | null }
 
 export function PermitFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const woId = searchParams.get('woId') ?? '';
 
+  const [permitTypes, setPermitTypes] = useState<PermitTypeConfig[]>(
+    FALLBACK_PERMIT_TYPES.map((t) => ({ id: t, type: t, label: t.replace(/_/g, ' '), maxValidityHours: null })),
+  );
+
+  useEffect(() => {
+    api<PermitTypeConfig[]>('/admin/permit-types')
+      .then((types) => { if (types.length > 0) setPermitTypes(types); })
+      .catch(() => {});
+  }, []);
+
   const [form, setForm] = useState({
-    type: 'GENERAL' as typeof PERMIT_TYPES[number],
+    type: 'GENERAL',
     description: '',
     validFrom: '',
     validTo: '',
@@ -62,9 +80,14 @@ export function PermitFormPage() {
         <div className="admin-section space-y-4 max-w-2xl">
           <FormField label="Permit type *" htmlFor="ptype">
             <select id="ptype" className="form-input" value={form.type}
-              onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as typeof form.type }))}>
-              {PERMIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+              onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
+              {permitTypes.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
             </select>
+            {permitTypes.find((t) => t.type === form.type)?.maxValidityHours && (
+              <p className="text-xs text-slate-500 mt-1">
+                Max validity: {permitTypes.find((t) => t.type === form.type)?.maxValidityHours} hours from Valid From.
+              </p>
+            )}
           </FormField>
 
           <FormField label="Description / scope of work *" htmlFor="pdesc">

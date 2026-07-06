@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, desc, ilike, or } from 'drizzle-orm';
+import { eq, and, desc, ilike, or, sql } from 'drizzle-orm';
 import {
   db,
   items,
@@ -8,8 +8,10 @@ import {
   inventoryTransactions,
   workOrders,
   audit,
+  users,
 } from '@eam/db';
 import { requirePermission } from '../plugins/auth.js';
+import { nextAutoRecordCode } from '@eam/shared';
 
 const readGuard = { preHandler: requirePermission('inventory:read') };
 const writeGuard = { preHandler: requirePermission('inventory:write') };
@@ -19,20 +21,27 @@ export async function inventoryRoutes(app: FastifyInstance) {
   // ─── Item Master ──────────────────────────────────────────────────────────────
 
   app.get('/items', readGuard, async (request) => {
-    const { itemType, q, page, pageSize } = request.query as {
+    const { itemType, q, page, pageSize, includeInactive } = request.query as {
       itemType?: string;
       q?: string;
       page?: string;
       pageSize?: string;
+      includeInactive?: string;
     };
     const tid = request.user!.tenantId;
     const limit = Math.min(Number(pageSize ?? 50), 200);
     const offset = (Number(page ?? 1) - 1) * limit;
 
+    // FIX: this list previously always hard-filtered to isActive=true
+    // with no way to ever see a deactivated Item again through the UI —
+    // once deactivated (see DELETE /items/:id below, newly added), an
+    // Item effectively vanished with no path back to view or reactivate
+    // it. includeInactive=true surfaces them, used by the Item Master
+    // list's new "Show inactive items" toggle.
     const rows = await db.select().from(items).where(
       and(
         eq(items.tenantId, tid),
-        eq(items.isActive, true),
+        includeInactive === 'true' ? undefined : eq(items.isActive, true),
         itemType ? eq(items.itemType, itemType as typeof items.$inferSelect.itemType) : undefined,
         q ? or(ilike(items.itemNum, `%${q}%`), ilike(items.description, `%${q}%`)) : undefined,
       ),
@@ -44,9 +53,77 @@ export async function inventoryRoutes(app: FastifyInstance) {
   app.post('/items', writeGuard, async (request, reply) => {
     const body = request.body as Partial<typeof items.$inferInsert>;
     const tid = request.user!.tenantId;
-    const [row] = await db.insert(items).values({ tenantId: tid, ...body } as typeof items.$inferInsert).returning();
+
+    if (!body.description || !String(body.description).trim()) {
+      return reply.status(422).send({ error: 'Description is required.' });
+    }
+
+    // FIX: same gap as assets/locations — "Item #" was a required manual
+    // text field with no auto-generation, so every item required the
+    // admin to invent a unique number by hand. Sequential ITM-00001,
+    // ITM-00002, ... scoped per tenant, same convention as AST-00001 for
+    // assets and LOC-00001 for locations. An explicitly typed item # (a
+    // real Maximo-style part number, etc.) still wins — this only fills
+    // in when the field was left blank.
+    let itemNum = body.itemNum?.trim().toUpperCase();
+    if (!itemNum) {
+      const [{ count }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(items)
+        .where(eq(items.tenantId, tid));
+      itemNum = nextAutoRecordCode(count);
+    }
+
+    const [row] = await db.insert(items).values({
+      tenantId: tid,
+      ...body,
+      itemNum,
+      createdByUserId: request.user!.id,
+    } as typeof items.$inferInsert).returning();
     await audit(db, { tenantId: tid, userId: request.user!.id, action: 'CREATE', resource: 'Item', resourceId: row!.id });
     return reply.code(201).send(row);
+  });
+
+  // FIX: Items had no delete/deactivate path at all — no DELETE route
+  // existed here, and the Item Master UI had no button for it either.
+  // Real Maximo Items app: an Item is never hard-deleted (too much
+  // history hangs off it — POs, work order material lines, asset
+  // itemId links), it's set to Status = INACTIVE instead, exactly the
+  // pattern already established for Organisations/Sites in this
+  // platform (isActive soft-delete via "Deactivate"). Mirrors that
+  // convention rather than inventing a new one.
+  app.delete('/items/:id', writeGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tid = request.user!.tenantId;
+
+    const [row] = await db
+      .update(items)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(items.id, id), eq(items.tenantId, tid)))
+      .returning();
+
+    if (!row) return reply.code(404).send({ error: 'Item not found' });
+    await audit(db, { tenantId: tid, userId: request.user!.id, action: 'DEACTIVATE', resource: 'Item', resourceId: id });
+    return reply.code(200).send(row);
+  });
+
+  // FIX: the reactivate counterpart — without this, "Deactivate" would
+  // be a one-way door with no UI path back, unlike Organisations/Sites
+  // which (per their own admin-org.ts routes) only ever toggle isActive,
+  // never lock it permanently.
+  app.post('/items/:id/reactivate', writeGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tid = request.user!.tenantId;
+
+    const [row] = await db
+      .update(items)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(and(eq(items.id, id), eq(items.tenantId, tid)))
+      .returning();
+
+    if (!row) return reply.code(404).send({ error: 'Item not found' });
+    await audit(db, { tenantId: tid, userId: request.user!.id, action: 'REACTIVATE', resource: 'Item', resourceId: id });
+    return reply.code(200).send(row);
   });
 
   app.get('/items/:id', readGuard, async (request, reply) => {
@@ -69,7 +146,15 @@ export async function inventoryRoutes(app: FastifyInstance) {
       .leftJoin(storerooms, eq(inventoryBalances.storeroomId, storerooms.id))
       .where(eq(inventoryBalances.itemId, id));
 
-    return { ...item, balances };
+    // FIX: resolve createdByUserId -> a display name for the frontend,
+    // same as the equivalent joins added to assets/locations. A single
+    // extra lookup rather than a join since this route's main select is
+    // a plain `select()` wildcard over items.
+    const [creator] = item.createdByUserId
+      ? await db.select({ displayName: users.displayName }).from(users).where(eq(users.id, item.createdByUserId)).limit(1)
+      : [null];
+
+    return { ...item, balances, createdByName: creator?.displayName ?? null };
   });
 
   app.put('/items/:id', writeGuard, async (request, reply) => {
@@ -90,19 +175,43 @@ export async function inventoryRoutes(app: FastifyInstance) {
   });
 
   app.post('/storerooms', adminGuard, async (request, reply) => {
-    const body = request.body as Record<string, unknown>;
+    const body = request.body as { code?: string; siteId?: string; name: string; description?: string; custodianUserId?: string };
     const tid = request.user!.tenantId;
 
-    // Auto-generate storeroom_num from code field or sequential number
-    const storeroomNum = (body['storeroomNum'] || body['storeroom_num'] || body['code']) as string | undefined;
-    if (storeroomNum) {
-      body['storeroomNum'] = storeroomNum;
-    } else {
-      const count = await db.select({ id: storerooms.id }).from(storerooms).where(eq(storerooms.tenantId, tid));
-      body['storeroomNum'] = `SR-${String(count.length + 1).padStart(4, '0')}`;
+    if (!body.name?.trim()) {
+      return reply.code(422).send({ error: 'Name is required' });
     }
 
-    const [row] = await db.insert(storerooms).values({ tenantId: tid, ...body } as typeof storerooms.$inferInsert).returning();
+    // FIX: previously blind-spread the raw request body straight into
+    // the insert (`{ tenantId, ...body }`), which is what let an
+    // unmodeled `code` value collide with another tenant's storeroom on
+    // a unique index that wasn't even tenant-scoped. Now builds the
+    // insert explicitly and — matching the same convention already
+    // applied to Assets/Locations/Items — auto-generates STR-00001 style
+    // when Code is left blank, uppercases an explicitly-typed one, and
+    // always keeps code/storeroomNum equal so they can't drift apart.
+    let code = body.code?.trim().toUpperCase();
+    if (!code) {
+      const [{ count }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(storerooms)
+        .where(eq(storerooms.tenantId, tid));
+      code = nextAutoRecordCode(count);
+    } else {
+      const [existing] = await db.select({ id: storerooms.id }).from(storerooms)
+        .where(and(eq(storerooms.tenantId, tid), eq(storerooms.code, code))).limit(1);
+      if (existing) return reply.code(409).send({ error: `A storeroom with code "${code}" already exists.` });
+    }
+
+    const [row] = await db.insert(storerooms).values({
+      tenantId: tid,
+      code,
+      storeroomNum: code,
+      siteId: body.siteId,
+      name: body.name.trim(),
+      description: body.description,
+      custodianUserId: body.custodianUserId,
+    }).returning();
     return reply.code(201).send(row);
   });
 

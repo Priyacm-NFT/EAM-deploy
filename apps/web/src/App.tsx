@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { isLoggedIn } from './api/client.js';
 import { HomePage } from './pages/HomePage.js';
@@ -50,9 +50,15 @@ import { DeliveryLogPage } from './pages/admin/notifications/DeliveryLog.js';
 import { BounceListPage } from './pages/admin/notifications/BounceList.js';
 import { UserNotificationPrefsPage } from './pages/admin/notifications/UserNotificationPrefs.js';
 import { LocationTreePage } from './pages/assets/LocationTree.js';
+import { LocationDetailPage } from './pages/assets/LocationDetail.js';
 import { FailureCodesPage } from './pages/assets/FailureCodes.js';
+import { SRCategoriesPage } from './pages/service-requests/SRCategories.js';
+import { PMRouteListPage } from './pages/pm/PMRouteList.js';
+import { PMRouteDetailPage } from './pages/pm/PMRouteDetail.js';
+import { PermitTypesPage } from './pages/permits/PermitTypes.js';
 import { AssetListPage } from './pages/assets/AssetList.js';
 import { AssetFormPage } from './pages/assets/AssetForm.js';
+import { AssetImportPage } from './pages/assets/AssetImport.js';
 import { AssetDetailPage } from './pages/assets/AssetDetail.js';
 import { SRListPage } from './pages/service-requests/SRList.js';
 import { SRFormPage } from './pages/service-requests/SRForm.js';
@@ -71,7 +77,9 @@ import { PermitListPage } from './pages/permits/PermitList.js';
 import { PermitDetailPage } from './pages/permits/PermitDetail.js';
 import { PermitFormPage } from './pages/permits/PermitForm.js';
 import { ItemMasterListPage } from './pages/inventory/ItemMasterList.js';
+import { ItemDetailPage } from './pages/inventory/ItemDetail.js';
 import { StoreroomListPage } from './pages/inventory/StoreroomList.js';
+import { StoreroomDetailPage } from './pages/inventory/StoreroomDetail.js';
 import { TransactionLogPage } from './pages/inventory/TransactionLog.js';
 import { LabourPage } from './pages/labour/LabourPage.js';
 import { StandardReportsPage } from './pages/StandardReports.js';
@@ -113,33 +121,48 @@ const ChevronDown = ({ open }: { open: boolean }) => (
 );
 
 // ── Collapsible sidebar section ──────────────────────────────────────────────
+// FIX: this is now a true accordion. Open/closed state for every section
+// lives in ONE place — the parent <App> component's `openSection` state —
+// instead of each section owning its own independent `useState`. With
+// independent state, clicking one section never affected the others, so
+// multiple sections could stay expanded at once, and a section that was
+// open from a previous page never auto-collapsed when you navigated
+// somewhere else. Now: clicking a section's header sets it as the single
+// "open" id; clicking it again closes it; clicking a different section's
+// header switches to that one and implicitly closes the previous one —
+// exactly one section open at a time.
 function CollapsibleSection({
+  id,
   label,
   children,
   paths = [],
   icon,
+  isOpen,
+  onToggle,
 }: {
+  id: string;
   label: string;
   children: React.ReactNode;
   paths?: string[];
   icon?: React.ReactNode;
+  isOpen: boolean;
+  onToggle: (id: string) => void;
 }) {
   const { pathname } = useLocation();
   const isChildActive = paths.some((p) => pathname === p || pathname.startsWith(p + '/'));
-  const [open, setOpen] = useState(isChildActive);
 
   return (
     <div style={{ marginBottom: '1px' }}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => onToggle(id)}
         className={`app-sidebar-group-btn${isChildActive ? ' app-sidebar-group-btn-active' : ''}`}
       >
         {icon && <span style={{ display: 'flex', alignItems: 'center', opacity: 0.6 }}>{icon}</span>}
         <span>{label}</span>
-        <ChevronDown open={open} />
+        <ChevronDown open={isOpen} />
       </button>
-      {open && (
+      {isOpen && (
         <nav className="app-sidebar-sub-nav">
           {children}
         </nav>
@@ -172,6 +195,15 @@ export default function App() {
   const canReadInventory       = hasPermission(user, 'inventory:read');
   const canReadPermits         = hasPermission(user, 'permits:read');
   const canReadPM              = hasPermission(user, 'pm:read');
+  // FIX: People (Labour & Crews) and Reports sidebar sections were both
+  // gated by canReadWO (work_orders:read) — a copy-paste leftover, not
+  // their own labour:read/reports:read permissions. Any user with WO
+  // access saw both sections regardless of whether their Security
+  // Group's Permissions list actually granted labour:read or
+  // reports:read, matching the same gap just fixed on the backend
+  // (labour.ts's guards, and reports.ts's new reportsReadGuard).
+  const canReadLabour          = hasPermission(user, 'labour:read');
+  const canReadReports         = hasPermission(user, 'reports:read');
   const canManageIdentity      = hasPermission(user, 'admin:users:manage');
   const canManageConfig        = hasPermission(user, 'admin:config:manage');
   const canManageReporting     = hasPermission(user, 'admin:reporting:manage');
@@ -182,15 +214,78 @@ export default function App() {
 
   const { pathname } = useLocation();
 
+  // ── Single source of truth for "which sidebar section is open" ───────────
+  // FIX: one piece of state for the whole sidebar, not one per section.
+  const SECTION_PATHS: Record<string, string[]> = {
+    assets: ['/assets', '/locations', '/failure-codes'],
+    service: ['/service-requests', '/sr-categories'],
+    maintenance: ['/work-orders', '/job-plans', '/pm', '/pm-routes'],
+    safety: ['/permits', '/admin/permit-types'],
+    inventory: ['/inventory'],
+    people: ['/labour'],
+    reports: ['/reports'],
+    identity: ['/admin/identity'],
+    configuration: ['/admin/config'],
+    schemaWorkflows: ['/admin/schema', '/admin/workflows'],
+    integrations: ['/admin/integrations'],
+    attachments: ['/admin/attachments'],
+    reporting: ['/admin/reporting'],
+    orgManagement: ['/admin/org'],
+    notifications: ['/admin/notifications'],
+  };
+
+  function sectionForPath(path: string): string | null {
+    for (const [id, paths] of Object.entries(SECTION_PATHS)) {
+      if (paths.some((p) => path === p || path.startsWith(p + '/'))) return id;
+    }
+    return null;
+  }
+
+  const [openSection, setOpenSection] = useState<string | null>(() => sectionForPath(pathname));
+
+  // ── Sidebar visibility toggle (hamburger icon in topbar) ──────────────────
+  // FIX: real Maximo's resolved Display/Hide/Use-setting-from-security-
+  // group choice (see auth.ts effectiveSideNav) decides the *starting*
+  // state here — defaults to true (visible) until /auth/me resolves,
+  // matching groups' own "off is something an admin chooses" default so
+  // the sidebar doesn't flash hidden during the brief loading window.
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarUserToggled, setSidebarUserToggled] = useState(false);
+
+  // Apply the resolved server value once it loads — but only if the user
+  // hasn't already manually clicked the hamburger toggle this session;
+  // a manual click should win for the rest of the session even if the
+  // user object re-fetches in the background.
+  useEffect(() => {
+    if (!sidebarUserToggled && user?.effectiveSideNav !== undefined) {
+      setSidebarOpen(user.effectiveSideNav);
+    }
+  }, [user?.effectiveSideNav, sidebarUserToggled]);
+
+  // FIX: when navigating to a page that belongs to a different section,
+  // automatically open that section. Since openSection only ever holds
+  // one id, this implicitly closes whichever section was open before.
+  useEffect(() => {
+    const matchedSection = sectionForPath(pathname);
+    if (matchedSection) setOpenSection(matchedSection);
+  }, [pathname]);
+
+  function toggleSection(id: string) {
+    setOpenSection((current) => (current === id ? null : id));
+  }
+
   const PAGE_TITLES: [string, string, string?][] = [
     ['/assets', 'Assets', 'Equipment, machinery and infrastructure register'],
     ['/locations', 'Locations'],
     ['/failure-codes', 'Failure Codes'],
     ['/service-requests', 'Service Requests', 'Customer and internal service tickets'],
+    ['/sr-categories', 'Service Request Categories'],
     ['/work-orders', 'Work Orders', 'Maintenance and corrective work'],
     ['/job-plans', 'Job Plans', 'Reusable task and resource templates'],
     ['/pm', 'Preventive Maintenance', 'Scheduled maintenance programs'],
+    ['/pm-routes', 'PM Routes', 'Route-based PM — many assets, one visit'],
     ['/permits', 'Permits to Work', 'Safety authorisation for hazardous work'],
+    ['/admin/permit-types', 'Permit Types', 'Configure checklist templates and approver roles per permit type'],
     ['/inventory', 'Inventory', 'Stock, items and storerooms'],
     ['/people', 'People', 'Crew, contractors and contacts'],
     ['/reports', 'Reports'],
@@ -235,7 +330,7 @@ export default function App() {
 
   return (
     <div className={isPublicPage ? '' : 'app-shell'}>
-      {!isPublicPage && (
+      {!isPublicPage && sidebarOpen && (
         <aside className="app-sidebar">
           {/* ── Logo ── */}
           <Link to="/" className="app-sidebar-logo">
@@ -262,7 +357,8 @@ export default function App() {
                 <div className="app-sidebar-section-label">Operations</div>
 
                 {canReadAssets && (
-                  <CollapsibleSection label="Assets" paths={['/assets', '/locations', '/failure-codes']}>
+                  <CollapsibleSection id="assets" label="Assets" paths={SECTION_PATHS.assets}
+                    isOpen={openSection === 'assets'} onToggle={toggleSection}>
                     <SidebarLink to="/assets" label="Asset Register" />
                     <SidebarLink to="/locations" label="Locations" />
                     <SidebarLink to="/failure-codes" label="Failure Codes" />
@@ -270,41 +366,50 @@ export default function App() {
                 )}
 
                 {canReadSR && (
-                  <CollapsibleSection label="Service" paths={['/service-requests']}>
+                  <CollapsibleSection id="service" label="Service" paths={SECTION_PATHS.service}
+                    isOpen={openSection === 'service'} onToggle={toggleSection}>
                     <SidebarLink to="/service-requests" label="Service Requests" />
+                    <SidebarLink to="/sr-categories" label="Categories" />
                   </CollapsibleSection>
                 )}
 
                 {canReadWO && (
-                  <CollapsibleSection label="Maintenance" paths={['/work-orders', '/job-plans', '/pm']}>
+                  <CollapsibleSection id="maintenance" label="Maintenance" paths={SECTION_PATHS.maintenance}
+                    isOpen={openSection === 'maintenance'} onToggle={toggleSection}>
                     <SidebarLink to="/work-orders" label="Work Orders" />
                     <SidebarLink to="/job-plans" label="Job Plans" />
                     <SidebarLink to="/pm" label="PM Masters" />
+                    <SidebarLink to="/pm-routes" label="PM Routes" />
                     <SidebarLink to="/pm/forecast" label="PM Forecast" />
                   </CollapsibleSection>
                 )}
 
                 {canReadPermits && (
-                  <CollapsibleSection label="Safety" paths={['/permits']}>
+                  <CollapsibleSection id="safety" label="Safety" paths={SECTION_PATHS.safety}
+                    isOpen={openSection === 'safety'} onToggle={toggleSection}>
                     <SidebarLink to="/permits" label="Permits to Work" />
+                    <SidebarLink to="/admin/permit-types" label="Permit Types" />
                   </CollapsibleSection>
                 )}
 
                 {canReadInventory && (
-                  <CollapsibleSection label="Inventory" paths={['/inventory']}>
+                  <CollapsibleSection id="inventory" label="Inventory" paths={SECTION_PATHS.inventory}
+                    isOpen={openSection === 'inventory'} onToggle={toggleSection}>
                     <SidebarLink to="/inventory" label="Item Master" />
                     <SidebarLink to="/inventory/transactions" label="Transactions" />
                   </CollapsibleSection>
                 )}
 
-                {canReadWO && (
-                  <CollapsibleSection label="People" paths={['/labour']}>
+                {canReadLabour && (
+                  <CollapsibleSection id="people" label="People" paths={SECTION_PATHS.people}
+                    isOpen={openSection === 'people'} onToggle={toggleSection}>
                     <SidebarLink to="/labour" label="Labour & Crews" />
                   </CollapsibleSection>
                 )}
 
-                {canReadWO && (
-                  <CollapsibleSection label="Reports" paths={['/reports']}>
+                {canReadReports && (
+                  <CollapsibleSection id="reports" label="Reports" paths={SECTION_PATHS.reports}
+                    isOpen={openSection === 'reports'} onToggle={toggleSection}>
                     <SidebarLink to="/reports/standard" label="Standard Reports" />
                   </CollapsibleSection>
                 )}
@@ -317,7 +422,8 @@ export default function App() {
                 <div className="app-sidebar-section-label">Administration</div>
 
                 {canManageIdentity && (
-                  <CollapsibleSection label="Identity" paths={['/admin/identity']}>
+                  <CollapsibleSection id="identity" label="Identity" paths={SECTION_PATHS.identity}
+                    isOpen={openSection === 'identity'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/identity/users" label="Users" />
                     <SidebarLink to="/admin/identity/groups" label="Groups" />
                     <SidebarLink to="/admin/identity/roles" label="Roles" />
@@ -327,7 +433,8 @@ export default function App() {
                 )}
 
                 {canManageConfig && (
-                  <CollapsibleSection label="Configuration" paths={['/admin/config']}>
+                  <CollapsibleSection id="configuration" label="Configuration" paths={SECTION_PATHS.configuration}
+                    isOpen={openSection === 'configuration'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/config" label="Entities & Fields" />
                     <SidebarLink to="/admin/config/picklists" label="Picklists" />
                     <SidebarLink to="/admin/config/status-model" label="Status Model" />
@@ -337,14 +444,16 @@ export default function App() {
                 )}
 
                 {canManageWorkflows && (
-                  <CollapsibleSection label="Schema & Workflows" paths={['/admin/schema', '/admin/workflows']}>
+                  <CollapsibleSection id="schemaWorkflows" label="Schema & Workflows" paths={SECTION_PATHS.schemaWorkflows}
+                    isOpen={openSection === 'schemaWorkflows'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/schema/migrations" label="Schema Migrations" />
                     <SidebarLink to="/admin/workflows" label="Workflows" />
                   </CollapsibleSection>
                 )}
 
                 {canManageIntegrations && (
-                  <CollapsibleSection label="Integrations" paths={['/admin/integrations']}>
+                  <CollapsibleSection id="integrations" label="Integrations" paths={SECTION_PATHS.integrations}
+                    isOpen={openSection === 'integrations'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/integrations/connections" label="Connections" />
                     <SidebarLink to="/admin/integrations/jobs" label="Scheduled Jobs" />
                     <SidebarLink to="/admin/integrations/webhooks" label="Webhooks" />
@@ -354,7 +463,8 @@ export default function App() {
                 )}
 
                 {canManageAttachments && (
-                  <CollapsibleSection label="Attachments" paths={['/admin/attachments']}>
+                  <CollapsibleSection id="attachments" label="Attachments" paths={SECTION_PATHS.attachments}
+                    isOpen={openSection === 'attachments'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/attachments/document-types" label="Document Types" />
                     <SidebarLink to="/admin/attachments/library" label="File Library" />
                     <SidebarLink to="/admin/attachments/scan-config" label="Scan Config" />
@@ -363,7 +473,8 @@ export default function App() {
                 )}
 
                 {canManageReporting && (
-                  <CollapsibleSection label="Reporting" paths={['/admin/reporting']}>
+                  <CollapsibleSection id="reporting" label="Reporting" paths={SECTION_PATHS.reporting}
+                    isOpen={openSection === 'reporting'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/reporting/library" label="Reports" />
                     <SidebarLink to="/admin/reporting/designer" label="Report Designer" />
                     <SidebarLink to="/admin/reporting/schedules" label="Schedules" />
@@ -373,14 +484,16 @@ export default function App() {
                 )}
 
                 {canManageConfig && (
-                  <CollapsibleSection label="Org Management" paths={['/admin/org']}>
+                  <CollapsibleSection id="orgManagement" label="Org Management" paths={SECTION_PATHS.orgManagement}
+                    isOpen={openSection === 'orgManagement'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/org" label="Organisations & Sites" />
                     <SidebarLink to="/admin/config/status-model" label="Status Model" />
                   </CollapsibleSection>
                 )}
 
                 {canManageNotifications && (
-                  <CollapsibleSection label="Notifications" paths={['/admin/notifications']}>
+                  <CollapsibleSection id="notifications" label="Notifications" paths={SECTION_PATHS.notifications}
+                    isOpen={openSection === 'notifications'} onToggle={toggleSection}>
                     <SidebarLink to="/admin/notifications/templates" label="Templates" />
                     <SidebarLink to="/admin/notifications/triggers" label="Triggers" />
                     <SidebarLink to="/admin/notifications/smtp" label="SMTP Config" />
@@ -439,16 +552,63 @@ export default function App() {
       <div className={isPublicPage ? 'w-full' : 'app-main'}>
         {!isPublicPage && (
           <header className="app-topbar">
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <span style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 600, fontSize: '14px', lineHeight: 1.2 }}>
-                {topbarTitle}
-              </span>
-              {topbarSub && (
-                <span style={{ color: 'rgba(255,255,255,0.95)', fontSize: '11px', marginTop: '1px' }}>
-                  {topbarSub}
+            {/* Left: sidebar toggle + brand name + page title */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              {/* FIX: replaced the plain 3-line hamburger with a
+                  collapse/expand-style icon — 3 horizontal lines plus a
+                  chevron that flips direction with sidebarOpen (points
+                  right when collapsed, i.e. "expand me"; points left when
+                  open, i.e. "collapse me"), matching the reference icon. */}
+              {/* FIX: removed the boxed look (background/border/rounded
+                  corners) — just the bare icon now, hover feedback via
+                  opacity instead of a visible button shape. */}
+              <button
+                type="button"
+                onClick={() => { setSidebarOpen((v) => !v); setSidebarUserToggled(true); }}
+                title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+                style={{
+                  width: '34px', height: '34px', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer', color: 'rgba(255,255,255,0.85)',
+                  opacity: 0.85,
+                  transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.85')}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                  {/* 3 horizontal bars, shortest at top (matches reference) */}
+                  <path d="M2 5h7" />
+                  <path d="M2 9h14" />
+                  <path d="M2 13h14" />
+                  {/* Chevron — right-pointing when collapsed (click to expand),
+                      left-pointing when open (click to collapse) */}
+                  {sidebarOpen ? (
+                    <path d="M13.5 5.5l-3 3.5 3 3.5" />
+                  ) : (
+                    <path d="M11.5 5.5l3 3.5-3 3.5" />
+                  )}
+                </svg>
+              </button>
+              {/* FIX: removed the "EAM Platform" link here — it duplicated
+                  the brand name already shown in the sidebar logo, and
+                  the topbar should show only the current page's title. */}
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', marginLeft: '6px' }}>
+                <span style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 600, fontSize: '14px', lineHeight: 1.2 }}>
+                  {topbarTitle}
                 </span>
-              )}
+                {topbarSub && (
+                  <span style={{ color: 'rgba(255,255,255,0.95)', fontSize: '11px', marginTop: '1px' }}>
+                    {topbarSub}
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* Right: actions */}
             <div className="app-topbar-actions">
               {user && <NotificationBell />}
               <AuthNav />
@@ -531,9 +691,15 @@ export default function App() {
 
             {/* EAM modules */}
             <Route path="/locations" element={<RequireAuth><LocationTreePage /></RequireAuth>} />
+            <Route path="/locations/:id" element={<RequireAuth><LocationDetailPage /></RequireAuth>} />
             <Route path="/failure-codes" element={<RequireAuth><FailureCodesPage /></RequireAuth>} />
+            <Route path="/sr-categories" element={<RequireAuth><SRCategoriesPage /></RequireAuth>} />
+            <Route path="/pm-routes" element={<RequireAuth><PMRouteListPage /></RequireAuth>} />
+            <Route path="/pm-routes/:id" element={<RequireAuth><PMRouteDetailPage /></RequireAuth>} />
+            <Route path="/admin/permit-types" element={<RequireAuth><PermitTypesPage /></RequireAuth>} />
             <Route path="/assets" element={<RequireAuth><AssetListPage /></RequireAuth>} />
             <Route path="/assets/new" element={<RequireAuth><AssetFormPage /></RequireAuth>} />
+            <Route path="/assets/import" element={<RequireAuth><AssetImportPage /></RequireAuth>} />
             <Route path="/assets/:id" element={<RequireAuth><AssetDetailPage /></RequireAuth>} />
             <Route path="/assets/:id/edit" element={<RequireAuth><AssetFormPage /></RequireAuth>} />
             <Route path="/service-requests" element={<RequireAuth><SRListPage /></RequireAuth>} />
@@ -558,6 +724,8 @@ export default function App() {
             <Route path="/inventory" element={<RequireAuth><ItemMasterListPage /></RequireAuth>} />
             <Route path="/inventory/transactions" element={<RequireAuth><TransactionLogPage /></RequireAuth>} />
             <Route path="/inventory/storerooms" element={<RequireAuth><StoreroomListPage /></RequireAuth>} />
+            <Route path="/inventory/storerooms/:id" element={<RequireAuth><StoreroomDetailPage /></RequireAuth>} />
+            <Route path="/inventory/:id" element={<RequireAuth><ItemDetailPage /></RequireAuth>} />
             <Route path="/labour" element={<RequireAuth><LabourPage /></RequireAuth>} />
             <Route path="/reports/standard" element={<RequireAuth><StandardReportsPage /></RequireAuth>} />
           </Routes>

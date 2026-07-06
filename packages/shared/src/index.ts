@@ -5,3 +5,4 @@ export * from './schemas.js';
 export * from './session-policy.js';
 export * from './event-bus.js';
 export * from './utils.js';
+export * from './record-code.js';

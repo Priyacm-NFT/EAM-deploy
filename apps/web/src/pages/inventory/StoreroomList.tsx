@@ -3,6 +3,7 @@
  * Route: /inventory/storerooms
  */
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { IdentityPageLayout, FormField, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { usePagination } from '../../hooks/usePagination.js';
@@ -20,7 +21,7 @@ export function StoreroomListPage() {
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ code: '', name: '', description: '' });
   const [saving, setSaving] = useState(false);
-
+a
   const load = () => {
     setError('');
     api<Storeroom[]>('/storerooms')
@@ -35,14 +36,14 @@ export function StoreroomListPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.code || !form.name) { setError('Code and name are required'); return; }
+    if (!form.name) { setError('Name is required'); return; }
     setSaving(true); setError('');
     try {
-      await api('/storerooms', {
+      const created = await api<{ code: string }>('/storerooms', {
         method: 'POST',
         body: JSON.stringify(form),
       });
-      setSuccess(`Storeroom ${form.code} created`);
+      setSuccess(`Storeroom ${created.code} created`);
       setForm({ code: '', name: '', description: '' });
       setShowNew(false);
       load();
@@ -66,8 +67,12 @@ export function StoreroomListPage() {
 
         {showNew && (
           <form onSubmit={handleCreate} className="bg-slate-50 border border-slate-200 rounded p-4 mb-4 grid grid-cols-3 gap-3">
-            <FormField label="Code *" htmlFor="sCode">
-              <input id="sCode" className="form-input" required value={form.code} onChange={set('code')} placeholder="e.g. SR-MAIN" />
+            <FormField label="Code" hint="Optional — auto-generated (e.g. STR-00001) if left blank" htmlFor="sCode">
+              <input
+                id="sCode" className="form-input" value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                placeholder="e.g. STR-00001"
+              />
             </FormField>
             <FormField label="Name *" htmlFor="sName">
               <input id="sName" className="form-input" required value={form.name} onChange={set('name')} placeholder="e.g. Main Storeroom" />
@@ -79,7 +84,7 @@ export function StoreroomListPage() {
               <button type="submit" className="btn-primary !w-auto px-4" disabled={saving}>
                 {saving ? 'Saving…' : 'Create'}
               </button>
-              <button type="button" className="btn-secondary !w-auto px-4" onClick={() => setShowNew(false)}>Cancel</button>
+              <button type="button" className="btn-outline-light !w-auto px-4" onClick={() => setShowNew(false)}>Cancel</button>
             </div>
           </form>
         )}
@@ -99,7 +104,9 @@ export function StoreroomListPage() {
               <tr><td colSpan={5} className="py-8 text-center text-slate-400">No storerooms found. Create one above.</td></tr>
             ) : paged.map((s) => (
               <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="py-2 pr-4 font-mono text-xs text-blue-600">{s.code}</td>
+                <td className="py-2 pr-4 font-mono text-xs">
+                  <Link to={`/inventory/storerooms/${s.id}`} className="text-blue-600 hover:underline">{s.code}</Link>
+                </td>
                 <td className="py-2 pr-4 font-medium">{s.name}</td>
                 <td className="py-2 pr-4 text-slate-500">{s.siteName ?? '—'}</td>
                 <td className="py-2 pr-4">

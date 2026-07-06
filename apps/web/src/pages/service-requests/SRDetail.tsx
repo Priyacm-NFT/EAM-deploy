@@ -8,6 +8,7 @@ import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 interface SR {
   id: string; srNum: string; subject: string; description: string | null;
   status: string; priority: string; channel: string; category: string | null;
+  routedRole: string | null;
   createdAt: string; slaDueAt: string | null; slaBreached: boolean;
   closedAt: string | null; resolvedAt: string | null;
   assignedToUserId: string | null;
@@ -16,14 +17,23 @@ interface SR {
   convertedToWoNum: string | null; reporterName: string | null;
   reporterEmail: string | null; closureNotes: string | null;
   customData: Record<string, unknown> | null;
+  // FIX: real Maximo "Reported By" / "Report Date" — see the schema
+  // comment on service_requests.reported_by_user_id for why these are
+  // distinct from the existing requester/reporterName above (a helpdesk
+  // agent can log an SR on a requester's behalf).
+  reportedByName: string | null;
+  reportedDate: string | null;
+  slaPausedAt: string | null;
+  // FIX (SR create/detail form parity): requested service window.
+  startDate: string | null;
+  endDate: string | null;
 }
 
-interface AssignUser { id: string; displayName: string; email: string }
+// FIX: "we should maintain the status history for all the application"
+// — frontend shape matching GET /service-requests/:id/status-history.
+interface StatusHistoryEntry { id: string; fromStatus: string | null; toStatus: string; changedAt: string; notes: string | null; changedByName: string | null }
 
-const PRIORITY_COLORS: Record<string, string> = {
-  URGENT: 'bg-red-100 text-red-700', HIGH: 'bg-orange-100 text-orange-700',
-  MEDIUM: 'bg-yellow-100 text-yellow-700', LOW: 'bg-slate-100 text-slate-500',
-};
+interface AssignUser { id: string; displayName: string; email: string }
 
 function SRAssignPanel({
   srId, currentAssigneeId, currentAssigneeName, onAssigned,
@@ -93,19 +103,36 @@ export function SRDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [sr, setSr] = useState<SR | null>(null);
-  const [tab, setTab] = useState<'overview' | 'attachments'>('overview');
+  const [tab, setTab] = useState<'overview' | 'statusHistory' | 'workHistory' | 'attachments'>('overview');
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [error, setError] = useState('');
   const [transitioning, setTransitioning] = useState(false);
   const [converting, setConverting] = useState(false);
   const [convertNotes, setConvertNotes] = useState('');
   const [showConvert, setShowConvert] = useState(false);
+  const [statusHistoryLog, setStatusHistoryLog] = useState<StatusHistoryEntry[]>([]);
+  // FIX: "Work History" — the related Work Order's own status history
+  // (same statusHistory table/shape as Status History above, just scoped
+  // to entityType='WorkOrder' via the existing /work-orders/:id/status-history
+  // route), not a duplicate of this SR's own status log.
+  const [workHistoryLog, setWorkHistoryLog] = useState<StatusHistoryEntry[]>([]);
 
   const load = () => {
     if (!id) return;
     api<SR>(`/service-requests/${id}`)
-      .then((s) => { setSr(s); setCustomData(s.customData ?? {}); })
+      .then((s) => {
+        setSr(s);
+        setCustomData(s.customData ?? {});
+        if (s.convertedToWoId) {
+          api<StatusHistoryEntry[]>(`/work-orders/${s.convertedToWoId}/status-history`)
+            .then(setWorkHistoryLog).catch(() => setWorkHistoryLog([]));
+        } else {
+          setWorkHistoryLog([]);
+        }
+      })
       .catch((e) => setError(String(e)));
+    api<StatusHistoryEntry[]>(`/service-requests/${id}/status-history`)
+      .then(setStatusHistoryLog).catch(() => setStatusHistoryLog([]));
   };
 
   useEffect(load, [id]);
@@ -136,7 +163,13 @@ export function SRDetailPage() {
   const nextStatuses: Record<string, string[]> = {
     NEW: ['QUEUED', 'IN_PROGRESS', 'CANCELLED'],
     QUEUED: ['IN_PROGRESS', 'CANCELLED'],
-    IN_PROGRESS: ['RESOLVED', 'CANCELLED'],
+    // FIX (PRD 9.2 gap — SLA clock pause): "Waiting on Requester" — the
+    // backend pauses the SLA due date the moment this transition fires,
+    // and un-pauses (extending slaDueAt by however long it was paused)
+    // the moment it leaves this status again. See the transition route
+    // in service-requests.ts for the actual pause/resume math.
+    IN_PROGRESS: ['WAITING_ON_REQUESTER', 'RESOLVED', 'CANCELLED'],
+    WAITING_ON_REQUESTER: ['IN_PROGRESS', 'CANCELLED'],
     RESOLVED: ['CLOSED', 'IN_PROGRESS'],
   };
   const available = nextStatuses[sr.status] ?? [];
@@ -148,12 +181,9 @@ export function SRDetailPage() {
 
       <div className="flex items-start gap-4 mb-3">
         <div className="flex-1">
-          <p className="text-lg font-medium text-slate-800 mb-2">{sr.subject}</p>
           <div className="flex gap-2 flex-wrap">
-            <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">{sr.status}</span>
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[sr.priority] ?? ''}`}>{sr.priority}</span>
-            <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">{sr.channel}</span>
             {sr.slaBreached && <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">SLA BREACHED</span>}
+            {sr.slaPausedAt && <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800 font-medium">SLA CLOCK PAUSED</span>}
           </div>
         </div>
         <div className="flex gap-2 flex-shrink-0">
@@ -200,10 +230,10 @@ export function SRDetailPage() {
       )}
 
       <div className="flex gap-1 border-b border-slate-200 mt-2 mb-4" role="tablist">
-        {(['overview', 'attachments'] as const).map((t) => (
+        {(['overview', 'statusHistory', 'workHistory', 'attachments'] as const).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize ${tab === t ? 'border-accent text-accent-dark' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-            {t}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${t === 'overview' || t === 'attachments' ? 'capitalize' : ''} ${tab === t ? 'border-accent text-accent-dark' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            {t === 'statusHistory' ? `Status History (${statusHistoryLog.length})` : t === 'workHistory' ? `Work History (${workHistoryLog.length})` : t}
           </button>
         ))}
       </div>
@@ -211,27 +241,112 @@ export function SRDetailPage() {
       {tab === 'overview' && (
         <>
           <div className="admin-section grid grid-cols-2 gap-4 text-sm">
-            <div><span className="form-label">Category</span><p>{sr.category ?? '—'}</p></div>
+            <div className="col-span-2">
+              <span className="form-label">Summary</span>
+              <p className="whitespace-pre-wrap text-slate-900">{sr.description || '—'}</p>
+            </div>
+            <div><span className="form-label">Service Request</span><p className="font-mono font-semibold text-slate-900">{sr.srNum}</p></div>
+            <div><span className="form-label">Description</span><p>{sr.description ?? '—'}</p></div>
             <div><span className="form-label">Asset</span><p>{sr.assetNum ?? '—'}</p></div>
             <div><span className="form-label">Location</span><p>{sr.locationName ?? '—'}</p></div>
+            <div><span className="form-label">Start Date</span><p>{sr.startDate ? new Date(sr.startDate).toLocaleDateString() : '—'}</p></div>
+            <div><span className="form-label">End Date</span><p>{sr.endDate ? new Date(sr.endDate).toLocaleDateString() : '—'}</p></div>
+            <div><span className="form-label">Priority</span><p>{sr.priority}</p></div>
+            <div><span className="form-label">Status</span><p>{sr.status}</p></div>
+            <div><span className="form-label">Reported by</span><p>{sr.reportedByName ?? '—'}</p></div>
+            <div><span className="form-label">Reported at</span><p>{sr.reportedDate ? new Date(sr.reportedDate).toLocaleString() : '—'}</p></div>
             <div>
               <span className="form-label">Assigned to</span>
               <SRAssignPanel srId={sr.id} currentAssigneeId={sr.assignedToUserId}
                 currentAssigneeName={sr.assignedDisplayName} onAssigned={load} />
             </div>
-            <div><span className="form-label">Reporter</span><p>{sr.reporterName ?? '—'}{sr.reporterEmail ? ` (${sr.reporterEmail})` : ''}</p></div>
+            <div><span className="form-label">Category</span><p>{sr.category ?? '—'}</p></div>
+
+            {/* FIX: remaining fields, unchanged in content — just moved
+                after the requested Summary block above. */}
+            <div><span className="form-label">Channel</span><p>{sr.channel}</p></div>
+            <div><span className="form-label">Routed to role</span><p>{sr.routedRole ? <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">{sr.routedRole}</code> : '—'}</p></div>
             <div><span className="form-label">Created</span><p>{new Date(sr.createdAt).toLocaleString()}</p></div>
             <div><span className="form-label">SLA due</span>
               <p className={sr.slaBreached ? 'text-red-600 font-medium' : ''}>{sr.slaDueAt ? new Date(sr.slaDueAt).toLocaleString() : '—'}</p>
             </div>
             <div><span className="form-label">Resolved</span><p>{sr.resolvedAt ? new Date(sr.resolvedAt).toLocaleString() : '—'}</p></div>
             <div><span className="form-label">Closed</span><p>{sr.closedAt ? new Date(sr.closedAt).toLocaleString() : '—'}</p></div>
-            {sr.description && <div className="col-span-2"><span className="form-label">Description</span><p className="whitespace-pre-wrap">{sr.description}</p></div>}
             {sr.closureNotes && <div className="col-span-2"><span className="form-label">Closure notes</span><p className="whitespace-pre-wrap">{sr.closureNotes}</p></div>}
           </div>
           <DynamicFormRenderer entityName="ServiceRequest" record={sr as unknown as Record<string, unknown>}
             values={customData} onChange={(key, val) => setCustomData((prev) => ({ ...prev, [key]: val }))} readOnly />
         </>
+      )}
+
+      {tab === 'statusHistory' && (
+        <div className="admin-section">
+          <h2 className="admin-section-title mb-3">Status history</h2>
+          {statusHistoryLog.length === 0 ? (
+            <p className="text-slate-400 text-sm">No status history yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                  <th className="pb-2 pr-4">From</th>
+                  <th className="pb-2 pr-4">To</th>
+                  <th className="pb-2 pr-4">Changed by</th>
+                  <th className="pb-2 pr-4">Date</th>
+                  <th className="pb-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statusHistoryLog.map((h) => (
+                  <tr key={h.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4 text-slate-500">{h.fromStatus ?? '— (created)'}</td>
+                    <td className="py-2 pr-4 font-medium text-slate-700">{h.toStatus}</td>
+                    <td className="py-2 pr-4 text-slate-500">{h.changedByName ?? '—'}</td>
+                    <td className="py-2 pr-4 text-slate-500">{new Date(h.changedAt).toLocaleString()}</td>
+                    <td className="py-2 text-slate-500">{h.notes ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* FIX: "Work History" — the status history of the Work Order this
+          SR was converted to (same From/To/Changed by/Date/Notes shape as
+          Status History above, and as Asset's own Status History tab),
+          not this SR's own transitions. Empty until the SR is converted. */}
+      {tab === 'workHistory' && (
+        <div className="admin-section">
+          <h2 className="admin-section-title mb-3">Work history</h2>
+          {!sr.convertedToWoId ? (
+            <p className="text-slate-400 text-sm">No related work order yet — convert this SR to a Work Order to see its history here.</p>
+          ) : workHistoryLog.length === 0 ? (
+            <p className="text-slate-400 text-sm">No work order history yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                  <th className="pb-2 pr-4">From</th>
+                  <th className="pb-2 pr-4">To</th>
+                  <th className="pb-2 pr-4">Changed by</th>
+                  <th className="pb-2 pr-4">Date</th>
+                  <th className="pb-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workHistoryLog.map((h) => (
+                  <tr key={h.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4 text-slate-500">{h.fromStatus ?? '— (created)'}</td>
+                    <td className="py-2 pr-4 font-medium text-slate-700">{h.toStatus}</td>
+                    <td className="py-2 pr-4 text-slate-500">{h.changedByName ?? '—'}</td>
+                    <td className="py-2 pr-4 text-slate-500">{new Date(h.changedAt).toLocaleString()}</td>
+                    <td className="py-2 text-slate-500">{h.notes ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
 
       {tab === 'attachments' && (

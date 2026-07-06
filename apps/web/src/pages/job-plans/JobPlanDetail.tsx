@@ -9,9 +9,18 @@ type Tab = 'tasks' | 'labour' | 'materials' | 'tools' | 'safety';
 interface JP { id: string; jpNum: string; description: string; longDescription: string | null; estimatedDurationHours: string | null }
 interface Task { id: string; sequence: number; description: string; estimatedHours: string | null }
 interface LabourLine { id: string; craft: string; estimatedHours: string; rate: string | null }
-interface MaterialLine { id: string; description: string; qty: string; unitCost: string | null }
-interface ToolLine { id: string; description: string; estimatedHours: string | null }
-interface SafetyLine { id: string; sequence: number; hazardDescription: string; controlMeasure: string }
+// FIX: these three interfaces didn't match the real DB column names at
+// all (materials.qty should be quantity; tools.description/
+// estimatedHours should be toolDescription/quantity — there's no
+// estimatedHours column on job_plan_tools, only quantity; safety.
+// hazardDescription/controlMeasure should be hazard/control). Every
+// existing row rendered blank for whichever fields were misnamed, and
+// the "+ Add" forms below were POSTing under the wrong keys too, so a
+// newly added row would fail the DB's NOT NULL constraint on the real
+// column (toolDescription, hazard, control) that never received a value.
+interface MaterialLine { id: string; description: string; quantity: string; unitCost: string | null }
+interface ToolLine { id: string; toolDescription: string; quantity: number | null }
+interface SafetyLine { id: string; sequence: number; hazard: string; control: string }
 
 export function JobPlanDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -27,8 +36,8 @@ export function JobPlanDetailPage() {
   const [newTask, setNewTask] = useState({ description: '', estimatedHours: '', sequence: '' });
   const [newLabour, setNewLabour] = useState({ craft: '', estimatedHours: '' });
   const [newMaterial, setNewMaterial] = useState({ description: '', qty: '1' });
-  const [newTool, setNewTool] = useState({ description: '', estimatedHours: '' });
-  const [newSafety, setNewSafety] = useState({ hazardDescription: '', controlMeasure: '' });
+  const [newTool, setNewTool] = useState({ toolDescription: '', quantity: '1' });
+  const [newSafety, setNewSafety] = useState({ hazard: '', control: '' });
   const [saving, setSaving] = useState(false);
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
 
@@ -93,34 +102,46 @@ export function JobPlanDetailPage() {
   };
 
   const addTool = async () => {
-    if (!newTool.description.trim()) { setError('Tool name is required'); return; }
+    if (!newTool.toolDescription.trim()) { setError('Tool name is required'); return; }
     setSaving(true); setError('');
     try {
+      // FIX: was sending { description, estimatedHours } — neither key
+      // exists on job_plan_tools (real columns are toolDescription and
+      // quantity; there's no hours-estimate column on this table at
+      // all). Every "+ Add" here previously failed the DB's NOT NULL
+      // constraint on tool_description silently swallowed by whatever
+      // error handling was in place, or inserted a row with no usable
+      // description — either way, nothing you typed here actually made
+      // it into the row.
       await api(`/job-plans/${id}/tools`, {
         method: 'POST',
         body: JSON.stringify({
-          description: newTool.description,
-          estimatedHours: newTool.estimatedHours || undefined,
+          toolDescription: newTool.toolDescription,
+          quantity: parseInt(newTool.quantity, 10) || 1,
         }),
       });
-      setNewTool({ description: '', estimatedHours: '' });
+      setNewTool({ toolDescription: '', quantity: '1' });
       await load();
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   };
 
   const addSafety = async () => {
-    if (!newSafety.hazardDescription.trim()) { setError('Hazard description is required'); return; }
+    if (!newSafety.hazard.trim()) { setError('Hazard description is required'); return; }
     setSaving(true); setError('');
     try {
+      // FIX: was sending { hazardDescription, controlMeasure } — neither
+      // matches the real columns (hazard, control), both NOT NULL. Same
+      // failure mode as the Tools tab: nothing typed here actually
+      // landed in the row that got created.
       await api(`/job-plans/${id}/safety`, {
         method: 'POST',
         body: JSON.stringify({
-          hazardDescription: newSafety.hazardDescription,
-          controlMeasure: newSafety.controlMeasure,
+          hazard: newSafety.hazard,
+          control: newSafety.control,
           sequence: safety.length + 1,
         }),
       });
-      setNewSafety({ hazardDescription: '', controlMeasure: '' });
+      setNewSafety({ hazard: '', control: '' });
       await load();
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   };
@@ -239,7 +260,7 @@ export function JobPlanDetailPage() {
               ) : materials.map((m) => (
                 <tr key={m.id} className="border-b border-slate-100">
                   <td className="py-2 pr-4">{m.description}</td>
-                  <td className="py-2">{m.qty}</td>
+                  <td className="py-2">{m.quantity}</td>
                 </tr>
               ))}
             </tbody>
@@ -263,15 +284,15 @@ export function JobPlanDetailPage() {
         <div className="admin-section">
           <table className="w-full text-sm mb-4">
             <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-              <th className="pb-2 pr-4">Tool</th><th className="pb-2">Est. hrs</th>
+              <th className="pb-2 pr-4">Tool</th><th className="pb-2">Qty</th>
             </tr></thead>
             <tbody>
               {tools.length === 0 ? (
                 <tr><td colSpan={2} className="py-4 text-slate-400 text-sm">No tools yet.</td></tr>
               ) : tools.map((t) => (
                 <tr key={t.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-4">{t.description}</td>
-                  <td className="py-2 text-slate-500">{t.estimatedHours ?? '—'}</td>
+                  <td className="py-2 pr-4">{t.toolDescription}</td>
+                  <td className="py-2 text-slate-500">{t.quantity ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -279,11 +300,11 @@ export function JobPlanDetailPage() {
           <div className="bg-slate-50 rounded p-3 flex gap-3 items-end">
             <FormField label="Tool name" htmlFor="tName">
               <input id="tName" className="form-input w-48" placeholder="e.g. Multimeter"
-                value={newTool.description} onChange={(e) => setNewTool({ ...newTool, description: e.target.value })} />
+                value={newTool.toolDescription} onChange={(e) => setNewTool({ ...newTool, toolDescription: e.target.value })} />
             </FormField>
-            <FormField label="Est. hrs" htmlFor="tHrs">
-              <input id="tHrs" type="number" step="0.5" className="form-input w-20"
-                value={newTool.estimatedHours} onChange={(e) => setNewTool({ ...newTool, estimatedHours: e.target.value })} />
+            <FormField label="Qty" htmlFor="tHrs">
+              <input id="tHrs" type="number" min="1" step="1" className="form-input w-20"
+                value={newTool.quantity} onChange={(e) => setNewTool({ ...newTool, quantity: e.target.value })} />
             </FormField>
             <button type="button" className="btn-primary !w-auto px-4" onClick={addTool} disabled={saving}>+ Add</button>
           </div>
@@ -302,8 +323,8 @@ export function JobPlanDetailPage() {
                 <tr><td colSpan={2} className="py-4 text-slate-400 text-sm">No safety items yet.</td></tr>
               ) : safety.map((s) => (
                 <tr key={s.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-4">{s.hazardDescription}</td>
-                  <td className="py-2">{s.controlMeasure}</td>
+                  <td className="py-2 pr-4">{s.hazard}</td>
+                  <td className="py-2">{s.control}</td>
                 </tr>
               ))}
             </tbody>
@@ -311,11 +332,11 @@ export function JobPlanDetailPage() {
           <div className="bg-slate-50 rounded p-3 flex gap-3 items-end flex-wrap">
             <FormField label="Hazard description" htmlFor="sHazard">
               <input id="sHazard" className="form-input" placeholder="e.g. Electrical shock risk"
-                value={newSafety.hazardDescription} onChange={(e) => setNewSafety({ ...newSafety, hazardDescription: e.target.value })} />
+                value={newSafety.hazard} onChange={(e) => setNewSafety({ ...newSafety, hazard: e.target.value })} />
             </FormField>
             <FormField label="Control measure" htmlFor="sControl">
               <input id="sControl" className="form-input" placeholder="e.g. Isolate and lock out"
-                value={newSafety.controlMeasure} onChange={(e) => setNewSafety({ ...newSafety, controlMeasure: e.target.value })} />
+                value={newSafety.control} onChange={(e) => setNewSafety({ ...newSafety, control: e.target.value })} />
             </FormField>
             <button type="button" className="btn-primary !w-auto px-4" onClick={addSafety} disabled={saving}>+ Add</button>
           </div>

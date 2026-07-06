@@ -27,6 +27,18 @@ export async function presignDownload(key: string): Promise<string> {
   return getSignedUrl(client, command, { expiresIn: 300 });
 }
 
+// FIX (P1-2 gap — email-to-ticket, AC-P1-2.5): "attachments preserved."
+// Every existing upload path in this app is client-driven (browser gets
+// a presigned URL and PUTs directly to S3/MinIO) — there was no
+// server-side write path at all, which is what an inbound-email webhook
+// needs: the mail relay hands the API raw attachment bytes in the
+// webhook payload itself, there's no browser in the loop to presign for.
+export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  const client = createS3Client();
+  const bucket = process.env.MINIO_BUCKET ?? 'eam-attachments';
+  await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+}
+
 export async function objectExists(key: string): Promise<boolean> {
   const client = createS3Client();
   const bucket = process.env.MINIO_BUCKET ?? 'eam-attachments';

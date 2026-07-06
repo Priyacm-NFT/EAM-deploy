@@ -238,7 +238,7 @@ export function DocumentTypesPage() {
               </button>
               <button
                 type="button"
-                className="btn-secondary !w-auto px-4"
+                className="btn-outline-light !w-auto px-4"
                 onClick={() => { setShowCreate(false); setEditId(null); }}
               >
                 Cancel

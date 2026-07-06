@@ -25,6 +25,7 @@ import { pmRoutes } from './routes/pm.js';
 import { permitRoutes } from './routes/permits.js';
 import { inventoryRoutes } from './routes/inventory.js';
 import { labourRoutes } from './routes/labour.js';
+import { accountRoutes } from './routes/account.js';
 import { setupSocketIO } from './socket.js';
 import { wireApiNotificationBridge, getNotificationRedis } from './lib/notification-bridge.js';
 import { NotificationDispatcher, createSmtpTransport, smtpFromAddress } from '@eam/notification-service';
@@ -190,6 +191,7 @@ export async function buildApp() {
   await app.register(permitRoutes);
   await app.register(inventoryRoutes);
   await app.register(labourRoutes);
+  await app.register(accountRoutes);
 
   return app;
 }

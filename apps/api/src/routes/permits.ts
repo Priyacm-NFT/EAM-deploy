@@ -5,12 +5,14 @@ import {
   permits,
   permitChecklistItems,
   permitApprovals,
+  permitTypesConfig,
   audit,
 } from '@eam/db';
 import { dispatchWebhookEvent } from '../lib/webhooks.js';
 import { entityDefinitions, fieldDefinitions } from '@eam/db';
 import { FieldRulesService } from '@eam/config-engine';
 import { requirePermission } from '../plugins/auth.js';
+import { nextAutoRecordCode } from '@eam/shared';
 
 const readGuard = { preHandler: requirePermission('permits:read') };
 const writeGuard = { preHandler: requirePermission('permits:write') };
@@ -117,25 +119,52 @@ async function validateCustomFields(
       return reply.code(400).send({ error: 'Type is required' });
     }
 
+    // FIX (P1-6 gap — AC-P1-6.6): look up the admin-configured type
+    // first. typeConfig is null for tenants that haven't configured
+    // anything yet (or for a genuinely unknown type string), in which
+    // case the original hardcoded getDefaultChecklistItems() /
+    // getApprovalSteps() below still apply — this is a safety net, not
+    // the primary path, once a tenant has run the seed migration or
+    // configured its own types via /admin/permit-types.
+    const [typeConfig] = await db.select().from(permitTypesConfig)
+      .where(and(eq(permitTypesConfig.tenantId, tid), eq(permitTypesConfig.type, typeStr), eq(permitTypesConfig.isActive, true)))
+      .limit(1);
+
+    const validFromDate = typeof rawBody['validFrom'] === 'string' && rawBody['validFrom'] ? new Date(rawBody['validFrom'] as string) : undefined;
+    const validToDate = typeof rawBody['validTo'] === 'string' && rawBody['validTo'] ? new Date(rawBody['validTo'] as string) : undefined;
+
+    if (typeConfig?.maxValidityHours && validFromDate && validToDate) {
+      const hours = (validToDate.getTime() - validFromDate.getTime()) / (1000 * 60 * 60);
+      if (hours > typeConfig.maxValidityHours) {
+        return reply.code(400).send({
+          error: `${typeConfig.label} permits are configured with a maximum validity of ${typeConfig.maxValidityHours} hours; the requested window is ${hours.toFixed(1)} hours.`,
+        });
+      }
+    }
+
     const count = await db.select({ id: permits.id }).from(permits).where(eq(permits.tenantId, tid));
-    const permitNum = `PTW-${String(count.length + 1).padStart(5, '0')}`;
+    const permitNum = nextAutoRecordCode(count.length);
 
     const [row] = await db.insert(permits).values({
       tenantId: tid,
       permitNum,
-      type: typeStr as typeof permits.$inferInsert.type,
+      type: typeStr,
       description: descriptionStr,
       woId: typeof rawBody['woId'] === 'string' ? rawBody['woId'] : undefined,
       assetId: typeof rawBody['assetId'] === 'string' ? rawBody['assetId'] : undefined,
       locationId: typeof rawBody['locationId'] === 'string' ? rawBody['locationId'] : undefined,
-      validFrom: typeof rawBody['validFrom'] === 'string' && rawBody['validFrom'] ? new Date(rawBody['validFrom'] as string) : undefined,
-      validTo: typeof rawBody['validTo'] === 'string' && rawBody['validTo'] ? new Date(rawBody['validTo'] as string) : undefined,
+      validFrom: validFromDate,
+      validTo: validToDate,
       notes: typeof rawBody['notes'] === 'string' ? rawBody['notes'] : undefined,
       requestedByUserId: request.user!.id,
     }).returning();
 
-    // Create default checklist based on type
-    const defaultItems = getDefaultChecklistItems(typeStr);
+    // Create default checklist based on type — admin-configured template
+    // takes priority; hardcoded getDefaultChecklistItems() is the
+    // fallback for tenants/types with no config row.
+    const defaultItems = typeConfig
+      ? (typeConfig.checklistTemplate as Array<{ category: string; description: string; sequence?: number; isRequired?: boolean }>)
+      : getDefaultChecklistItems(typeStr);
     const customItems = (Array.isArray(rawBody['checklistItems']) ? rawBody['checklistItems'] : []) as Array<{ category: string; description: string; sequence?: number; isRequired?: boolean }>;
     const allItems = [...defaultItems, ...customItems];
 
@@ -151,8 +180,11 @@ async function validateCustomFields(
       );
     }
 
-    // Create approval steps
-    const approvalSteps = getApprovalSteps(typeStr);
+    // Create approval steps — same priority as checklist: admin config
+    // first, hardcoded getApprovalSteps() fallback second.
+    const approvalSteps = typeConfig
+      ? (typeConfig.requiredApproverRoles as string[]).map((role) => ({ role }))
+      : getApprovalSteps(typeStr);
     if (approvalSteps.length > 0) {
       await db.insert(permitApprovals).values(
         approvalSteps.map((step, i) => ({
@@ -352,6 +384,105 @@ async function validateCustomFields(
       .where(eq(permits.id, id)).returning();
 
     return updated;
+  });
+
+  // ─── Admin: Permit Types Config (P1-6 gap — AC-P1-6.6) ──────────────────────
+  // "Admin can configure a new permit type with custom checklist and
+  // approver roles." These are the routes that make that literally true
+  // — a genuinely new `type` string, with its own checklist template and
+  // approver roles, becomes usable in POST /permits the moment it's
+  // created here, no deploy or migration required.
+
+  app.get('/admin/permit-types', readGuard, async (request) => {
+    const tid = request.user!.tenantId;
+    return db.select().from(permitTypesConfig)
+      .where(eq(permitTypesConfig.tenantId, tid))
+      .orderBy(permitTypesConfig.label);
+  });
+
+  app.get('/admin/permit-types/:id', readGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tid = request.user!.tenantId;
+    const [row] = await db.select().from(permitTypesConfig)
+      .where(and(eq(permitTypesConfig.id, id), eq(permitTypesConfig.tenantId, tid))).limit(1);
+    if (!row) return reply.code(404).send({ error: 'Permit type not found' });
+    return row;
+  });
+
+  app.post('/admin/permit-types', writeGuard, async (request, reply) => {
+    const tid = request.user!.tenantId;
+    const body = request.body as {
+      type: string;
+      label: string;
+      checklistTemplate?: Array<{ category: string; description: string; isRequired?: boolean; sequence?: number }>;
+      requiredApproverRoles?: string[];
+      maxValidityHours?: number;
+    };
+
+    if (!body.type?.trim() || !body.label?.trim()) {
+      return reply.code(422).send({ error: 'type and label are required' });
+    }
+    // Normalize to the same UPPER_SNAKE convention the built-in types use
+    // — not enforced strictly (this is text now, not an enum) but keeps
+    // new types consistent with the seeded ones for anyone filtering by
+    // type elsewhere in the app.
+    const typeKey = body.type.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+
+    const [existing] = await db.select({ id: permitTypesConfig.id }).from(permitTypesConfig)
+      .where(and(eq(permitTypesConfig.tenantId, tid), eq(permitTypesConfig.type, typeKey))).limit(1);
+    if (existing) return reply.code(409).send({ error: `A permit type "${typeKey}" already exists` });
+
+    const [row] = await db.insert(permitTypesConfig).values({
+      tenantId: tid,
+      type: typeKey,
+      label: body.label.trim(),
+      checklistTemplate: body.checklistTemplate ?? [],
+      requiredApproverRoles: body.requiredApproverRoles ?? ['supervisor'],
+      maxValidityHours: body.maxValidityHours,
+      createdByUserId: request.user!.id,
+    }).returning();
+
+    await audit(db, { tenantId: tid, userId: request.user!.id, action: 'CREATE', resource: 'PermitTypeConfig', resourceId: row!.id });
+    return reply.code(201).send(row);
+  });
+
+  app.put('/admin/permit-types/:id', writeGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tid = request.user!.tenantId;
+    const body = request.body as Partial<{
+      label: string;
+      checklistTemplate: Array<{ category: string; description: string; isRequired?: boolean; sequence?: number }>;
+      requiredApproverRoles: string[];
+      maxValidityHours: number | null;
+      isActive: boolean;
+    }>;
+
+    const [row] = await db.update(permitTypesConfig)
+      .set({ ...body, updatedAt: new Date() })
+      .where(and(eq(permitTypesConfig.id, id), eq(permitTypesConfig.tenantId, tid)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'Permit type not found' });
+
+    await audit(db, { tenantId: tid, userId: request.user!.id, action: 'UPDATE', resource: 'PermitTypeConfig', resourceId: id });
+    return row;
+  });
+
+  app.delete('/admin/permit-types/:id', writeGuard, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tid = request.user!.tenantId;
+
+    // Soft-delete (isActive: false) rather than a hard DELETE — existing
+    // permits already created with this type keep working (permits.type
+    // is just text, not a foreign key), and this only stops the type
+    // from being offered for *new* permits going forward.
+    const [row] = await db.update(permitTypesConfig)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(permitTypesConfig.id, id), eq(permitTypesConfig.tenantId, tid)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'Permit type not found' });
+
+    await audit(db, { tenantId: tid, userId: request.user!.id, action: 'DEACTIVATE', resource: 'PermitTypeConfig', resourceId: id });
+    return reply.code(204).send();
   });
 }
 

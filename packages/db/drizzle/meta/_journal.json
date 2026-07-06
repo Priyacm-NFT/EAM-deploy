@@ -48,7 +48,7 @@
       "idx": 6,
       "version": "7",
       "when": 1780200000000,
-      "tag": "0006_fix_column_mismatches",
+      "tag": "0006_phase1_enum_casts",
       "breakpoints": true
     },
     {
@@ -77,6 +77,174 @@
       "version": "7",
       "when": 1781155000000,
       "tag": "0010_notification_bounce",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781155100000,
+      "tag": "0011_fix_column_mismatches",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781155200000,
+      "tag": "0012_user_default_information",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1781155300000,
+      "tag": "0013_org_site_maximo_parity",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781155400000,
+      "tag": "0014_org_site_address_tab",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1781155500000,
+      "tag": "0015_user_default_application",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781155600000,
+      "tag": "0016_group_side_nav",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781155700000,
+      "tag": "0017_asset_location_position",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781155800000,
+      "tag": "0018_cm_location_item_match",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781155900000,
+      "tag": "0019_asset_gaps_rows5to13",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781156000000,
+      "tag": "0020_asset_meters_unique_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781156100000,
+      "tag": "0021_users_esignature",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781156200000,
+      "tag": "0022_audit_trail_created_reported_status_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781156300000,
+      "tag": "0023_sr_waiting_on_requester_sla_pause",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781156400000,
+      "tag": "0024_asset_spares_and_location_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781156500000,
+      "tag": "0025_permit_types_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781156600000,
+      "tag": "0026_pm_routes",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1781156700000,
+      "tag": "0027_sr_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1781156800000,
+      "tag": "0028_storeroom_code_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1781156900000,
+      "tag": "0029_numeric_record_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781157000000,
+      "tag": "0030_asset_numeric_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781157100000,
+      "tag": "0031_organisation_addresses",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781157200000,
+      "tag": "0032_org_site_numeric_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781157300000,
+      "tag": "0033_sr_start_end_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781157400000,
+      "tag": "0034_location_meters_rolldown_parity",
       "breakpoints": true
     }
   ]

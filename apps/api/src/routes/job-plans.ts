@@ -13,6 +13,7 @@ import {
 import { entityDefinitions, fieldDefinitions } from '@eam/db';
 import { FieldRulesService } from '@eam/config-engine';
 import { requirePermission } from '../plugins/auth.js';
+import { nextAutoRecordCode } from '@eam/shared';
 
 const readGuard = { preHandler: requirePermission('work_orders:read') };
 const writeGuard = { preHandler: requirePermission('work_orders:write') };
@@ -70,7 +71,7 @@ async function validateCustomFields(
     // ────────────────────────────────────────────────────────────────────────
 
     const count = await db.select({ id: jobPlans.id }).from(jobPlans).where(eq(jobPlans.tenantId, tid));
-    const jpNum = body.jpNum ?? `JP-${String(count.length + 1).padStart(5, '0')}`;
+    const jpNum = body.jpNum ?? nextAutoRecordCode(count.length);
 
     const [row] = await db.insert(jobPlans).values({
       tenantId: tid,

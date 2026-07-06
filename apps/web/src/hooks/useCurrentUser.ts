@@ -10,6 +10,11 @@ export interface CurrentUser {
   mfaEnabled: boolean;
   mfaVerified: boolean;
   mfaRequired: boolean;
+  // FIX: real Maximo 3-level side-nav resolution (System → Security Group
+  // → User override) resolved server-side in /auth/me — see auth.ts. true
+  // unless the user themself chose HIDE, or every group they belong to has
+  // it turned off.
+  effectiveSideNav?: boolean;
 }
 
 export function hasPermission(user: CurrentUser | null, permission: string): boolean {

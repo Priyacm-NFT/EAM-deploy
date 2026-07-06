@@ -37,6 +37,14 @@ export function UserFormPage() {
   const [tab,             setTab]           = useState<Tab>('profile');
   const [form,            setForm]          = useState({ email: '', username: '', displayName: '' });
   const [perms,           setPerms]         = useState<{ roles: string[]; permissions: string[]; groups: GroupOption[] } | null>(null);
+  // FIX: the Access tab's own panel is gated on `perms` being truthy —
+  // previously the fetch that sets it had no .catch() at all, so if that
+  // one request ever failed (independent of the Profile fields loading
+  // fine, since those two things share the same response but Profile
+  // renders unconditionally while Access requires `perms`), the tab
+  // rendered completely blank with zero indication anything went wrong.
+  // This makes that failure visible instead of silent.
+  const [permsError,      setPermsError]     = useState('');
   const [allGroups,       setAllGroups]     = useState<GroupOption[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [sessions,        setSessions]      = useState<SessionRow[]>([]);
@@ -53,8 +61,15 @@ export function UserFormPage() {
       `/admin/users/${id}`
     ).then((u) => {
       setForm({ email: u.email, username: u.username, displayName: u.displayName });
-      setPerms({ roles: u.roles, permissions: u.permissions, groups: u.groups });
-    });
+      // FIX: defensive fallback to [] — if the backend ever returns this
+      // response with roles/permissions/groups missing entirely (rather
+      // than empty arrays), `perms` would still end up truthy (it's an
+      // object either way) and the panel would render, but then
+      // `perms.groups.map(...)` etc. below would throw at render time
+      // since undefined has no .map. Coercing to [] here means an
+      // incomplete response shows "None" instead of crashing the tab.
+      setPerms({ roles: u.roles ?? [], permissions: u.permissions ?? [], groups: u.groups ?? [] });
+    }).catch((e) => setPermsError(e instanceof Error ? e.message : 'Failed to load access info'));
     api<SessionRow[]>(`/admin/users/${id}/sessions`).then(setSessions).catch(() => undefined);
   }, [id, navigate]);
 
@@ -154,23 +169,36 @@ export function UserFormPage() {
       )}
 
       {/* ── Access tab ── */}
-      {tab === 'access' && perms && (
+      {tab === 'access' && (
         <div className="admin-section">
           <h2 className="admin-section-title">Access</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div><p className="form-label">Groups</p><p className="text-slate-800">{perms.groups.map(g => g.name).join(', ') || 'None'}</p></div>
-            <div><p className="form-label">Roles</p><p className="text-slate-800">{perms.roles.join(', ') || 'None'}</p></div>
-            <div><p className="form-label">Permissions</p><p className="text-slate-800 break-all">{perms.permissions.join(', ') || 'None'}</p></div>
-          </div>
-          <div className="flex flex-wrap gap-3 items-end pt-4 border-t border-slate-200 mt-4">
-            <FormField label="Add to group" htmlFor="add-group">
-              <select id="add-group" className="form-select min-w-[14rem]" value={selectedGroupId} onChange={e => setSelectedGroupId(e.target.value)}>
-                <option value="">Select a group…</option>
-                {allGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </select>
-            </FormField>
-            <button type="button" className="btn-primary !w-auto px-4 text-sm" onClick={addToGroup}>Add to group</button>
-          </div>
+          {/* FIX: three distinct states, all previously collapsed into
+              "render nothing" — a slow/failed request and a genuinely
+              empty-but-loaded result (a brand-new user with no groups/
+              roles yet) used to look identical: a blank panel with no
+              explanation either way. */}
+          {permsError ? (
+            <p className="text-red-600 text-sm">Failed to load access info: {permsError}</p>
+          ) : !perms ? (
+            <p className="text-slate-400 text-sm">Loading access info…</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div><p className="form-label">Groups</p><p className="text-slate-800">{perms.groups.map(g => g.name).join(', ') || 'None assigned yet'}</p></div>
+                <div><p className="form-label">Roles</p><p className="text-slate-800">{perms.roles.join(', ') || 'None assigned yet'}</p></div>
+                <div><p className="form-label">Permissions</p><p className="text-slate-800 break-all">{perms.permissions.join(', ') || 'None — usually inherited from Groups/Roles above'}</p></div>
+              </div>
+              <div className="flex flex-wrap gap-3 items-end pt-4 border-t border-slate-200 mt-4">
+                <FormField label="Add to group" htmlFor="add-group">
+                  <select id="add-group" className="form-select min-w-[14rem]" value={selectedGroupId} onChange={e => setSelectedGroupId(e.target.value)}>
+                    <option value="">Select a group…</option>
+                    {allGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </FormField>
+                <button type="button" className="btn-primary !w-auto px-4 text-sm" onClick={addToGroup}>Add to group</button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

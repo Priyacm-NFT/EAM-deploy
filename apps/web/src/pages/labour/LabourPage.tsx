@@ -264,7 +264,7 @@ function CertificationsInput({
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
           style={{ flex: 1 }}
         />
-        <button type="button" className="btn-secondary !w-auto px-3 text-xs" onClick={add}>Add</button>
+        <button type="button" className="btn-outline-light !w-auto px-3 text-xs" onClick={add}>Add</button>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
         {value.map((cert) => (
@@ -561,7 +561,7 @@ export function LabourPage() {
                   onClick={handleSaveRecord}>
                   {savingRecord ? 'Saving…' : (editRecord ? 'Update' : 'Create')}
                 </button>
-                <button type="button" className="btn-secondary !w-auto px-4"
+                <button type="button" className="btn-outline-light !w-auto px-4"
                   onClick={() => { setShowNewRecord(false); setEditRecord(null); }}>Cancel</button>
               </div>
             </div>
@@ -660,7 +660,7 @@ export function LabourPage() {
                   onClick={handleSaveCrew}>
                   {savingCrew ? 'Saving…' : (editCrew ? 'Update' : 'Create')}
                 </button>
-                <button type="button" className="btn-secondary !w-auto px-4"
+                <button type="button" className="btn-outline-light !w-auto px-4"
                   onClick={() => { setShowNewCrew(false); setEditCrew(null); setExpandedCrewId(null); setCrewDetail(null); }}>Cancel</button>
               </div>
 

@@ -55,6 +55,14 @@ export async function authenticate(request: FastifyRequest): Promise<void> {
       displayName: user.displayName,
       roles: payload.roles,
       permissions: payload.permissions,
+      // FIX: PRD §8.1 data scoping — carry the org/site/location
+      // restriction from the JWT onto request.user, so every route
+      // handler can read request.user!.scope without an extra DB call.
+      // Falls back to fully unrestricted if an older token (signed before
+      // this field existed) is still in use, so existing sessions don't
+      // break on deploy — they'll pick up real scope on their next
+      // refresh.
+      scope: payload.scope ?? { unrestricted: true, organisationIds: [], siteIds: [], locationIds: [] },
       sessionId: payload.sid,
       mfaVerified: payload.mfa_verified ?? false,
     };

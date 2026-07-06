@@ -123,8 +123,17 @@ export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    const payload = err as { error?: string; message?: string };
-    throw new Error(payload.error ?? payload.message ?? res.statusText);
+    const payload = err as { error?: string; message?: string } & Record<string, unknown>;
+    const thrown = new Error(payload.error ?? payload.message ?? res.statusText);
+    // FIX (P1-1 UI work): some endpoints (e.g. the CONTINUOUS-meter
+    // rollback check) return extra structured fields alongside `error`
+    // — currentReading/submittedReading, or bulk-import's per-row
+    // `errors` array. Previously those were silently dropped since only
+    // `.message` was ever kept; attaching the raw payload lets calling
+    // code branch on it (e.g. show a "confirm rollover" checkbox) without
+    // every caller having to re-parse the response itself.
+    Object.assign(thrown, payload);
+    throw thrown;
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

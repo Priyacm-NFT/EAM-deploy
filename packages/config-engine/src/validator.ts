@@ -98,10 +98,25 @@ export function validateFieldValueRules(
       message: `${fieldKey} must be at least ${rules.minLength} characters`,
     });
   }
-  if (rules.maxLength != null && str.length > rules.maxLength) {
+  // FIX: previously a TEXT/EMAIL/URL/PHONE field with no maxLength
+  // explicitly configured on the Fields screen was completely
+  // unlimited — an admin had to remember to set one by hand, every
+  // single time, for every field, on every entity, or it silently had
+  // no cap at all. This applies a sensible universal default (200
+  // characters) to exactly the same field types that already expose a
+  // "Maximum length" control in the UI (FieldList.tsx's showLengthRules
+  // set), so every new single-line-style field is capped out of the
+  // box — while an admin who explicitly sets their own maxLength (larger
+  // or smaller) on the Fields screen still gets exactly that value
+  // instead, since rules.maxLength always wins when actually set.
+  // Deliberately excludes TEXTAREA (multi-line text), which exists
+  // specifically for longer content and has no such default.
+  const DEFAULT_MAX_LENGTH_TYPES = new Set(['TEXT', 'EMAIL', 'URL', 'PHONE']);
+  const effectiveMaxLength = rules.maxLength ?? (fieldType && DEFAULT_MAX_LENGTH_TYPES.has(fieldType) ? 200 : null);
+  if (effectiveMaxLength != null && str.length > effectiveMaxLength) {
     errors.push({
       field_key: fieldKey,
-      message: `${fieldKey} must be at most ${rules.maxLength} characters`,
+      message: `${fieldKey} must be at most ${effectiveMaxLength} characters`,
     });
   }
 

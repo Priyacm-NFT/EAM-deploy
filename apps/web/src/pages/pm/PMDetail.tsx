@@ -32,6 +32,9 @@ export function PMDetailPage() {
     description: '', frequencyType: 'CALENDAR', interval: '1',
     intervalUnit: 'MONTH', leadDays: '7', priority: 'MEDIUM',
     assetId: '', jobPlanId: '', status: 'ACTIVE',
+    // FIX: deliberately starts blank, NOT pre-filled from the current
+    // nextDueDate — see the save() comment below for why that matters.
+    manualNextDueDate: '',
   });
 
   useEffect(() => {
@@ -48,6 +51,7 @@ export function PMDetailPage() {
         assetId: p.assetId ?? '',
         jobPlanId: p.jobPlanId ?? '',
         status: p.status,
+        manualNextDueDate: '',
       });
     }).catch((e) => setError(String(e)));
 
@@ -61,6 +65,13 @@ export function PMDetailPage() {
     e.preventDefault();
     setSaving(true); setError(''); setMsg('');
     try {
+      // FIX: manualNextDueDate is only included when the admin actually
+      // typed something into the new override field — sending it blank/
+      // undefined lets the backend fall back to its normal behaviour
+      // (recompute from frequency/interval if those changed, otherwise
+      // leave the existing due date untouched). This is what makes
+      // "change the description without accidentally resetting the due
+      // date" possible at all — see the PUT /pm-masters/:id fix in pm.ts.
       await api(`/pm-masters/${id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -73,9 +84,13 @@ export function PMDetailPage() {
           assetId: form.assetId || null,
           jobPlanId: form.jobPlanId || null,
           status: form.status,
+          manualNextDueDate: form.manualNextDueDate || undefined,
         }),
       });
+      setForm((f) => ({ ...f, manualNextDueDate: '' }));
       setMsg('PM master updated successfully.');
+      const refreshed = await api<PMDetail>(`/pm-masters/${id}`);
+      setPm(refreshed);
     } catch (e) {
       setError(String(e));
     } finally { setSaving(false); }
@@ -167,6 +182,19 @@ export function PMDetailPage() {
           <FormField label="Lead time (days)" htmlFor="leadDays">
             <input id="leadDays" type="number" min="0" className="form-input"
               value={form.leadDays} onChange={(e) => setForm({ ...form, leadDays: e.target.value })} />
+          </FormField>
+
+          {/* FIX: real bug found during PM Compliance testing — saving
+              this form always recomputed nextDueDate relative to "right
+              now" (since frequencyType/interval/intervalUnit are always
+              submitted together), so there was no way to ever set or
+              preserve a deliberate due date. This field is a genuine
+              override: leave blank to keep the normal auto-recompute
+              behaviour; fill it in to set nextDueDate to exactly that
+              date on this save, regardless of frequency settings. */}
+          <FormField label="Override next due date (optional)" htmlFor="manualNextDueDate" hint="Leave blank to auto-calculate from frequency/interval as usual.">
+            <input id="manualNextDueDate" type="date" className="form-input"
+              value={form.manualNextDueDate} onChange={(e) => setForm({ ...form, manualNextDueDate: e.target.value })} />
           </FormField>
 
           <FormField label="Asset" htmlFor="pmAsset">

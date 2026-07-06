@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client.js';
 
-interface Item { id: string; itemNum: string; description: string; itemType: string; unit: string; unitCost: string | null; }
+interface Item { id: string; itemNum: string; description: string; itemType: string; unit: string; unitCost: string | null; isActive?: boolean; }
 interface WO { id: string; woNum: string; description: string; }
 interface Storeroom { id: string; name: string; code: string; }
 
@@ -23,10 +23,15 @@ export function ItemMasterListPage() {
   const [ccStoreroomId, setCcStoreroomId] = useState('');
   const [ccItems, setCcItems] = useState<Array<{ itemId: string; itemNum: string; description: string; qtyOnHand: string; countedQty: string }>>([]);
   const [ccBusy, setCcBusy] = useState(false);
+  // FIX: surfaces deactivated Items — the "Deactivate" action added to
+  // ItemDetailPage would otherwise be a one-way door out of this list
+  // with no way back to find and reactivate a given Item again.
+  const [showInactive, setShowInactive] = useState(false);
 
   const loadItems = () => {
     const params = new URLSearchParams();
     if (search) params.set('q', search);
+    if (showInactive) params.set('includeInactive', 'true');
     api<{ data: Item[] } | Item[]>(`/items?${params}`)
       .then((r) => setItems(Array.isArray(r) ? r : (r as { data: Item[] }).data ?? []))
       .catch((e) => setError(String(e)));
@@ -38,7 +43,7 @@ export function ItemMasterListPage() {
     api<{ data: WO[] } | WO[]>('/work-orders?pageSize=100')
       .then((r) => setWorkOrders(Array.isArray(r) ? r : (r as { data: WO[] }).data ?? []))
       .catch(() => {});
-  }, [search]);
+  }, [search, showInactive]);
 
   const doTransaction = async () => {
     if (!showTx || !txForm.storeroomId) { setError('Select a storeroom'); return; }
@@ -88,11 +93,19 @@ export function ItemMasterListPage() {
 
   const createItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItem.itemNum || !newItem.description) { setError('Item # and description are required'); return; }
+    // FIX: itemNum used to be required here too, matching the input's
+    // `required` attribute below — but the backend now auto-generates a
+    // sequential ITM-00001 style number when it's left blank, same
+    // convention as AST-00001 for assets and LOC-00001 for locations.
+    // Only Description is still actually required.
+    if (!newItem.description) { setError('Description is required'); return; }
     setNewBusy(true); setError('');
     try {
-      await api('/items', { method: 'POST', body: JSON.stringify({ ...newItem, unitCost: newItem.unitCost || undefined }) });
-      setSuccess(`Item ${newItem.itemNum} created`);
+      const created = await api<{ itemNum: string }>('/items', {
+        method: 'POST',
+        body: JSON.stringify({ ...newItem, itemNum: newItem.itemNum || undefined, unitCost: newItem.unitCost || undefined }),
+      });
+      setSuccess(`Item ${created.itemNum} created`);
       setShowNew(false);
       setNewItem({ itemNum: '', description: '', itemType: 'STOCKED', unit: 'EA', unitCost: '' });
       loadItems();
@@ -113,16 +126,30 @@ export function ItemMasterListPage() {
           value={search} onChange={(e) => setSearch(e.target.value)} />
         <Link to="/inventory/storerooms" className="btn-link" style={{ fontSize: '14px' }}>Storerooms →</Link>
         <Link to="/inventory/transactions" className="btn-link" style={{ fontSize: '14px' }}>Transactions →</Link>
-        <button type="button" className="btn-secondary !w-auto px-4 text-sm" onClick={() => setShowCycleCount(true)}>
+        <button type="button" className="btn-outline-light !w-auto px-4 text-sm" onClick={() => setShowCycleCount(true)}>
           🔄 Cycle Count
         </button>
         <button type="button" className="btn-primary !w-auto px-4" onClick={() => setShowNew(true)}>+ New item</button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#64748b' }}>
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          Show inactive items
+        </label>
       </div>
 
       {/* New item form */}
       {showNew && (
         <form onSubmit={createItem} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', marginBottom: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div><label className="form-label">Item # *</label><input className="form-input" required value={newItem.itemNum} onChange={(e) => setNewItem((f) => ({ ...f, itemNum: e.target.value }))} /></div>
+          <div>
+            <label className="form-label">Item # <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 400 }}>(optional — auto-generated if left blank)</span></label>
+            {/* FIX: same as Location Code — manual entry stays allowed,
+                but is forced to uppercase as typed so "cap-45uf" and
+                "CAP-45UF" can't end up as two different-looking item
+                numbers for what's meant to be the same identifier. */}
+            <input
+              className="form-input" placeholder="e.g. ITM-00001" value={newItem.itemNum}
+              onChange={(e) => setNewItem((f) => ({ ...f, itemNum: e.target.value.toUpperCase() }))}
+            />
+          </div>
           <div><label className="form-label">Description *</label><input className="form-input" required value={newItem.description} onChange={(e) => setNewItem((f) => ({ ...f, description: e.target.value }))} /></div>
           <div><label className="form-label">Type</label>
             <select className="form-input" value={newItem.itemType} onChange={(e) => setNewItem((f) => ({ ...f, itemType: e.target.value }))}>
@@ -133,7 +160,7 @@ export function ItemMasterListPage() {
           <div><label className="form-label">Unit cost</label><input type="number" step="0.01" className="form-input" value={newItem.unitCost} onChange={(e) => setNewItem((f) => ({ ...f, unitCost: e.target.value }))} /></div>
           <div style={{ gridColumn: 'span 2', display: 'flex', gap: '8px' }}>
             <button type="submit" className="btn-primary !w-auto px-4" disabled={newBusy}>{newBusy ? 'Saving…' : 'Save item'}</button>
-            <button type="button" className="btn-secondary !w-auto px-4" onClick={() => setShowNew(false)}>Cancel</button>
+            <button type="button" className="btn-outline-light !w-auto px-4" onClick={() => setShowNew(false)}>Cancel</button>
           </div>
         </form>
       )}
@@ -156,8 +183,19 @@ export function ItemMasterListPage() {
               <tr><td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>No items found.</td></tr>
             ) : items.map((item) => (
               <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '10px 12px', color: '#e8650a', fontFamily: 'monospace', fontSize: '13px' }}>{item.itemNum}</td>
-                <td style={{ padding: '10px 12px' }}>{item.description}</td>
+                <td style={{ padding: '10px 12px' }}>
+                  <Link to={`/inventory/${item.id}`} style={{ color: '#e8650a', fontFamily: 'monospace', fontSize: '13px', textDecoration: 'none' }}>
+                    {item.itemNum}
+                  </Link>
+                </td>
+                <td style={{ padding: '10px 12px' }}>
+                  {item.description}
+                  {item.isActive === false && (
+                    <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, padding: '1px 8px', borderRadius: '999px', background: '#f1f5f9', color: '#64748b' }}>
+                      Inactive
+                    </span>
+                  )}
+                </td>
                 <td style={{ padding: '10px 12px', color: '#64748b' }}>{item.itemType}</td>
                 <td style={{ padding: '10px 12px', color: '#64748b' }}>{item.unit}</td>
                 <td style={{ padding: '10px 12px', color: '#64748b' }}>{item.unitCost ? `$${parseFloat(item.unitCost).toFixed(2)}` : '—'}</td>
@@ -212,7 +250,7 @@ export function ItemMasterListPage() {
             </div>
             <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
               <button type="button" className="btn-primary !w-auto px-4" disabled={txBusy} onClick={doTransaction}>{txBusy ? 'Saving…' : 'Confirm'}</button>
-              <button type="button" className="btn-secondary !w-auto px-4" onClick={() => setShowTx(null)}>Cancel</button>
+              <button type="button" className="btn-outline-light !w-auto px-4" onClick={() => setShowTx(null)}>Cancel</button>
             </div>
           </div>
         </div>
@@ -233,7 +271,7 @@ export function ItemMasterListPage() {
                 </div>
                 <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                   <button type="button" className="btn-primary !w-auto px-4" disabled={ccBusy} onClick={startCycleCount}>{ccBusy ? 'Loading…' : 'Start Count'}</button>
-                  <button type="button" className="btn-secondary !w-auto px-4" onClick={() => setShowCycleCount(false)}>Cancel</button>
+                  <button type="button" className="btn-outline-light !w-auto px-4" onClick={() => setShowCycleCount(false)}>Cancel</button>
                 </div>
               </div>
             ) : (
@@ -266,7 +304,7 @@ export function ItemMasterListPage() {
                 </table>
                 <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
                   <button type="button" className="btn-primary !w-auto px-4" disabled={ccBusy} onClick={commitCycleCount}>{ccBusy ? 'Committing…' : 'Commit Count'}</button>
-                  <button type="button" className="btn-secondary !w-auto px-4" onClick={() => { setShowCycleCount(false); setCcItems([]); setCcStoreroomId(''); }}>Cancel</button>
+                  <button type="button" className="btn-outline-light !w-auto px-4" onClick={() => { setShowCycleCount(false); setCcItems([]); setCcStoreroomId(''); }}>Cancel</button>
                 </div>
               </div>
             )}

@@ -60,6 +60,7 @@ export function AccountPage() {
 
   useEffect(() => {
     loadMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleRefresh() {
@@ -147,10 +148,19 @@ export function AccountPage() {
               <dt className="font-medium text-accent">Roles</dt>
               <dd className="text-gray-700">{user.roles.join(', ') || '—'}</dd>
             </div>
-            <div>
-              <dt className="font-medium text-accent">Permissions</dt>
-              <dd className="text-gray-700 break-all">{user.permissions.join(', ') || '—'}</dd>
-            </div>
+
+            {/* FIX: Default Information / Personal Information / Password
+                Information / Set or Modify E-Signature Key now live in
+                modals opened from the profile-icon dropdown in the top
+                bar (see AuthNav.tsx + AccountInfoModals.tsx) — not as
+                static blocks on this page. This page keeps only the
+                things that are genuinely page-shaped: identity summary
+                above, MFA + active-session management below. */}
+            <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
+              Default Information, Personal Information, Password Information,
+              and E-Signature settings are available from the profile menu
+              (click your name, top right).
+            </p>
 
             {/* ── MFA section ─────────────────────────────────────────────── */}
             <div>

@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
+import { enqueueAction, looksLikeOfflineFailure, subscribeQueueChanges } from '../lib/offlineQueue.js';
+import { OfflineQueueBanner } from '../hooks/useOfflineQueue.js';
 
 interface DocumentType {
   id: string;
@@ -71,6 +73,16 @@ export function AttachmentPanel({ entityType, entityId }: Props) {
     load();
   }, [entityType, entityId]);
 
+  // FIX: same gap as WODetail — a queued photo/file that finishes
+  // uploading in the background (reconnect, or "Sync now") doesn't
+  // otherwise tell this component to re-fetch, so a successfully synced
+  // attachment stays invisible until a manual page refresh.
+  useEffect(() => {
+    const unsub = subscribeQueueChanges(() => { load(); });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityType, entityId]);
+
   const selectedType = docTypes.find((d) => d.id === selectedDocType);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -125,7 +137,30 @@ export function AttachmentPanel({ entityType, entityId }: Props) {
       if (fileRef.current) fileRef.current.value = '';
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      // FIX (P1-8 gap — AC-P1-8.5): photo capture is the third of the
+      // three offline-queueable actions the PRD names. The file itself
+      // (as a Blob, not just a filename) goes into the IndexedDB queue
+      // since a technician taking a photo underground/in a basement
+      // needs the actual bytes preserved locally, not just a promise to
+      // re-pick the file later — re-selecting the same photo from a
+      // phone's camera roll after the fact is not a reasonable ask.
+      if (looksLikeOfflineFailure(err)) {
+        await enqueueAction({
+          kind: 'attachment',
+          description: `${entityType} attachment: ${file.name}`,
+          documentTypeId: selectedDocType,
+          entityType,
+          entityId,
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          fileBlob: file,
+        });
+        setMsg(`"${file.name}" saved locally — will upload once you're back online.`);
+        setDescription('');
+        if (fileRef.current) fileRef.current.value = '';
+      } else {
+        setError(err instanceof Error ? err.message : 'Upload failed');
+      }
     } finally {
       setUploading(false);
     }
@@ -174,6 +209,7 @@ export function AttachmentPanel({ entityType, entityId }: Props) {
 
   return (
     <div className="space-y-4">
+      <OfflineQueueBanner />
       {/* Upload form */}
       <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
         <h3 className="text-sm font-semibold text-primary">Upload attachment</h3>

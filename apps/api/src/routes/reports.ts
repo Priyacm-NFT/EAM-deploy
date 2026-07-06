@@ -19,17 +19,28 @@ import { authenticate, requirePermission } from '../plugins/auth.js';
 
 const manageGuard = { preHandler: [authenticate, requirePermission('admin:reporting:manage')] };
 const authGuard = { preHandler: authenticate };
+// FIX: report subjects/definitions listing and every "run"/"preview"
+// endpoint (the ones that actually return report data or execute a
+// report) were only guarded by authGuard — "are you logged in", not "do
+// you have reports:read". Any authenticated user could view and run
+// every standard report regardless of what their Security Group's
+// Permissions list actually granted them, which is exactly the gap that
+// showed the full Reports list to a user whose reports:read box was
+// left unchecked. Left authGuard on personal-only endpoints (a user's
+// own favourites list) since those don't expose report data by
+// themselves.
+const reportsReadGuard = { preHandler: [authenticate, requirePermission('reports:read')] };
 
 export async function reportRoutes(app: FastifyInstance) {
   app.get(
     '/reports/subjects',
-    { ...authGuard, schema: { tags: ['Reports'], summary: 'List report subjects' } },
+    { ...reportsReadGuard, schema: { tags: ['Reports'], summary: 'List report subjects' } },
     async () => db.select().from(reportSubjects),
   );
 
   app.get(
     '/reports/definitions',
-    { ...authGuard, schema: { tags: ['Reports'], summary: 'List report definitions' } },
+    { ...reportsReadGuard, schema: { tags: ['Reports'], summary: 'List report definitions' } },
     async (request) =>
       db
         .select()
@@ -155,7 +166,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
   app.get(
     '/reports/definitions/:id/preview',
-    { ...authGuard, schema: { tags: ['Reports'], summary: 'Preview first 50 rows' } },
+    { ...reportsReadGuard, schema: { tags: ['Reports'], summary: 'Preview first 50 rows' } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       try {
@@ -174,7 +185,7 @@ export async function reportRoutes(app: FastifyInstance) {
   // Run a built-in report subject directly (returns rows for the standard reports page)
   app.get(
     '/reports/run/:subjectId',
-    { ...authGuard },
+    { ...reportsReadGuard },
     async (request, reply) => {
       const { subjectId } = request.params as { subjectId: string };
       const tid = request.user!.tenantId;
@@ -201,7 +212,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
   app.post(
     '/reports/definitions/:id/run',
-    { ...authGuard, schema: { tags: ['Reports'], summary: 'Run report and return download URL' } },
+    { ...reportsReadGuard, schema: { tags: ['Reports'], summary: 'Run report and return download URL' } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = (request.body ?? {}) as { format?: string; skipIfEmpty?: boolean };
@@ -274,7 +285,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
   app.get(
     '/reports/runs',
-    { ...authGuard, schema: { tags: ['Reports'] } },
+    { ...reportsReadGuard, schema: { tags: ['Reports'] } },
     async (request) => {
       const reportId = (request.query as { reportId?: string }).reportId;
       const logs = await db
@@ -528,7 +539,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
   app.post(
     '/reports/definitions/:id/run-with-params',
-    { ...authGuard, schema: { tags: ['Reports'], summary: 'Run report with parameter overrides' } },
+    { ...reportsReadGuard, schema: { tags: ['Reports'], summary: 'Run report with parameter overrides' } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = (request.body ?? {}) as {

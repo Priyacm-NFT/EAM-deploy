@@ -6,6 +6,7 @@ import { useTableView } from '../../hooks/useTableView.js';
 import { TableViewBar } from '../../components/TableViewBar.js';
 import { usePagination } from '../../hooks/usePagination.js';
 import { Pagination } from '../../components/Pagination.js';
+import { useActiveDefaultSite } from '../../hooks/useActiveDefaultSite.js';
 
 interface Asset {
   id: string; assetNum: string; description: string; status: string;
@@ -23,7 +24,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const DEFAULT_COLUMNS = [
-  { fieldKey: 'assetNum',     label: 'Asset #',              width: 100 },
+  { fieldKey: 'assetNum',     label: 'Asset',               width: 100 },
   { fieldKey: 'description',  label: 'Description',          width: 220 },
   { fieldKey: 'status',       label: 'Status',               width: 120 },
   { fieldKey: 'className',    label: 'Class',                width: 120 },
@@ -31,9 +32,17 @@ const DEFAULT_COLUMNS = [
   { fieldKey: 'manufacturer', label: 'Manufacturer / Model', width: 180 },
 ];
 
+function displayAssetNum(assetNum: string | null | undefined): string {
+  if (!assetNum) return '—';
+  if (assetNum.length >= 4 && assetNum.slice(0, 4).toUpperCase() === 'AST-') {
+    return assetNum.slice(4);
+  }
+  return assetNum;
+}
+
 function getCellValue(asset: Asset, fieldKey: string): string {
   switch (fieldKey) {
-    case 'assetNum':      return asset.assetNum ?? '—';
+    case 'assetNum':      return displayAssetNum(asset.assetNum);
     case 'description':   return asset.description ?? '—';
     case 'status':        return asset.status ?? '—';
     case 'criticality':   return asset.criticality ?? '—';
@@ -50,19 +59,47 @@ export function AssetListPage() {
   const [error, setError]   = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  // FIX: "Use Default Insert Site as a Display Filter?" (Account →
+  // Default Information) existed as a checkbox that saved fine but was
+  // never actually read by any list page — checking it did nothing.
+  // Real Maximo behavior: when checked, list apps like this one default
+  // their Site filter to the user's Default Insert Site the moment they
+  // open the page, but the filter stays a normal, changeable dropdown —
+  // not a hard lock — so an unrestricted/admin user can still clear it
+  // and see every Site, same as picking a different one.
+  const [siteId, setSiteId] = useState('');
+  const [siteOptions, setSiteOptions] = useState<Array<{ id: string; siteNum: string; name: string }>>([]);
+  const [siteFilterReady, setSiteFilterReady] = useState(false);
+  const { defaultSiteId, useDefaultSiteAsFilter, ready: defaultSiteReady } = useActiveDefaultSite();
   const navigate = useNavigate();
   const { views, activeView, setActiveView } = useTableView('Asset');
   const columns = activeView?.columnConfig?.length ? activeView.columnConfig : DEFAULT_COLUMNS;
 
   useEffect(() => {
+    api<Array<{ id: string; siteNum: string; name: string }>>('/account/lookups/sites')
+      .then(setSiteOptions)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!defaultSiteReady || siteFilterReady) return;
+    if (useDefaultSiteAsFilter && defaultSiteId) {
+      setSiteId(defaultSiteId);
+    }
+    setSiteFilterReady(true);
+  }, [defaultSiteReady, siteFilterReady, useDefaultSiteAsFilter, defaultSiteId]);
+
+  useEffect(() => {
+    if (!siteFilterReady) return;
     setError('');
     const params = new URLSearchParams();
     if (search) params.set('q', search);
     if (status) params.set('status', status);
+    if (siteId) params.set('siteId', siteId);
     api<{ data: Asset[] } | Asset[]>(`/assets?${params}`)
       .then((res) => setAssets(Array.isArray(res) ? res : (res as { data: Asset[] }).data ?? []))
       .catch((e) => setError(String(e)));
-  }, [search, status]);
+  }, [search, status, siteId, siteFilterReady]);
 
   const { page, setPage, paged, totalPages, totalItems } = usePagination(assets, 10);
 
@@ -85,6 +122,15 @@ export function AssetListPage() {
               ))}
             </select>
           </label>
+          <label className="block w-52">
+            <span className="form-label">Site</span>
+            <select className="form-input" value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+              <option value="">All sites</option>
+              {siteOptions.map((s) => <option key={s.id} value={s.id}>{s.siteNum} — {s.name}</option>)}
+            </select>
+          </label>
+          <button type="button" className="btn-outline-light !w-auto px-4"
+            onClick={() => navigate('/assets/import')}>Bulk import</button>
           <button type="button" className="btn-primary !w-auto px-4"
             onClick={() => navigate('/assets/new')}>+ New asset</button>
         </div>

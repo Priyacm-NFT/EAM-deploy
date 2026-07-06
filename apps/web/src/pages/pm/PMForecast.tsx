@@ -8,16 +8,33 @@ interface ForecastItem {
   assetNum: string | null; siteName: string | null;
 }
 
+// FIX (PRD 9.4.1 gap — PM compliance % KPI): matches GET /pm-compliance's
+// response shape.
+interface ComplianceStats {
+  onTime: number; late: number; missed: number; pending: number;
+  dueTotal: number; compliancePct: number | null;
+}
+
 export function PMForecastPage() {
   const [items, setItems] = useState<ForecastItem[]>([]);
   const [error, setError] = useState('');
   const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
   const [to, setTo] = useState(new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10));
+  const [compliance, setCompliance] = useState<ComplianceStats | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams({ from, to });
     api<ForecastItem[]>(`/pm-forecasts?${params}`).then(setItems).catch((e) => setError(String(e)));
   }, [from, to]);
+
+  // FIX: compliance looks BACKWARD (trailing 90 days by default, per the
+  // /pm-compliance route's own default) — deliberately independent of
+  // the forward-looking from/to filters above, which control the
+  // upcoming-forecast calendar, a different question ("what's coming
+  // up" vs "how have we been doing").
+  useEffect(() => {
+    api<ComplianceStats>('/pm-compliance').then(setCompliance).catch(() => setCompliance(null));
+  }, []);
 
   // Group by week
   const byWeek: Record<string, ForecastItem[]> = {};
@@ -33,6 +50,34 @@ export function PMForecastPage() {
   return (
     <IdentityPageLayout title="PM Forecast Calendar" backTo="/pm" backLabel="Back to PM masters">
       {error && <MessageBanner type="error" text={error} />}
+
+      {/* FIX (PRD 9.4.1 gap — PM compliance % KPI) */}
+      {compliance && (
+        <div className="admin-section grid grid-cols-2 md:grid-cols-5 gap-4 text-center mb-4">
+          <div>
+            <p className="text-2xl font-semibold text-slate-800">
+              {compliance.compliancePct !== null ? `${compliance.compliancePct.toFixed(0)}%` : '—'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">PM Compliance (90d)</p>
+          </div>
+          <div>
+            <p className="text-2xl font-semibold text-green-600">{compliance.onTime}</p>
+            <p className="text-xs text-slate-400 mt-1">On time</p>
+          </div>
+          <div>
+            <p className="text-2xl font-semibold text-amber-600">{compliance.late}</p>
+            <p className="text-xs text-slate-400 mt-1">Late</p>
+          </div>
+          <div>
+            <p className="text-2xl font-semibold text-red-600">{compliance.missed}</p>
+            <p className="text-xs text-slate-400 mt-1">Missed</p>
+          </div>
+          <div>
+            <p className="text-2xl font-semibold text-slate-500">{compliance.pending}</p>
+            <p className="text-xs text-slate-400 mt-1">Pending (not yet due)</p>
+          </div>
+        </div>
+      )}
 
       <div className="admin-section">
         <div className="flex gap-4 mb-4 items-end">

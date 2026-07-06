@@ -12,9 +12,17 @@ import {
   audit,
 } from '@eam/db';
 import { requirePermission } from '../plugins/auth.js';
+import { nextAutoRecordCode } from '@eam/shared';
 
-const readGuard = { preHandler: requirePermission('work_orders:read') };
-const writeGuard = { preHandler: requirePermission('work_orders:write') };
+// FIX: every Labour/Crew endpoint was guarded by work_orders:read/write
+// instead of its own labour:read/write permission — meaning any user
+// with WO access got full Labour & Crews access too (viewing rates,
+// editing crew membership, etc.), completely bypassing the actual
+// labour:read/write checkboxes on their Security Group's Permissions
+// list. Real Maximo treats "Labor" as its own distinct app/permission
+// from Work Order Tracking.
+const readGuard = { preHandler: requirePermission('labour:read') };
+const writeGuard = { preHandler: requirePermission('labour:write') };
 
 export async function labourRoutes(app: FastifyInstance) {
   // ─── Labour Crafts ────────────────────────────────────────────────────────────
@@ -180,7 +188,7 @@ export async function labourRoutes(app: FastifyInstance) {
     const tid = request.user!.tenantId;
 
     const count = await db.select({ id: crews.id }).from(crews).where(eq(crews.tenantId, tid));
-    const crewNum = (body as { crewNum?: string }).crewNum ?? `CREW-${String(count.length + 1).padStart(4, '0')}`;
+    const crewNum = (body as { crewNum?: string }).crewNum ?? nextAutoRecordCode(count.length);
 
     const [row] = await db.insert(crews).values({
       ...body,

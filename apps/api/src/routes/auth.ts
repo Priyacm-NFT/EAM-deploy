@@ -352,6 +352,33 @@ export async function authRoutes(app: FastifyInstance) {
     if (sessionActive(request)) {
       await touchSession(db, request.user!.sessionId!);
     }
+
+    // FIX: real Maximo's 3-level side-nav resolution — confirmed against
+    // IBM's own docs ("if any security group that the user belongs to has
+    // the side navigation turned on then the user will see the side
+    // navigation bar... the choice that the user makes overrides the
+    // choice of the administrator"). So:
+    //   1. user.sideNavMode = DISPLAY/HIDE → that wins outright, no group
+    //      lookup needed.
+    //   2. user.sideNavMode = SECURITY_GROUP → OR across every group this
+    //      user belongs to; if ANY group has displaySideNav = true, show
+    //      it. A user with zero groups falls back to showing it (matches
+    //      groups' own default of true, i.e. "off" is something an admin
+    //      has to deliberately choose, not the unconfigured default).
+    let effectiveSideNav: boolean;
+    if (user!.sideNavMode === 'DISPLAY') {
+      effectiveSideNav = true;
+    } else if (user!.sideNavMode === 'HIDE') {
+      effectiveSideNav = false;
+    } else {
+      const memberGroups = await db
+        .select({ displaySideNav: groups.displaySideNav })
+        .from(userGroups)
+        .innerJoin(groups, eq(userGroups.groupId, groups.id))
+        .where(eq(userGroups.userId, user!.id));
+      effectiveSideNav = memberGroups.length === 0 || memberGroups.some((g) => g.displaySideNav);
+    }
+
     return reply.send({
       id: user!.id,
       email: user!.email,
@@ -361,6 +388,7 @@ export async function authRoutes(app: FastifyInstance) {
       mfaEnabled: user!.mfaEnabled,
       mfaVerified: request.user!.mfaVerified,
       mfaRequired: await userRequiresMfa(db, user!.id),
+      effectiveSideNav,
     });
   });
 }

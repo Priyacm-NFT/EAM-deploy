@@ -2,11 +2,12 @@ import type { Redis } from 'ioredis';
 import { Queue, Worker } from 'bullmq';
 import { eq, and, lte } from 'drizzle-orm';
 import { db, pmMasters, workOrders, pmForecasts } from '@eam/db';
+import { nextAutoRecordCode } from '@eam/shared';
 
 async function generatePmWorkOrder(pm: typeof pmMasters.$inferSelect): Promise<void> {
   if (!pm.jobPlanId) return;
   const count = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.tenantId, pm.tenantId));
-  const woNum = `WO-${String(count.length + 1).padStart(6, '0')}`;
+  const woNum = nextAutoRecordCode(count.length);
 
   const [wo] = await db.insert(workOrders).values({
     tenantId: pm.tenantId,

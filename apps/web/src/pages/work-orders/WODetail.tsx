@@ -4,13 +4,16 @@ import { api } from '../../api/client.js';
 import { IdentityPageLayout, MessageBanner } from '../../components/identity/IdentityLayout.js';
 import { DynamicFormRenderer } from '../../components/DynamicFormRenderer.js';
 import { AttachmentPanel } from '../../components/AttachmentPanel.js';
+import { enqueueAction, looksLikeOfflineFailure, subscribeQueueChanges } from '../../lib/offlineQueue.js';
+import { OfflineQueueBanner } from '../../hooks/useOfflineQueue.js';
 
-type Tab = 'overview' | 'tasks' | 'labour' | 'materials' | 'tools' | 'safety' | 'costs' | 'permits' | 'attachments';
+type Tab = 'overview' | 'tasks' | 'labour' | 'materials' | 'tools' | 'safety' | 'costs' | 'permits' | 'statusHistory' | 'attachments';
 
 interface WO {
   id: string; woNum: string; description: string; status: string;
   type: string; priority: string; assetNum: string | null;
-  locationName: string | null; siteName: string | null;
+  locationCode: string | null; locationName: string | null;
+  siteNum: string | null; siteName: string | null;
   targetStartDate: string | null; targetFinishDate: string | null;
   actualStartDate: string | null; actualFinishDate: string | null;
   longDescription: string | null; laborCost: string | null;
@@ -18,7 +21,16 @@ interface WO {
   pmNum: string | null; srNum: string | null; closureNotes: string | null;
   jobPlanDescription: string | null;
   customData: Record<string, unknown> | null;
+  // FIX: real Maximo "Reported By" / "Report Date" — see the schema
+  // comment on work_orders.reported_by_user_id.
+  reportedByName: string | null;
+  reportedDate: string | null;
+  createdAt?: string;
 }
+
+// FIX: "we should maintain the status history for all the application"
+// — frontend shape matching GET /work-orders/:id/status-history.
+interface StatusHistoryEntry { id: string; fromStatus: string | null; toStatus: string; changedAt: string; notes: string | null; changedByName: string | null }
 
 interface LabourRow {
   id: string; craft: string; workDate: string;
@@ -38,6 +50,7 @@ interface ToolRow {
 interface TaskRow {
   id: string; sequence: number; description: string; status: string;
 }
+interface FailureCode { id: string; code: string; description: string }
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['WAPPR', 'CAN'],
@@ -66,17 +79,70 @@ export function WODetailPage() {
   const [safety, setSafety] = useState<Record<string, unknown>[]>([]);
   const [costs, setCosts] = useState<{ laborCost: string; materialCost: string; serviceCost: string; toolCost: string; totalCost: string } | null>(null);
   const [woPermits, setWoPermits] = useState<Array<{ id: string; permitNum: string; type: string; status: string; validFrom: string | null; validTo: string | null }>>([]);
+  // FIX: "+ Request permit" only ever created a brand-new permit — a
+  // permit already created standalone (e.g. from Safety → Permits to
+  // Work directly, with no WO picked at creation) had no way to be
+  // retroactively attached to a Work Order. PUT /permits/:id already
+  // accepts any field generically including woId, so linking is just a
+  // matter of picking one of this tenant's currently-unlinked permits
+  // and setting its woId to this WO.
+  const [linkablePermits, setLinkablePermits] = useState<Array<{ id: string; permitNum: string; type: string }>>([]);
+  const [selectedPermitToLink, setSelectedPermitToLink] = useState('');
+  const [linkingPermit, setLinkingPermit] = useState(false);
+  const [statusHistoryLog, setStatusHistoryLog] = useState<StatusHistoryEntry[]>([]);
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [transitioning, setTransitioning] = useState(false);
   const [applyingJP, setApplyingJP] = useState(false);
   const [showClose, setShowClose] = useState(false);
-  const [closeForm, setCloseForm] = useState({ downtimeHours: '', closureNotes: '' });
+  // FIX (PRD 9.3/9.4.2 gap — "Failure reporting at closure — problem /
+  // cause / remedy codes"): the Close dialog collected downtime hours
+  // and notes but never actually let anyone pick failure codes at all,
+  // even though the backend route has always accepted them. Without
+  // this, the Repeat Failure Detection feature (also new) could never
+  // fire in practice through this UI — there was nothing to detect a
+  // repeat OF.
+  const [closeForm, setCloseForm] = useState({ downtimeHours: '', closureNotes: '', failureProblemId: '', failureCauseId: '', failureRemedyId: '' });
+  const [failureCodes, setFailureCodes] = useState<{ problems: FailureCode[]; causes: FailureCode[]; remedies: FailureCode[] }>({ problems: [], causes: [], remedies: [] });
   const [closing, setClosing] = useState(false);
+  // FIX (PRD 9.4.2 gap — Repeat failure detection): surfaced right after
+  // closing, using the `repeatFailure` field the close endpoint now
+  // returns.
+  const [repeatFailureAlert, setRepeatFailureAlert] = useState<{ occurrencesInWindow: number; windowDays: number } | null>(null);
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
 
   const [showAddLabour, setShowAddLabour] = useState(false);
-  const [labourForm, setLabourForm] = useState({ craft: '', workDate: '', regularHours: '', overtimeHours: '0', regularRate: '', notes: '' });
+  // FIX (Maximo parity — Labor Code lookup): previously Craft was a
+  // free-typed text box with a manually re-typed rate every single
+  // time, completely disconnected from the Labour Records master data
+  // (People → Labour & Crews). That's why the Utilisation report shows
+  // "hvac", "HVAC_TECH", "hvac1" as three different rows for the same
+  // person — nothing enforced picking a registered technician or pulled
+  // their actual rate. Maximo's own WO Labor tab works via a Labor Code
+  // lookup: select a person, Craft and Rate auto-fill from their record,
+  // but the rate stays editable for legitimate per-WO overrides (shift
+  // differential, contractor rate, etc.).
+  const [labourRecords, setLabourRecordsList] = useState<Array<{ id: string; userId: string; userName: string | null; craftCode: string | null; regularRate: string | null; overtimeRate: string | null }>>([]);
+  const [labourForm, setLabourForm] = useState({ labourRecordId: '', userId: '', craft: '', workDate: '', regularHours: '', overtimeHours: '0', regularRate: '', overtimeRate: '', notes: '' });
+
+  // FIX: manual task add — the backend (POST/DELETE
+  // /work-orders/:id/tasks) already supported this, but the Tasks tab
+  // only ever showed a list with no way to add one without going through
+  // "Apply Job Plan". Useful when a WO needs one or two ad-hoc steps
+  // that don't warrant a whole Job Plan.
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [taskDescription, setTaskDescription] = useState('');
+  const [savingTask, setSavingTask] = useState(false);
+
+  // FIX: Maximo lets a Work Order's Safety Plan come from either the
+  // Job Plan (already worked — applyJobPlanToWo copies jobPlanSafety
+  // into wo_safety) OR be added directly on the WO itself. Only the
+  // first path existed here; the backend
+  // (POST/DELETE /work-orders/:id/safety) was already there with
+  // nothing in the UI to call it.
+  const [showAddSafety, setShowAddSafety] = useState(false);
+  const [safetyForm, setSafetyForm] = useState({ hazard: '', control: '', ppe: '' });
+  const [savingSafety, setSavingSafety] = useState(false);
   const [savingLabour, setSavingLabour] = useState(false);
 
   const [showAddMaterial, setShowAddMaterial] = useState(false);
@@ -103,9 +169,36 @@ export function WODetailPage() {
       safeFetch<Record<string, unknown>>(`/work-orders/${id}/safety`),
     ]);
     setTasks(t); setLabour(l); setMaterials(m); setTools(tl); setSafety(s);
+    safeFetch<StatusHistoryEntry>(`/work-orders/${id}/status-history`).then(setStatusHistoryLog);
+    Promise.all([
+      safeFetch<FailureCode>('/failure-codes?type=PROBLEM'),
+      safeFetch<FailureCode>('/failure-codes?type=CAUSE'),
+      safeFetch<FailureCode>('/failure-codes?type=REMEDY'),
+    ]).then(([problems, causes, remedies]) => setFailureCodes({ problems, causes, remedies }));
   };
 
   useEffect(() => { load(); }, [id]);
+
+  useEffect(() => {
+    api<Array<{ id: string; userId: string; userName: string | null; craftCode: string | null; regularRate: string | null; overtimeRate: string | null }>>('/labour-records?isActive=true')
+      .then(setLabourRecordsList)
+      .catch(() => setLabourRecordsList([]));
+  }, []);
+
+  // FIX: a background sync (queue flushing on reconnect, or "Sync now")
+  // happens completely outside this page's own data-loading cycle —
+  // nothing here previously knew it happened, so a labour entry (or
+  // status change etc.) that synced successfully in the background
+  // stayed invisible on screen until a manual full page refresh.
+  // Subscribing to queue changes means any successful sync (or a
+  // discarded failed item) quietly re-fetches this page's data so what's
+  // on screen catches up automatically.
+  useEffect(() => {
+    const unsub = subscribeQueueChanges(() => { load(); });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   useEffect(() => {
     if (tab === 'costs' && id) {
       api<{ summary: typeof costs }>(`/work-orders/${id}/costs`)
@@ -114,6 +207,9 @@ export function WODetailPage() {
     if (tab === 'permits' && id) {
       safeFetch<{ id: string; permitNum: string; type: string; status: string; validFrom: string | null; validTo: string | null }>(`/permits?woId=${id}`)
         .then(setWoPermits).catch(() => {});
+      safeFetch<{ id: string; permitNum: string; type: string; woId: string | null }>('/permits')
+        .then((all) => setLinkablePermits(all.filter((p) => !p.woId).map((p) => ({ id: p.id, permitNum: p.permitNum, type: p.type }))))
+        .catch(() => setLinkablePermits([]));
     }
   }, [tab, id]);
 
@@ -122,13 +218,36 @@ export function WODetailPage() {
     try {
       await api(`/work-orders/${id}/transition`, { method: 'POST', body: JSON.stringify({ toStatus: newStatus }) });
       await load();
-    } catch (e) { setError(String(e)); }
+    } catch (e) {
+      // FIX (P1-8 gap — AC-P1-8.5): status update is one of the three
+      // actions the PRD names explicitly for offline queueing. Only
+      // network-looking failures get queued — a real validation error
+      // (e.g. a permit gate rejecting INPRG) still surfaces normally so
+      // the technician isn't left thinking a rejected change is "queued".
+      if (looksLikeOfflineFailure(e)) {
+        await enqueueAction({
+          kind: 'api',
+          description: `WO ${wo?.woNum ?? id}: status → ${newStatus}`,
+          url: `/work-orders/${id}/transition`,
+          method: 'POST',
+          body: { toStatus: newStatus },
+        });
+        if (wo) setWo({ ...wo, status: newStatus }); // optimistic
+      } else {
+        setError(String(e));
+      }
+    }
     finally { setTransitioning(false); }
   };
 
   const applyJobPlan = async () => {
     setApplyingJP(true);
-    try { await api(`/work-orders/${id}/apply-job-plan`, { method: 'POST' }); await load(); }
+    // FIX: this call was sending no body at all — the backend now
+    // falls back to the WO's own jobPlanId when none is passed, and
+    // returns a clear error either way (no job plan set, or already
+    // applied) instead of the old silent duplicate-on-every-click
+    // behavior.
+    try { await api(`/work-orders/${id}/apply-job-plan`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
     catch (e) { setError(String(e)); }
     finally { setApplyingJP(false); }
   };
@@ -136,13 +255,102 @@ export function WODetailPage() {
   const closeWo = async () => {
     setClosing(true);
     try {
-      await api(`/work-orders/${id}/close`, {
+      const result = await api<{ repeatFailure: { isRepeat: boolean; occurrencesInWindow: number; windowDays: number } | null }>(`/work-orders/${id}/close`, {
         method: 'POST',
-        body: JSON.stringify({ downtimeHours: parseFloat(closeForm.downtimeHours) || 0, closureNotes: closeForm.closureNotes }),
+        body: JSON.stringify({
+          downtimeHours: parseFloat(closeForm.downtimeHours) || 0,
+          closureNotes: closeForm.closureNotes,
+          failureProblemId: closeForm.failureProblemId || undefined,
+          failureCauseId: closeForm.failureCauseId || undefined,
+          failureRemedyId: closeForm.failureRemedyId || undefined,
+        }),
       });
-      setShowClose(false); await load();
+      setShowClose(false);
+      setRepeatFailureAlert(result.repeatFailure?.isRepeat ? result.repeatFailure : null);
+      await load();
     } catch (e) { setError(String(e)); }
     finally { setClosing(false); }
+  };
+
+  const addTask = async () => {
+    if (!taskDescription.trim()) { setError('Task description is required'); return; }
+    setSavingTask(true); setError('');
+    try {
+      await api(`/work-orders/${id}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({ description: taskDescription.trim(), sequence: tasks.length + 1 }),
+      });
+      setTaskDescription('');
+      setShowAddTask(false);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
+  const removeTask = async (taskId: string) => {
+    if (!window.confirm('Remove this task?')) return;
+    try {
+      await api(`/work-orders/${id}/tasks/${taskId}`, { method: 'DELETE' });
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const addSafety = async () => {
+    if (!safetyForm.hazard.trim() || !safetyForm.control.trim()) {
+      setError('Hazard and control measure are both required'); return;
+    }
+    setSavingSafety(true); setError('');
+    try {
+      await api(`/work-orders/${id}/safety`, {
+        method: 'POST',
+        body: JSON.stringify({
+          hazard: safetyForm.hazard.trim(),
+          control: safetyForm.control.trim(),
+          ppe: safetyForm.ppe.trim() || undefined,
+        }),
+      });
+      setSafetyForm({ hazard: '', control: '', ppe: '' });
+      setShowAddSafety(false);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingSafety(false);
+    }
+  };
+
+  const removeSafety = async (safetyId: string) => {
+    if (!window.confirm('Remove this safety item?')) return;
+    try {
+      await api(`/work-orders/${id}/safety/${safetyId}`, { method: 'DELETE' });
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const linkPermit = async () => {
+    if (!selectedPermitToLink) return;
+    setLinkingPermit(true); setError('');
+    try {
+      await api(`/permits/${selectedPermitToLink}`, { method: 'PUT', body: JSON.stringify({ woId: id }) });
+      setSelectedPermitToLink('');
+      const [linked, all] = await Promise.all([
+        api<Array<{ id: string; permitNum: string; type: string; status: string; validFrom: string | null; validTo: string | null }>>(`/permits?woId=${id}`),
+        api<Array<{ id: string; permitNum: string; type: string; woId: string | null }>>('/permits'),
+      ]);
+      setWoPermits(linked);
+      setLinkablePermits(all.filter((p) => !p.woId).map((p) => ({ id: p.id, permitNum: p.permitNum, type: p.type })));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLinkingPermit(false);
+    }
   };
 
   const addLabour = async () => {
@@ -150,22 +358,37 @@ export function WODetailPage() {
       setError('Craft, Work date and Regular hours are required'); return;
     }
     setSavingLabour(true); setError('');
+    const labourBody = {
+      userId: labourForm.userId || undefined,
+      craft: labourForm.craft,
+      workDate: new Date(labourForm.workDate).toISOString(),
+      regularHours: parseFloat(labourForm.regularHours),
+      overtimeHours: parseFloat(labourForm.overtimeHours) || 0,
+      regularRate: labourForm.regularRate ? parseFloat(labourForm.regularRate) : undefined,
+      overtimeRate: labourForm.overtimeRate ? parseFloat(labourForm.overtimeRate) : undefined,
+      notes: labourForm.notes || undefined,
+    };
     try {
-      await api(`/work-orders/${id}/labour`, {
-        method: 'POST',
-        body: JSON.stringify({
-          craft: labourForm.craft,
-          workDate: new Date(labourForm.workDate).toISOString(),
-          regularHours: parseFloat(labourForm.regularHours),
-          overtimeHours: parseFloat(labourForm.overtimeHours) || 0,
-          regularRate: labourForm.regularRate ? parseFloat(labourForm.regularRate) : undefined,
-          notes: labourForm.notes || undefined,
-        }),
-      });
+      await api(`/work-orders/${id}/labour`, { method: 'POST', body: JSON.stringify(labourBody) });
       setShowAddLabour(false);
-      setLabourForm({ craft: '', workDate: '', regularHours: '', overtimeHours: '0', regularRate: '', notes: '' });
+      setLabourForm({ labourRecordId: '', userId: '', craft: '', workDate: '', regularHours: '', overtimeHours: '0', regularRate: '', overtimeRate: '', notes: '' });
       await load();
-    } catch (e) { setError(String(e)); }
+    } catch (e) {
+      // FIX (P1-8 gap — AC-P1-8.5): labour entry offline queueing.
+      if (looksLikeOfflineFailure(e)) {
+        await enqueueAction({
+          kind: 'api',
+          description: `WO ${wo?.woNum ?? id}: ${labourForm.regularHours}h labour (${labourForm.craft})`,
+          url: `/work-orders/${id}/labour`,
+          method: 'POST',
+          body: labourBody,
+        });
+        setShowAddLabour(false);
+        setLabourForm({ labourRecordId: '', userId: '', craft: '', workDate: '', regularHours: '', overtimeHours: '0', regularRate: '', overtimeRate: '', notes: '' });
+      } else {
+        setError(String(e));
+      }
+    }
     finally { setSavingLabour(false); }
   };
 
@@ -227,7 +450,8 @@ export function WODetailPage() {
     { id: 'tools', label: `Tools (${tools.length})` },
     { id: 'safety', label: `Safety (${safety.length})` },
     { id: 'costs', label: 'Costs' },
-    { id: 'permits', label: 'Permits' },
+    { id: 'permits', label: `Permits (${woPermits.length})` },
+    { id: 'statusHistory', label: `Status History (${statusHistoryLog.length})` },
     { id: 'attachments', label: 'Attachments' },
   ];
 
@@ -239,11 +463,12 @@ export function WODetailPage() {
   return (
     <IdentityPageLayout title={wo.woNum} backTo="/work-orders" backLabel="Back to work orders">
       <div style={{ marginTop: '0px' }}>
+      <OfflineQueueBanner />
       {error && <MessageBanner type="error" text={error} />}
 
       <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1">
-          {wo.description && <p className="text-lg font-medium text-slate-800 mb-2">{wo.description}</p>}
+          {wo.description && <p className="text-lg font-medium text-white/95 mb-2">{wo.description}</p>}
           <div className="flex gap-2 flex-wrap text-xs">
             <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">{wo.status}</span>
             <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700">{wo.type}</span>
@@ -269,7 +494,16 @@ export function WODetailPage() {
               → {s}
             </button>
           ))}
-          {wo.status === 'COMP' && (
+          {/* FIX: backend's POST /work-orders/:id/close already accepts
+              INPRG directly, not just COMP — but this button only ever
+              showed up once status was COMP. That's a dead end for a
+              CM/HIGH-criticality WO specifically: the → COMP transition
+              button is correctly blocked without a failure report, but
+              nothing else on this page would show the Close form (the
+              one place that actually accepts failure report fields)
+              until COMP was somehow reached. Showing Close from INPRG
+              too closes that gap. */}
+          {(wo.status === 'COMP' || wo.status === 'INPRG') && (
             <button type="button" className="btn-primary !w-auto px-4 text-sm bg-gray-700" onClick={() => setShowClose(true)}>
               Close WO
             </button>
@@ -287,6 +521,31 @@ export function WODetailPage() {
                 onChange={(e) => setCloseForm({ ...closeForm, downtimeHours: e.target.value })} />
             </label>
             <div />
+            {/* FIX (PRD 9.3/9.4.2 gap): Problem/Cause/Remedy codes at
+                closure — feeds MTBF/MTTR reporting and the new Repeat
+                Failure Detection check, neither of which had anything to
+                work with before since this dialog never collected them. */}
+            <label className="block">
+              <span className="form-label">Failure — Problem</span>
+              <select className="form-input" value={closeForm.failureProblemId} onChange={(e) => setCloseForm({ ...closeForm, failureProblemId: e.target.value })}>
+                <option value="">— None —</option>
+                {failureCodes.problems.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.description}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="form-label">Failure — Cause</span>
+              <select className="form-input" value={closeForm.failureCauseId} onChange={(e) => setCloseForm({ ...closeForm, failureCauseId: e.target.value })}>
+                <option value="">— None —</option>
+                {failureCodes.causes.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.description}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="form-label">Failure — Remedy</span>
+              <select className="form-input" value={closeForm.failureRemedyId} onChange={(e) => setCloseForm({ ...closeForm, failureRemedyId: e.target.value })}>
+                <option value="">— None —</option>
+                {failureCodes.remedies.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.description}</option>)}
+              </select>
+            </label>
             <div className="col-span-2">
               <label className="block">
                 <span className="form-label">Closure notes</span>
@@ -299,6 +558,16 @@ export function WODetailPage() {
             <button type="button" className="btn-primary !w-auto px-4" onClick={closeWo} disabled={closing}>{closing ? 'Closing…' : 'Confirm close'}</button>
             <button type="button" className="btn-link" onClick={() => setShowClose(false)}>Cancel</button>
           </div>
+        </div>
+      )}
+
+      {repeatFailureAlert && (
+        <div className="admin-section bg-amber-50 border border-amber-300 mb-4">
+          <p className="font-medium text-amber-900">⚠ Repeat failure detected</p>
+          <p className="text-sm text-amber-800 mt-1">
+            This same failure Problem code has now occurred <strong>{repeatFailureAlert.occurrencesInWindow} times</strong> on this Asset within the last {repeatFailureAlert.windowDays} days. Consider investigating the root cause rather than treating this as a one-off.
+          </p>
+          <button type="button" className="btn-link text-sm mt-1" onClick={() => setRepeatFailureAlert(null)}>Dismiss</button>
         </div>
       )}
 
@@ -316,8 +585,8 @@ export function WODetailPage() {
         <>
           <div className="admin-section grid grid-cols-2 gap-4 text-sm" style={{ marginBottom: '20px' }}>
             <div><span className="form-label">Asset</span><p>{wo.assetNum ?? '—'}</p></div>
-            <div><span className="form-label">Location</span><p>{wo.locationName ?? '—'}</p></div>
-            <div><span className="form-label">Site</span><p>{wo.siteName ?? '—'}</p></div>
+            <div><span className="form-label">Location</span><p>{wo.locationCode && wo.locationName ? `${wo.locationCode} - ${wo.locationName}` : (wo.locationName ?? '—')}</p></div>
+            <div><span className="form-label">Site</span><p>{wo.siteNum ?? '—'}</p></div>
             <div><span className="form-label">Job plan</span><p>{wo.jobPlanDescription ?? '—'}</p></div>
             <div><span className="form-label">Target start</span><p>{wo.targetStartDate ? new Date(wo.targetStartDate).toLocaleDateString() : '—'}</p></div>
             <div><span className="form-label">Target finish</span><p>{wo.targetFinishDate ? new Date(wo.targetFinishDate).toLocaleDateString() : '—'}</p></div>
@@ -326,6 +595,11 @@ export function WODetailPage() {
             {wo.srNum && <div><span className="form-label">From SR</span><p>{wo.srNum}</p></div>}
             {wo.pmNum && <div><span className="form-label">PM</span><p>{wo.pmNum}</p></div>}
             <div><span className="form-label">Total cost</span><p>${totalCost.toLocaleString()}</p></div>
+            {/* FIX: real Maximo "Reported By" / "Report Date" fields —
+                see the schema comment on work_orders.reported_by_user_id
+                for why these are distinct from createdAt/createdBy. */}
+            <div><span className="form-label">Reported by</span><p>{wo.reportedByName ?? '—'}</p></div>
+            <div><span className="form-label">Report date</span><p>{wo.reportedDate ? new Date(wo.reportedDate).toLocaleString() : '—'}</p></div>
             {wo.longDescription && <div className="col-span-2"><span className="form-label">Details</span><p className="whitespace-pre-wrap">{wo.longDescription}</p></div>}
             {wo.closureNotes && <div className="col-span-2"><span className="form-label">Closure notes</span><p className="whitespace-pre-wrap">{wo.closureNotes}</p></div>}
           </div>
@@ -343,18 +617,41 @@ export function WODetailPage() {
       {/* Tasks */}
       {tab === 'tasks' && (
         <div className="admin-section">
-          <h2 className="admin-section-title mb-3">Tasks</h2>
-          {tasks.length === 0 ? <p className="text-slate-400 text-sm">No tasks. Apply a job plan to populate.</p> : (
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="admin-section-title">Tasks</h2>
+            <button type="button" className="btn-primary !w-auto px-4 text-sm" onClick={() => setShowAddTask((v) => !v)}>
+              {showAddTask ? 'Cancel' : '+ Add task'}
+            </button>
+          </div>
+
+          {showAddTask && (
+            <div className="bg-slate-50 border border-slate-200 rounded p-4 mb-4 flex gap-3 items-end">
+              <label className="block flex-1">
+                <span className="form-label">Description</span>
+                <input
+                  className="form-input" value={taskDescription}
+                  onChange={(e) => setTaskDescription(e.target.value)}
+                  placeholder="e.g. Check oil level"
+                />
+              </label>
+              <button type="button" className="btn-primary !w-auto px-4" disabled={savingTask || !taskDescription.trim()} onClick={addTask}>
+                {savingTask ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          )}
+
+          {tasks.length === 0 ? <p className="text-slate-400 text-sm">No tasks. Apply a job plan, or add one manually above.</p> : (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                <th className="pb-2 pr-4">Seq</th><th className="pb-2 pr-4">Description</th><th className="pb-2">Status</th>
+                <th className="pb-2 pr-4">Seq</th><th className="pb-2 pr-4">Description</th><th className="pb-2 pr-4">Status</th><th className="pb-2"></th>
               </tr></thead>
               <tbody>
                 {tasks.map((t) => (
                   <tr key={t.id} className="border-b border-slate-100">
                     <td className="py-2 pr-4 text-slate-400">{t.sequence}</td>
                     <td className="py-2 pr-4">{t.description}</td>
-                    <td className="py-2 text-slate-500">{t.status}</td>
+                    <td className="py-2 pr-4 text-slate-500">{t.status}</td>
+                    <td className="py-2"><button type="button" className="btn-link text-xs text-red-600" onClick={() => removeTask(t.id)}>Remove</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -375,6 +672,42 @@ export function WODetailPage() {
 
           {showAddLabour && (
             <div className="mb-4 p-4 border border-slate-200 rounded-lg bg-slate-50 grid grid-cols-2 gap-3">
+              {/* FIX (Maximo parity — Labor Code lookup): pick a
+                  registered technician from Labour Records instead of
+                  free-typing a craft. Selecting one auto-fills Craft and
+                  both rates from their record; all three stay editable
+                  afterward for legitimate per-WO overrides, same as
+                  Maximo's own Labor tab. */}
+              <label className="block col-span-2">
+                <span className="form-label">Labor Code (technician) *</span>
+                <select
+                  className="form-input"
+                  value={labourForm.labourRecordId}
+                  onChange={(e) => {
+                    const rec = labourRecords.find((r) => r.id === e.target.value);
+                    setLabourForm({
+                      ...labourForm,
+                      labourRecordId: e.target.value,
+                      userId: rec?.userId ?? '',
+                      craft: rec?.craftCode ?? labourForm.craft,
+                      regularRate: rec?.regularRate ?? labourForm.regularRate,
+                      overtimeRate: rec?.overtimeRate ?? labourForm.overtimeRate,
+                    });
+                  }}
+                >
+                  <option value="">— Select a technician —</option>
+                  {labourRecords.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.userName ?? 'Unnamed'} — {r.craftCode ?? 'No craft'}{r.regularRate ? ` ($${r.regularRate}/hr)` : ''}
+                    </option>
+                  ))}
+                </select>
+                {labourRecords.length === 0 && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    No technicians registered yet — <a href="/labour" className="text-accent hover:underline">add one under People → Labour & Crews</a>, or type a craft manually below.
+                  </p>
+                )}
+              </label>
               <label className="block">
                 <span className="form-label">Craft *</span>
                 <input className="form-input" placeholder="e.g. HVAC_TECH" value={labourForm.craft}
@@ -396,9 +729,14 @@ export function WODetailPage() {
                   onChange={(e) => setLabourForm({ ...labourForm, overtimeHours: e.target.value })} />
               </label>
               <label className="block">
-                <span className="form-label">Rate per hour</span>
+                <span className="form-label">Regular rate / hr</span>
                 <input type="number" className="form-input" placeholder="e.g. 450" value={labourForm.regularRate}
                   onChange={(e) => setLabourForm({ ...labourForm, regularRate: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="form-label">Overtime rate / hr</span>
+                <input type="number" className="form-input" placeholder="defaults to regular rate" value={labourForm.overtimeRate}
+                  onChange={(e) => setLabourForm({ ...labourForm, overtimeRate: e.target.value })} />
               </label>
               <label className="block">
                 <span className="form-label">Notes</span>
@@ -561,17 +899,61 @@ export function WODetailPage() {
       {/* Safety */}
       {tab === 'safety' && (
         <div className="admin-section">
-          <h2 className="admin-section-title mb-3">Safety & Hazards</h2>
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="admin-section-title">Safety & Hazards</h2>
+            <button type="button" className="btn-primary !w-auto px-4 text-sm" onClick={() => setShowAddSafety((v) => !v)}>
+              {showAddSafety ? 'Cancel' : '+ Add safety item'}
+            </button>
+          </div>
+
+          {showAddSafety && (
+            <div className="bg-slate-50 border border-slate-200 rounded p-4 mb-4 flex gap-3 items-end flex-wrap">
+              <label className="block flex-1 min-w-[200px]">
+                <span className="form-label">Hazard</span>
+                <input
+                  className="form-input" value={safetyForm.hazard}
+                  onChange={(e) => setSafetyForm({ ...safetyForm, hazard: e.target.value })}
+                  placeholder="e.g. Electrical shock risk"
+                />
+              </label>
+              <label className="block flex-1 min-w-[200px]">
+                <span className="form-label">Control measure</span>
+                <input
+                  className="form-input" value={safetyForm.control}
+                  onChange={(e) => setSafetyForm({ ...safetyForm, control: e.target.value })}
+                  placeholder="e.g. Isolate and lock out"
+                />
+              </label>
+              <label className="block min-w-[160px]">
+                <span className="form-label">PPE (optional)</span>
+                <input
+                  className="form-input" value={safetyForm.ppe}
+                  onChange={(e) => setSafetyForm({ ...safetyForm, ppe: e.target.value })}
+                  placeholder="e.g. Insulated gloves"
+                />
+              </label>
+              <button type="button" className="btn-primary !w-auto px-4" disabled={savingSafety} onClick={addSafety}>
+                {savingSafety ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          )}
+
           {safety.length === 0 ? <p className="text-slate-400 text-sm">No safety items.</p> : (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                <th className="pb-2 pr-4">Hazard</th><th className="pb-2">Control measure</th>
+                <th className="pb-2 pr-4">Hazard</th><th className="pb-2 pr-4">Control measure</th><th className="pb-2 pr-4">PPE</th><th className="pb-2"></th>
               </tr></thead>
               <tbody>
                 {safety.map((s, i) => (
                   <tr key={String(s['id']) || i} className="border-b border-slate-100">
                     <td className="py-2 pr-4">{String(s['hazardDescription'] ?? s['hazard'] ?? '—')}</td>
-                    <td className="py-2">{String(s['controlMeasure'] ?? s['control'] ?? '—')}</td>
+                    <td className="py-2 pr-4">{String(s['controlMeasure'] ?? s['control'] ?? '—')}</td>
+                    <td className="py-2 pr-4 text-slate-500">{String(s['ppe'] ?? '—')}</td>
+                    <td className="py-2">
+                      {Boolean(s['id']) && (
+                        <button type="button" className="btn-link text-xs text-red-600" onClick={() => removeSafety(String(s['id']))}>Remove</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -608,6 +990,28 @@ export function WODetailPage() {
               + Request permit
             </Link>
           </div>
+
+          {/* FIX: this section is what was missing — a permit created
+              standalone (not via the "+ Request permit" flow above,
+              which always creates a fresh one) had no way back to being
+              attached to a WO. Only permits with no woId set yet show up
+              here, so an already-linked permit can't accidentally be
+              re-pointed at a different WO by mistake. */}
+          {linkablePermits.length > 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded p-3 mb-4 flex gap-3 items-end">
+              <label className="block flex-1">
+                <span className="form-label">Link an existing permit</span>
+                <select className="form-input" value={selectedPermitToLink} onChange={(e) => setSelectedPermitToLink(e.target.value)}>
+                  <option value="">— Select a permit —</option>
+                  {linkablePermits.map((p) => <option key={p.id} value={p.id}>{p.permitNum} — {p.type}</option>)}
+                </select>
+              </label>
+              <button type="button" className="btn-primary !w-auto px-4" disabled={linkingPermit || !selectedPermitToLink} onClick={linkPermit}>
+                {linkingPermit ? 'Linking…' : 'Link to this WO'}
+              </button>
+            </div>
+          )}
+
           {woPermits.length === 0 ? (
             <p className="text-slate-400 text-sm">No permits linked to this work order.</p>
           ) : (
@@ -627,6 +1031,39 @@ export function WODetailPage() {
                     <td className="py-2 pr-4"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100">{p.status}</span></td>
                     <td className="py-2 pr-4">{p.validFrom ? new Date(p.validFrom).toLocaleDateString() : '—'}</td>
                     <td className="py-2">{p.validTo ? new Date(p.validTo).toLocaleDateString() : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Status History */}
+      {tab === 'statusHistory' && (
+        <div className="admin-section">
+          <h2 className="admin-section-title mb-3">Status history</h2>
+          {statusHistoryLog.length === 0 ? (
+            <p className="text-slate-400 text-sm">No status history yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                  <th className="pb-2 pr-4">From</th>
+                  <th className="pb-2 pr-4">To</th>
+                  <th className="pb-2 pr-4">Changed by</th>
+                  <th className="pb-2 pr-4">Date</th>
+                  <th className="pb-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statusHistoryLog.map((h) => (
+                  <tr key={h.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4 text-slate-500">{h.fromStatus ?? '— (created)'}</td>
+                    <td className="py-2 pr-4 font-medium text-slate-700">{h.toStatus}</td>
+                    <td className="py-2 pr-4 text-slate-500">{h.changedByName ?? '—'}</td>
+                    <td className="py-2 pr-4 text-slate-500">{new Date(h.changedAt).toLocaleString()}</td>
+                    <td className="py-2 text-slate-500">{h.notes ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

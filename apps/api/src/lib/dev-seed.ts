@@ -9,25 +9,29 @@ import {
   groupRoles,
   roles,
   permissions,
-  rolePermissions,
+  groupPermissions,
 } from '@eam/db';
 
 const DEV_ADMIN_EMAIL = process.env.DEV_ADMIN_EMAIL ?? 'admin@eam.local';
 const DEV_ADMIN_PASSWORD = process.env.DEV_ADMIN_PASSWORD ?? 'AdminPass1!';
 
-async function syncRolePermissions(roleId: string): Promise<void> {
+// FIX: this used to grant permissions directly to a Role. In the
+// Maximo-style model, permissions are granted to the Security GROUP
+// instead — Role is now pure job-title metadata with no security
+// behaviour. This function is renamed and re-targeted accordingly.
+async function syncGroupPermissions(groupId: string): Promise<void> {
   const allPerms = await db.select().from(permissions);
   if (allPerms.length === 0) return;
 
   const existing = await db
-    .select({ permissionId: rolePermissions.permissionId })
-    .from(rolePermissions)
-    .where(eq(rolePermissions.roleId, roleId));
+    .select({ permissionId: groupPermissions.permissionId })
+    .from(groupPermissions)
+    .where(eq(groupPermissions.groupId, groupId));
   const existingIds = new Set(existing.map((r) => r.permissionId));
   const missing = allPerms.filter((p) => !existingIds.has(p.id));
   if (missing.length > 0) {
-    await db.insert(rolePermissions).values(
-      missing.map((p) => ({ roleId, permissionId: p.id })),
+    await db.insert(groupPermissions).values(
+      missing.map((p) => ({ groupId, permissionId: p.id })),
     );
   }
 }
@@ -43,7 +47,7 @@ export async function ensureDevAdminUser(): Promise<void> {
   const [tenant] = await db.select().from(tenants).where(eq(tenants.slug, 'default')).limit(1);
   if (!tenant) return;
 
-  // ── System Administrator role (for admin@eam.local only) ──────────────
+  // ── "System Administrator" role label (metadata only, no permissions) ─
   let [adminRole] = await db
     .select()
     .from(roles)
@@ -56,16 +60,17 @@ export async function ensureDevAdminUser(): Promise<void> {
       .values({
         tenantId: tenant.id,
         name: 'System Administrator',
-        description: 'Dev bootstrap — full system access',
+        description: 'Job-title label for the dev admin user (display only — grants no access by itself)',
         isSystem: true,
       })
       .returning();
-    console.log('[dev-seed] Created System Administrator role');
+    console.log('[dev-seed] Created System Administrator role label');
   }
 
-  await syncRolePermissions(adminRole!.id);
-
   // ── Administrators group (only admin@eam.local is in here) ────────────
+  // FIX: created BEFORE the permission sync below, since permissions now
+  // land on the GROUP (Maximo-style), not the role — the sync needs
+  // adminGroup.id to exist first.
   let [adminGroup] = await db
     .select()
     .from(groups)
@@ -79,12 +84,17 @@ export async function ensureDevAdminUser(): Promise<void> {
       .returning();
   }
 
+  // FIX: sync ALL permissions onto the Administrators GROUP, not the role.
+  await syncGroupPermissions(adminGroup!.id);
+
+  // Attach the "System Administrator" job-title label to the group —
+  // display only, does not affect access (set above).
   await db
     .insert(groupRoles)
     .values({ groupId: adminGroup!.id, roleId: adminRole!.id })
     .onConflictDoNothing();
 
-  // ── "All Users" role — every registered user gets this ────────────────
+  // ── "All Users" role label — every registered user gets this tag ──────
   let [allUsersRole] = await db
     .select()
     .from(roles)
@@ -97,15 +107,12 @@ export async function ensureDevAdminUser(): Promise<void> {
       .values({
         tenantId: tenant.id,
         name: 'All Users',
-        description: 'Default role — assigned to every registered user',
+        description: 'Job-title label assigned to every registered user (display only — grants no access by itself)',
         isSystem: true,
       })
       .returning();
-    console.log('[dev-seed] Created All Users role');
+    console.log('[dev-seed] Created All Users role label');
   }
-
-  await db.delete(rolePermissions).where(eq(rolePermissions.roleId, allUsersRole!.id));
-  console.log('[dev-seed] Cleared All Users role permissions — users get access only via specific group roles');
 
   // ── "All Users" group — every registered user is auto-added here ──────
   let [allUsersGroup] = await db
@@ -122,6 +129,18 @@ export async function ensureDevAdminUser(): Promise<void> {
     console.log('[dev-seed] Created All Users group');
   }
 
+  // FIX: intentionally never call syncGroupPermissions on this group —
+  // it has zero direct permissions by design, so every registered user
+  // gets sidebar access via this membership but no actual data access
+  // until they're also added to a group that grants it. Also clear out
+  // any permissions this group may have picked up previously (e.g. from
+  // an earlier seed run), so a fresh dev-seed always restores the
+  // intended zero-permission state.
+  await db.delete(groupPermissions).where(eq(groupPermissions.groupId, allUsersGroup!.id));
+  console.log('[dev-seed] All Users group has no direct permissions — access comes only from other group memberships');
+
+  // Attach the "All Users" job-title label — display only, does not
+  // affect access.
   await db
     .insert(groupRoles)
     .values({ groupId: allUsersGroup!.id, roleId: allUsersRole!.id })
