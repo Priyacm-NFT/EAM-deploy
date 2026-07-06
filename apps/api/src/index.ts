@@ -7,7 +7,6 @@ import swaggerUi from '@fastify/swagger-ui';
 import { initJwtKeys } from '@eam/auth';
 import { seedDatabase, db } from '@eam/db';
 import { createAuthPlugin } from './plugins/create-auth-plugin.js';
-import { ensureDevAdminUser } from './lib/dev-seed.js';
 import { ssoRoutes } from './routes/sso.js';
 import { healthRoutes } from './routes/health.js';
 import { adminRoutes } from './routes/admin.js';
@@ -43,6 +42,7 @@ export async function buildApp() {
   await initJwtKeys();
   if (process.env.NODE_ENV !== 'production' && process.env.AUTO_SEED !== 'false') {
     await seedDatabase(db);
+    const { ensureDevAdminUser } = await import('./lib/dev-seed.js');
     await ensureDevAdminUser();
   }
   // Skip Redis notification bridge in test environment to avoid connection hangs
